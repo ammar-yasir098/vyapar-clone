@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ShoppingCart, Plus, Trash2, CheckCircle2, User, FileText, ArrowUpRight } from 'lucide-react';
 import { Item, Party, InvoiceItem, PaymentMethod, BusinessDetails } from '../../types';
 import { db } from '../../db';
+import { createServerPurchase } from '../../services/api';
 
 interface PurchaseScreenProps {
   items: Item[];
@@ -104,6 +105,15 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       totalDebit: totalAmount,
       totalCredit: totalAmount,
       createdAt: new Date().toISOString()
+    });
+
+    // 4. Send to PostgreSQL backend REST API
+    await createServerPurchase({
+      billNumber,
+      billDate,
+      supplierId: selectedSupplier.id,
+      supplierName: selectedSupplier.name,
+      items: purchaseItems
     });
 
     alert(`Purchase Inward Bill ${billNumber} saved successfully! Inventory stock increased.`);

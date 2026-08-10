@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Package, Plus, Search, AlertTriangle, Edit2, Trash2, Layers } from 'lucide-react';
 import { Item, UnitType } from '../../types';
 import { db } from '../../db';
+import { createServerItem, adjustServerItemStock, deleteServerItem } from '../../services/api';
 
 interface InventoryScreenProps {
   items: Item[];
@@ -46,7 +47,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items, onItemU
     e.preventDefault();
     if (!newItem.name || !newItem.salesPrice) return;
 
-    await db.items.add({
+    const itemPayload = {
       tenantId: 'default-tenant',
       name: newItem.name,
       skuCode: newItem.skuCode || `SKU-${Date.now().toString().slice(-4)}`,
@@ -62,7 +63,10 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items, onItemU
       igstRate: Number(newItem.igstRate) || 0,
       isActive: true,
       updatedAt: new Date().toISOString()
-    });
+    };
+
+    const savedId = await db.items.add(itemPayload);
+    await createServerItem({ ...itemPayload, id: savedId });
 
     setShowAddModal(false);
     onItemUpdated();
@@ -90,6 +94,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items, onItemU
 
     if (item.id) {
       await db.items.update(item.id, { currentStock: newStock, updatedAt: new Date().toISOString() });
+      await adjustServerItemStock(item.id, delta);
     }
 
     alert(`Stock for ${item.name} adjusted from ${item.currentStock} to ${newStock} ${item.unitType}.`);
@@ -102,6 +107,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items, onItemU
     if (!id) return;
     if (confirm('Are you sure you want to delete this product?')) {
       await db.items.delete(id);
+      await deleteServerItem(id);
       onItemUpdated();
     }
   };

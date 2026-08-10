@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Users, Plus, Search, Phone, ArrowDownLeft, ArrowUpRight, DollarSign, CheckCircle2 } from 'lucide-react';
 import { Party, PartyType, BalanceType } from '../../types';
 import { db } from '../../db';
+import { createServerParty, recordServerPartyPayment } from '../../services/api';
 
 interface PartiesScreenProps {
   parties: Party[];
@@ -35,7 +36,7 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUp
     e.preventDefault();
     if (!newParty.name || !newParty.phone) return;
 
-    await db.parties.add({
+    const partyPayload = {
       tenantId: 'default-tenant',
       name: newParty.name,
       phone: newParty.phone,
@@ -46,7 +47,10 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUp
       gstin: newParty.gstin || '',
       address: newParty.address || '',
       createdAt: new Date().toISOString()
-    });
+    };
+
+    const savedId = await db.parties.add(partyPayload);
+    await createServerParty({ ...partyPayload, id: savedId });
 
     setShowAddModal(false);
     onPartyUpdated();
@@ -70,6 +74,7 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUp
     // Update Party Current Balance in Dexie
     if (party.id) {
       await db.parties.update(party.id, { currentBalance: newBal });
+      await recordServerPartyPayment(party.id, paymentAmount, paymentRemarks, party.type);
     }
 
     // Post Journal Entry

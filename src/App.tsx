@@ -16,19 +16,47 @@ import { PrinterModal } from './components/Printer/PrinterModal';
 import { CommandPaletteModal } from './components/CommandPalette/CommandPaletteModal';
 import { Invoice } from './types';
 import { triggerThermalPrint } from './services/printer';
+import { fetchServerItems, fetchServerParties, fetchServerInvoices } from './services/api';
 
 export function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [isDbLoaded, setIsDbLoaded] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
-  // Initialize & Seed Database
+  // Initialize & Sync with PostgreSQL Backend
   useEffect(() => {
-    async function init() {
+    async function syncPostgresToClient() {
       await seedDatabaseIfEmpty();
+
+      try {
+        // Fetch live data from PostgreSQL API
+        const serverItems = await fetchServerItems();
+        const serverParties = await fetchServerParties();
+        const serverInvoices = await fetchServerInvoices();
+
+        // If PostgreSQL server returns records, sync to local IndexedDB
+        if (serverItems && serverItems.length > 0) {
+          await db.items.clear();
+          await db.items.bulkAdd(serverItems);
+        }
+
+        if (serverParties && serverParties.length > 0) {
+          await db.parties.clear();
+          await db.parties.bulkAdd(serverParties);
+        }
+
+        if (serverInvoices && serverInvoices.length > 0) {
+          await db.invoices.clear();
+          await db.invoices.bulkAdd(serverInvoices);
+        }
+      } catch (err) {
+        console.warn('Backend server offline or unreachable. Operating in local mode.', err);
+      }
+
       setIsDbLoaded(true);
     }
-    init();
+
+    syncPostgresToClient();
   }, []);
 
   // Global Ctrl+F listener for Command Palette Search
@@ -57,8 +85,8 @@ export function App() {
   if (!isDbLoaded) {
     return (
       <div className="h-screen w-screen bg-[#f3f4f6] text-slate-800 flex flex-col items-center justify-center gap-3 select-none">
-        <div className="w-10 h-10 border-4 border-red-500 border-t-transparent rounded-full animate-spin"></div>
-        <div className="font-extrabold text-sm text-slate-700">Loading Vyapar Enterprise Suite...</div>
+        <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin"></div>
+        <div className="font-extrabold text-xs text-slate-700">Connecting to PostgreSQL Cloud Server...</div>
       </div>
     );
   }

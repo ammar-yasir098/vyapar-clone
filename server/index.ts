@@ -6,6 +6,8 @@ import { authRouter } from './routes/auth.js';
 import { itemsRouter } from './routes/items.js';
 import { partiesRouter } from './routes/parties.js';
 import { invoicesRouter } from './routes/invoices.js';
+import { ledgerRouter } from './routes/ledger.js';
+import { purchasesRouter } from './routes/purchases.js';
 
 dotenv.config();
 
@@ -23,6 +25,8 @@ app.use('/api/v1/sync', syncRouter);
 app.use('/api/v1/items', itemsRouter);
 app.use('/api/v1/parties', partiesRouter);
 app.use('/api/v1/invoices', invoicesRouter);
+app.use('/api/v1/ledger', ledgerRouter);
+app.use('/api/v1/purchases', purchasesRouter);
 
 // Root Status
 app.get('/', (req: Request, res: Response) => {
@@ -41,6 +45,9 @@ app.listen(PORT, () => {
   console.log(`   - GET/POST http://localhost:${PORT}/api/v1/items`);
   console.log(`   - GET/POST http://localhost:${PORT}/api/v1/parties`);
   console.log(`   - GET/POST http://localhost:${PORT}/api/v1/invoices`);
-  console.log(`   - GET http://localhost:${PORT}/api/v1/sync/health`);
+  console.log(`   - GET      http://localhost:${PORT}/api/v1/ledger/accounts`);
+  console.log(`   - GET      http://localhost:${PORT}/api/v1/ledger/journals`);
+  console.log(`   - POST     http://localhost:${PORT}/api/v1/purchases`);
+  console.log(`   - GET      http://localhost:${PORT}/api/v1/sync/health`);
   console.log(`=======================================================`);
 });
