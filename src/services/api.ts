@@ -122,12 +122,12 @@ export async function createServerParty(partyData: any) {
   }
 }
 
-export async function recordServerPartyPayment(id: number, amount: number, remarks: string, partyType: string) {
+export async function recordServerPartyPayment(id: number, amount: number, remarks: string, partyType: string, partyName?: string) {
   try {
     const res = await fetch(`${API_BASE_URL}/parties/${id}/payment`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount, remarks, partyType })
+      body: JSON.stringify({ amount, remarks, partyType, partyName })
     });
     return await res.json();
   } catch (err: any) {

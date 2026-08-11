@@ -118,9 +118,12 @@ invoicesRouter.post('/', async (req: Request, res: Response) => {
           }
         }
 
-        // 4. Update Party Balance if Credit Sale
-        if (partyId && dueAmount > 0) {
-          const party = await Party.findByPk(partyId, { transaction: t });
+        // 4. Update Party Balance if Sale has Unpaid Dues
+        if (dueAmount > 0) {
+          let party = partyId ? await Party.findByPk(partyId, { transaction: t }) : null;
+          if (!party && partyName && partyName !== 'Walk-in Retail Customer') {
+            party = await Party.findOne({ where: { name: partyName }, transaction: t });
+          }
           if (party) {
             const curBal = (party.get('currentBalance') as number) || 0;
             await party.update({ currentBalance: curBal + dueAmount }, { transaction: t });

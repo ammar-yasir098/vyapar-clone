@@ -127,6 +127,22 @@ class ClientSyncManager {
           }
         }
 
+        const localJournals = await db.journalEntries.toArray();
+        for (const je of localJournals) {
+          if (je.id || je.entryNumber) {
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-je-${je.id || je.entryNumber}`,
+              clientSequence: Date.now(),
+              entityType: 'JOURNAL',
+              entityId: String(je.id || je.entryNumber),
+              mutationType: 'INSERT',
+              payload: JSON.stringify(je),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          }
+        }
+
         // Re-fetch unsynced queue after auto-populating
         unsynced = await db.syncJournal.filter(record => !record.synced).toArray();
       }

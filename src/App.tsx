@@ -91,8 +91,20 @@ export function App() {
         }
 
         if (serverParties && serverParties.length > 0) {
+          const localParties = await db.parties.toArray();
+          const mergedParties = serverParties.map((sp: any) => {
+            const lp = localParties.find(p => p.id === sp.id || p.name === sp.name);
+            if (lp) {
+              return {
+                ...sp,
+                currentBalance: lp.currentBalance !== undefined ? lp.currentBalance : sp.currentBalance,
+                openingBalance: lp.openingBalance !== undefined ? lp.openingBalance : sp.openingBalance
+              };
+            }
+            return sp;
+          });
           await db.parties.clear();
-          await db.parties.bulkAdd(serverParties);
+          await db.parties.bulkAdd(mergedParties);
         }
 
         if (serverInvoices && serverInvoices.length > 0) {
@@ -181,7 +193,7 @@ export function App() {
           )}
 
           {activeTab === 'parties' && (
-            <PartiesScreen parties={parties} onPartyUpdated={() => {}} />
+            <PartiesScreen parties={parties} invoices={invoices} onPartyUpdated={() => {}} />
           )}
 
           {activeTab === 'purchase' && (

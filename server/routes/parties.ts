@@ -59,15 +59,20 @@ partiesRouter.post('/', async (req: Request, res: Response) => {
 partiesRouter.post('/:id/payment', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { amount, remarks = '', partyType = 'CUSTOMER', tenantId = 'default-tenant' } = req.body;
+    const { amount, remarks = '', partyType = 'CUSTOMER', partyName, tenantId = 'default-tenant' } = req.body;
     const paymentAmt = Number(amount) || 0;
 
     if (isDbConnected()) {
-      const party = await Party.findByPk(Number(id));
+      let party = await Party.findByPk(Number(id));
+      if (!party && partyName) {
+        party = await Party.findOne({ where: { name: partyName } });
+      }
       if (party) {
         const cur = (party.get('currentBalance') as number) || 0;
+        const op = (party.get('openingBalance') as number) || 0;
         const newBal = Math.max(0, cur - paymentAmt);
-        await party.update({ currentBalance: newBal });
+        const newOp = Math.max(0, op - paymentAmt);
+        await party.update({ currentBalance: newBal, openingBalance: newOp });
 
         await JournalEntry.create({
           tenantId,

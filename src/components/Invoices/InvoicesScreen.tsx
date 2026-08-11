@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { FileText, Printer, Search } from 'lucide-react';
 import { Invoice, BusinessDetails } from '../../types';
 import { triggerThermalPrint } from '../../services/printer';
+import { db } from '../../db';
+import { syncManager } from '../../services/sync';
 
 interface InvoicesScreenProps {
   invoices: Invoice[];
@@ -89,7 +91,9 @@ export const InvoicesScreen: React.FC<InvoicesScreenProps> = ({ invoices = [], b
                         className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
                           inv.paymentStatus === 'PAID'
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-amber-50 text-amber-700 border-amber-200'
+                            : inv.paymentStatus === 'PARTIAL'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : 'bg-rose-50 text-rose-700 border-rose-200'
                         }`}
                       >
                         {inv.paymentStatus || 'UNPAID'}

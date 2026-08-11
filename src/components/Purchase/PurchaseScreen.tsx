@@ -3,6 +3,7 @@ import { ShoppingCart, Plus, Trash2, CheckCircle2, User, FileText, ArrowUpRight 
 import { Item, Party, InvoiceItem, PaymentMethod, BusinessDetails } from '../../types';
 import { db } from '../../db';
 import { createServerPurchase } from '../../services/api';
+import { syncManager } from '../../services/sync';
 
 interface PurchaseScreenProps {
   items: Item[];
@@ -26,6 +27,12 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
   const [quantity, setQuantity] = useState<number>(1);
   const [unitRate, setUnitRate] = useState<number>(0);
 
+  const safeNum = (val: any): number => {
+    if (val === null || val === undefined) return 0;
+    const n = Number(val);
+    return isNaN(n) || !isFinite(n) ? 0 : n;
+  };
+
   useEffect(() => {
     if (!selectedSupplier && suppliers.length > 0) {
       setSelectedSupplier(suppliers[0]);
@@ -37,23 +44,28 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
     const item = items.find(i => i.id === Number(selectedItemId));
     if (!item) return;
 
-    const rate = unitRate > 0 ? unitRate : item.purchasePrice;
-    const sub = quantity * rate;
-    const tax = (sub * (item.cgstRate + item.sgstRate)) / 100;
+    const rate = unitRate > 0 ? unitRate : safeNum(item.purchasePrice);
+    const qty = Math.max(1, quantity);
+    const sub = qty * rate;
+    const cgst = safeNum(item.cgstRate);
+    const sgst = safeNum(item.sgstRate);
+    const igst = safeNum(item.igstRate);
+    const tax = (sub * (cgst + sgst)) / 100;
+    const totalAmount = sub + tax;
 
     const newItem: InvoiceItem = {
       itemId: item.id!,
       itemName: item.name,
-      hsnSacCode: item.hsnSacCode,
-      unitType: item.unitType,
-      quantity,
+      hsnSacCode: item.hsnSacCode || '1000',
+      unitType: item.unitType || 'PCS',
+      quantity: qty,
       unitPrice: rate,
       purchasePrice: rate,
-      cgstRate: item.cgstRate,
-      sgstRate: item.sgstRate,
-      igstRate: item.igstRate,
+      cgstRate: cgst,
+      sgstRate: sgst,
+      igstRate: igst,
       taxAmount: tax,
-      totalAmount: sub + tax
+      totalAmount: totalAmount
     };
 
     setPurchaseItems(prev => [...prev, newItem]);
@@ -62,6 +74,45 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
     setUnitRate(0);
   };
 
+  const updatePurchaseItemQty = (idx: number, newQty: number) => {
+    setPurchaseItems(prev =>
+      prev.map((item, i) => {
+        if (i === idx) {
+          const qty = Math.max(1, newQty);
+          const sub = qty * item.unitPrice;
+          const cgst = safeNum(item.cgstRate);
+          const sgst = safeNum(item.sgstRate);
+          const tax = (sub * (cgst + sgst)) / 100;
+          return { ...item, quantity: qty, taxAmount: tax, totalAmount: sub + tax };
+        }
+        return item;
+      })
+    );
+  };
+
+  const updatePurchaseItemRate = (idx: number, newRate: number) => {
+    setPurchaseItems(prev =>
+      prev.map((item, i) => {
+        if (i === idx) {
+          const rate = Math.max(0, newRate);
+          const sub = item.quantity * rate;
+          const cgst = safeNum(item.cgstRate);
+          const sgst = safeNum(item.sgstRate);
+          const tax = (sub * (cgst + sgst)) / 100;
+          return { ...item, unitPrice: rate, purchasePrice: rate, taxAmount: tax, totalAmount: sub + tax };
+        }
+        return item;
+      })
+    );
+  };
+
+  const totalBillAmount = purchaseItems.reduce((sum, i) => {
+    const itemTotal = safeNum(i.totalAmount) > 0
+      ? safeNum(i.totalAmount)
+      : safeNum(i.quantity) * safeNum(i.unitPrice);
+    return sum + itemTotal;
+  }, 0);
+
   const handleSavePurchase = async (e: React.FormEvent) => {
     e.preventDefault();
     if (purchaseItems.length === 0 || !selectedSupplier) {
@@ -69,13 +120,13 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       return;
     }
 
-    const totalAmount = purchaseItems.reduce((sum, i) => sum + i.totalAmount, 0);
+    const totalAmount = totalBillAmount;
 
     // 1. Stock Inward: Increase Item stock levels in Dexie DB
     for (const pItem of purchaseItems) {
       const dbItem = await db.items.get(pItem.itemId);
       if (dbItem) {
-        const newStock = dbItem.currentStock + pItem.quantity;
+        const newStock = safeNum(dbItem.currentStock) + safeNum(pItem.quantity);
         await db.items.update(pItem.itemId, {
           currentStock: newStock,
           purchasePrice: pItem.unitPrice,
@@ -86,22 +137,25 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
 
     // 2. Update Supplier Accounts Payable Ledger Balance
     if (selectedSupplier?.id) {
-      const newBal = (selectedSupplier.currentBalance || 0) + totalAmount;
+      const curBal = safeNum(selectedSupplier.currentBalance);
+      const newBal = curBal + totalAmount;
       await db.parties.update(selectedSupplier.id, {
         currentBalance: newBal
       });
+      await syncManager.logMutation('PARTY', String(selectedSupplier.id), 'UPDATE', { id: selectedSupplier.id, currentBalance: newBal });
     }
 
-    // 3. Post Double-Entry Journal (Debit Inventory Asset, Credit Accounts Payable)
+    // 3. Post Double-Entry Journal Entry
     const accounts = await db.ledgerAccounts.toArray();
     const invAcc = accounts.find(a => a.accountCode === '1040') || accounts[0];
     const apAcc = accounts.find(a => a.accountCode === '2010') || accounts[0];
 
     const count = await db.journalEntries.count();
     const suppName = selectedSupplier?.name || 'Supplier';
-    await db.journalEntries.add({
+    const entryNumber = `JE-PUR-${Date.now().toString().slice(-4)}`;
+    const journalEntry = {
       tenantId: 'default-tenant',
-      entryNumber: `JE-2026-${(count + 1).toString().padStart(4, '0')}`,
+      entryNumber,
       referenceId: billNumber,
       transactionDate: billDate,
       description: `Purchase Inward Bill ${billNumber} from ${suppName}`,
@@ -112,7 +166,10 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       totalDebit: totalAmount,
       totalCredit: totalAmount,
       createdAt: new Date().toISOString()
-    });
+    };
+
+    const jeId = await db.journalEntries.add(journalEntry);
+    await syncManager.logMutation('JOURNAL', entryNumber, 'INSERT', { ...journalEntry, id: jeId });
 
     // 4. Send to PostgreSQL backend REST API
     if (selectedSupplier) {
@@ -125,13 +182,11 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       });
     }
 
-    alert(`Purchase Inward Bill ${billNumber} saved successfully! Inventory stock increased.`);
+    alert(`Purchase Inward Bill ${billNumber} saved successfully! Total Rs ${totalAmount.toFixed(2)} added to stock & supplier payable balance.`);
     setPurchaseItems([]);
     setBillNumber(`PUR-${Date.now().toString().slice(-4)}`);
     onPurchaseCreated();
   };
-
-  const totalBillAmount = purchaseItems.reduce((sum, i) => sum + i.totalAmount, 0);
 
   return (
     <div className="flex-1 flex flex-col p-5 bg-[#f3f4f6] overflow-hidden gap-4 select-none">
@@ -265,22 +320,59 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
                       </td>
                     </tr>
                   ) : (
-                    purchaseItems.map((item, idx) => (
-                      <tr key={idx}>
-                        <td className="font-bold text-slate-800 text-xs">{item.itemName}</td>
-                        <td className="font-mono text-xs text-slate-700">{item.quantity} {item.unitType}</td>
-                        <td className="font-mono text-xs text-slate-700">₹{Number(item.unitPrice || 0).toFixed(2)}</td>
-                        <td className="font-mono text-xs font-black text-blue-600 text-right">₹{Number(item.totalAmount || 0).toFixed(2)}</td>
-                        <td className="text-center">
-                          <button
-                            onClick={() => setPurchaseItems(prev => prev.filter((_, i) => i !== idx))}
-                            className="text-slate-400 hover:text-red-500 transition"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                    purchaseItems.map((item, idx) => {
+                      const itemTotal = safeNum(item.totalAmount) > 0
+                        ? safeNum(item.totalAmount)
+                        : safeNum(item.quantity) * safeNum(item.unitPrice);
+                      return (
+                        <tr key={idx}>
+                          <td className="font-bold text-slate-800 text-xs">{item.itemName}</td>
+                          <td>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => updatePurchaseItemQty(idx, item.quantity - 1)}
+                                className="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center border border-slate-300 cursor-pointer"
+                              >
+                                -
+                              </button>
+                              <input
+                                type="number"
+                                min="1"
+                                value={item.quantity}
+                                onChange={e => updatePurchaseItemQty(idx, parseInt(e.target.value) || 1)}
+                                className="w-12 text-center bg-slate-50 border border-slate-300 rounded text-xs text-slate-900 font-bold py-0.5"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => updatePurchaseItemQty(idx, item.quantity + 1)}
+                                className="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center border border-slate-300 cursor-pointer"
+                              >
+                                +
+                              </button>
+                              <span className="text-[10px] text-slate-500 font-bold ml-1">{item.unitType}</span>
+                            </div>
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              value={item.unitPrice}
+                              onChange={e => updatePurchaseItemRate(idx, parseFloat(e.target.value) || 0)}
+                              className="w-20 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-900 font-mono font-bold"
+                            />
+                          </td>
+                          <td className="font-mono text-xs font-black text-blue-600 text-right">₹{itemTotal.toFixed(2)}</td>
+                          <td className="text-center">
+                            <button
+                              onClick={() => setPurchaseItems(prev => prev.filter((_, i) => i !== idx))}
+                              className="text-slate-400 hover:text-red-500 transition cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

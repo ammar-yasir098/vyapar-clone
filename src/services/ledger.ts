@@ -1,5 +1,6 @@
-import { db } from '../db';
+import { db, seedDatabaseIfEmpty } from '../db';
 import { Invoice, JournalEntry, JournalLine } from '../types';
+import { syncManager } from './sync';
 
 /**
  * Automatically creates balanced double-entry Journal Entries for any POS Invoice.
@@ -7,7 +8,11 @@ import { Invoice, JournalEntry, JournalLine } from '../types';
  */
 export async function postInvoiceJournalEntry(invoice: Invoice): Promise<JournalEntry | null> {
   try {
-    const accounts = await db.ledgerAccounts.toArray();
+    let accounts = await db.ledgerAccounts.toArray();
+    if (accounts.length === 0) {
+      await seedDatabaseIfEmpty();
+      accounts = await db.ledgerAccounts.toArray();
+    }
 
     // Map standard account codes
     const cashAcc = accounts.find(a => a.accountCode === '1010') || accounts[0];
@@ -18,6 +23,11 @@ export async function postInvoiceJournalEntry(invoice: Invoice): Promise<Journal
     const salesAcc = accounts.find(a => a.accountCode === '4010') || accounts[0];
     const cogsAcc = accounts.find(a => a.accountCode === '5010') || accounts[0];
     const discountAcc = accounts.find(a => a.accountCode === '5020') || accounts[0];
+
+    if (!cashAcc || !salesAcc) {
+      console.warn('Chart of Accounts not initialized properly.');
+      return null;
+    }
 
     const lines: JournalLine[] = [];
 
@@ -88,10 +98,10 @@ export async function postInvoiceJournalEntry(invoice: Invoice): Promise<Journal
     const entryNumber = `JE-2026-${(count + 1).toString().padStart(4, '0')}`;
 
     const entry: JournalEntry = {
-      tenantId: invoice.tenantId,
+      tenantId: invoice.tenantId || 'default-tenant',
       entryNumber,
       referenceId: invoice.invoiceNumber,
-      transactionDate: invoice.invoiceDate,
+      transactionDate: invoice.invoiceDate || new Date().toISOString().split('T')[0],
       description: `Sales revenue & tax posting for Invoice ${invoice.invoiceNumber} (${invoice.partyName})`,
       lines,
       totalDebit,
@@ -99,7 +109,11 @@ export async function postInvoiceJournalEntry(invoice: Invoice): Promise<Journal
       createdAt: new Date().toISOString()
     };
 
-    await db.journalEntries.add(entry);
+    const savedId = await db.journalEntries.add(entry);
+    entry.id = savedId;
+
+    // Log Journal Entry mutation for cloud sync
+    await syncManager.logMutation('JOURNAL', entry.entryNumber, 'INSERT', entry);
 
     // Update Account balances
     for (const line of lines) {
@@ -112,7 +126,7 @@ export async function postInvoiceJournalEntry(invoice: Invoice): Promise<Journal
     }
 
     // 5. Post COGS & Inventory Adjustment Entry
-    const totalCostOfGoods = invoice.items.reduce((sum, item) => sum + item.quantity * item.purchasePrice, 0);
+    const totalCostOfGoods = invoice.items ? invoice.items.reduce((sum, item) => sum + (item.quantity * (item.purchasePrice || 0)), 0) : 0;
     if (totalCostOfGoods > 0) {
       const cogsEntryNumber = `JE-2026-${(count + 2).toString().padStart(4, '0')}`;
       const cogsLines: JournalLine[] = [
@@ -132,17 +146,22 @@ export async function postInvoiceJournalEntry(invoice: Invoice): Promise<Journal
         }
       ];
 
-      await db.journalEntries.add({
-        tenantId: invoice.tenantId,
+      const cogsEntry: JournalEntry = {
+        tenantId: invoice.tenantId || 'default-tenant',
         entryNumber: cogsEntryNumber,
         referenceId: invoice.invoiceNumber,
-        transactionDate: invoice.invoiceDate,
+        transactionDate: invoice.invoiceDate || new Date().toISOString().split('T')[0],
         description: `COGS & Inventory stock reduction for Invoice ${invoice.invoiceNumber}`,
         lines: cogsLines,
         totalDebit: totalCostOfGoods,
         totalCredit: totalCostOfGoods,
         createdAt: new Date().toISOString()
-      });
+      };
+
+      const cogsSavedId = await db.journalEntries.add(cogsEntry);
+      cogsEntry.id = cogsSavedId;
+
+      await syncManager.logMutation('JOURNAL', cogsEntryNumber, 'INSERT', cogsEntry);
     }
 
     return entry;

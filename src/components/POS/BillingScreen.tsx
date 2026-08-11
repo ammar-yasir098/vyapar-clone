@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Search, 
-  Plus, 
-  Trash2, 
-  Printer, 
-  User, 
-  Check, 
-  Barcode, 
-  CreditCard, 
+import {
+  Search,
+  Plus,
+  Trash2,
+  Printer,
+  User,
+  Check,
+  Barcode,
+  CreditCard,
   RotateCcw,
   Share2,
   FileText,
@@ -98,7 +98,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
       const uPrice = Number(updated[existingIndex].unitPrice || 0);
       const sub = newQty * uPrice;
       const tax = (sub * (cgst + sgst)) / 100;
-      
+
       updated[existingIndex] = {
         ...updated[existingIndex],
         quantity: newQty,
@@ -109,7 +109,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
     } else {
       const sub = sPrice;
       const tax = (sub * (cgst + sgst)) / 100;
-      
+
       const newItem: InvoiceItem = {
         itemId: item.id!,
         itemName: item.name,
@@ -210,10 +210,13 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   const rawGrandTotal = Math.max(0, subtotal + taxTotal - discountTotal);
   const grandTotal = Math.round(rawGrandTotal);
 
-  const recAmtNum = parseFloat(receivedAmount) || 0;
+  const recAmtNum = (receivedAmount !== '' && !isNaN(parseFloat(receivedAmount)))
+    ? Math.max(0, parseFloat(receivedAmount))
+    : 0;
+
   const changeToReturn = Math.max(0, recAmtNum - grandTotal);
   const dueAmount = paymentMethod === 'CREDIT' ? grandTotal : Math.max(0, grandTotal - recAmtNum);
-  const paymentStatus = dueAmount === 0 ? 'PAID' : dueAmount === grandTotal ? 'UNPAID' : 'PARTIAL';
+  const paymentStatus = dueAmount === 0 ? 'PAID' : (dueAmount === grandTotal ? 'UNPAID' : 'PARTIAL');
 
   const handleSaveAndPrint = async () => {
     if (cartItems.length === 0) return;
@@ -235,7 +238,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
       taxTotal,
       discountTotal,
       grandTotal,
-      receivedAmount: paymentMethod === 'CREDIT' ? 0 : recAmtNum || grandTotal,
+      receivedAmount: paymentMethod === 'CREDIT' ? 0 : recAmtNum,
       dueAmount,
       paymentStatus,
       paymentMethod,
@@ -247,6 +250,17 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
     // 1. Save to local Dexie IndexedDB
     const savedId = await db.invoices.add(newInvoice);
     newInvoice.id = savedId;
+
+    // Update selected Party balance if dueAmount > 0
+    if (selectedParty && selectedParty.id && dueAmount > 0) {
+      const curVal = Number(selectedParty.currentBalance);
+      const currentBal = isNaN(curVal) || !isFinite(curVal) ? 0 : curVal;
+      const safeDue = isNaN(Number(dueAmount)) ? 0 : Number(dueAmount);
+      const newBal = currentBal + safeDue;
+      const validBal = isNaN(newBal) || !isFinite(newBal) ? safeDue : newBal;
+      await db.parties.update(selectedParty.id, { currentBalance: validBal });
+      await syncManager.logMutation('PARTY', String(selectedParty.id), 'UPDATE', { id: selectedParty.id, currentBalance: validBal });
+    }
 
     // Log to Offline Sync Queue
     await syncManager.logMutation('INVOICE', newInvoice.invoiceId, 'INSERT', newInvoice);
@@ -497,7 +511,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                 <span>Subtotal ({cartItems.length} items):</span>
                 <span className="font-mono text-slate-900 font-bold">Rs {subtotal.toFixed(2)}</span>
               </div>
-              
+
               <div className="flex justify-between text-slate-600 font-semibold">
                 <span>Sales Tax Total:</span>
                 <span className="font-mono text-slate-800">Rs {taxTotal.toFixed(2)}</span>
@@ -534,11 +548,10 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                   <button
                     key={method}
                     onClick={() => setPaymentMethod(method)}
-                    className={`py-2 px-2 rounded-lg font-extrabold text-xs border transition flex items-center justify-center cursor-pointer ${
-                      paymentMethod === method
+                    className={`py-2 px-2 rounded-lg font-extrabold text-xs border transition flex items-center justify-center cursor-pointer ${paymentMethod === method
                         ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
                         : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
-                    }`}
+                      }`}
                   >
                     {method === 'UPI' ? 'DIGITAL / APP' : method === 'CREDIT' ? 'PARTY CREDIT' : method}
                   </button>
@@ -549,32 +562,63 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
             {/* Cash Quick Tender Notes & Change Calculator */}
             {paymentMethod === 'CASH' && (
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-700">Amount Received:</label>
-                  <input
-                    type="number"
-                    value={receivedAmount}
-                    onChange={e => setReceivedAmount(e.target.value)}
-                    placeholder={`Rs ${grandTotal.toFixed(0)}`}
-                    className="w-28 text-right bg-white border border-slate-300 rounded px-2 py-1 text-xs text-slate-900 font-mono font-bold"
-                  />
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-bold text-slate-700 shrink-0">Amount Received:</label>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      value={receivedAmount}
+                      onChange={e => setReceivedAmount(e.target.value)}
+                      placeholder="0.00"
+                      className="w-24 text-right bg-white border border-slate-300 rounded px-2 py-1 text-xs text-slate-900 font-mono font-bold outline-none focus:border-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setReceivedAmount(grandTotal.toString())}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] px-2 py-1 rounded cursor-pointer transition shadow-xs shrink-0"
+                      title="Fill exact bill amount as received cash"
+                    >
+                      Exact Paid
+                    </button>
+                  </div>
                 </div>
 
                 {/* Quick Tender Note Buttons */}
-                <div className="grid grid-cols-3 gap-1 pt-1">
+                <div className="grid grid-cols-4 gap-1 pt-1">
                   {[500, 1000, 5000].map(note => (
                     <button
                       key={note}
+                      type="button"
                       onClick={() => setReceivedAmount(note.toString())}
                       className="py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded text-[10px] font-mono font-bold text-slate-700 cursor-pointer"
                     >
                       Rs {note}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => setReceivedAmount('')}
+                    className="py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[10px] font-bold cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                {/* Live Status Indicator */}
+                <div className="flex justify-between items-center text-xs font-bold pt-2 border-t border-slate-200">
+                  <span className="text-slate-600">Status:</span>
+                  <span className={`px-2 py-0.5 rounded text-[11px] font-extrabold font-mono border ${paymentStatus === 'PAID'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : paymentStatus === 'PARTIAL'
+                        ? 'bg-amber-50 text-amber-700 border-amber-200'
+                        : 'bg-rose-50 text-rose-700 border-rose-200'
+                    }`}>
+                    {paymentStatus} {dueAmount > 0 && `(Due: Rs ${dueAmount.toFixed(0)})`}
+                  </span>
                 </div>
 
                 {recAmtNum > 0 && recAmtNum >= grandTotal && (
-                  <div className="flex justify-between items-center text-xs font-bold text-emerald-600 pt-2 border-t border-slate-200">
+                  <div className="flex justify-between items-center text-xs font-bold text-emerald-600 pt-1">
                     <span>Change to Return:</span>
                     <span className="font-mono text-sm font-black">Rs {changeToReturn.toFixed(2)}</span>
                   </div>
