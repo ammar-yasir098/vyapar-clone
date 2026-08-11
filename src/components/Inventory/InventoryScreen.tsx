@@ -264,7 +264,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items = [], on
                         </div>
                       </td>
                       <td className="font-mono text-xs text-slate-500">
-                        {Number(item.cgstRate || 0) + Number(item.sgstRate || 0)}%
+                        {Number(item.igstRate || (Number(item.cgstRate || 0) + Number(item.sgstRate || 0)))}%
                       </td>
                       <td className="text-center">
                         <div className="flex items-center justify-center gap-2">
@@ -572,6 +572,35 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items = [], on
                     onChange={e => setEditItem({ ...editItem, currentStock: parseInt(e.target.value) || 0 })}
                     className="input-field text-xs font-mono"
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">HSN / SAC Code</label>
+                  <input
+                    type="text"
+                    value={editItem.hsnSacCode || ''}
+                    onChange={e => setEditItem({ ...editItem, hsnSacCode: e.target.value })}
+                    className="input-field text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Sales Tax Rate (%)</label>
+                  <select
+                    value={Number(editItem.igstRate || (Number(editItem.cgstRate || 0) + Number(editItem.sgstRate || 0)))}
+                    onChange={e => {
+                      const totalRate = parseFloat(e.target.value);
+                      const half = totalRate / 2;
+                      setEditItem({ ...editItem, cgstRate: half, sgstRate: half, igstRate: totalRate });
+                    }}
+                    className="input-field text-xs"
+                  >
+                    <option value={0}>0% (Tax Exempt)</option>
+                    <option value={5}>5% Sales Tax</option>
+                    <option value={12}>12% Sales Tax</option>
+                    <option value={18}>18% Standard GST</option>
+                  </select>
                 </div>
               </div>
 

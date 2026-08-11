@@ -24,16 +24,86 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ invoices = [],
   const safeParties = Array.isArray(parties) ? parties : [];
   const safeInvoices = Array.isArray(invoices) ? invoices : [];
 
+  const safeNum = (val: any): number => {
+    if (val === null || val === undefined) return 0;
+    const n = Number(val);
+    return isNaN(n) || !isFinite(n) ? 0 : n;
+  };
+
+  const getPartyEffectiveBalance = (party: Party): number => {
+    const pId = party.id;
+    const pName = (party.name || '').trim().toLowerCase();
+
+    const partyInvoices = safeInvoices.filter(
+      inv => (pId !== undefined && inv?.partyId === pId) || (inv?.partyName && inv.partyName.trim().toLowerCase() === pName)
+    );
+
+    const unpaidInvoicesDue = partyInvoices.reduce((sum, inv) => {
+      if (inv?.paymentStatus === 'PAID') return sum;
+      const dueVal = inv?.dueAmount !== undefined && !isNaN(Number(inv.dueAmount))
+        ? safeNum(inv.dueAmount)
+        : Math.max(0, safeNum(inv?.grandTotal) - safeNum(inv?.receivedAmount));
+      return sum + safeNum(dueVal);
+    }, 0);
+
+    const opening = safeNum(party.openingBalance);
+    const current = safeNum(party.currentBalance);
+
+    if (party.type === 'CUSTOMER') {
+      if (current === 0) {
+        return unpaidInvoicesDue;
+      }
+      return safeNum(opening + unpaidInvoicesDue);
+    }
+    return current;
+  };
+
   const totalReceivable = safeParties
-    .filter(p => Number(p?.currentBalance || 0) > 0 && p?.type === 'CUSTOMER')
-    .reduce((sum, p) => sum + Number(p?.currentBalance || 0), 0);
+    .filter(p => p.type === 'CUSTOMER' || p.type === 'BOTH')
+    .reduce((sum, p) => {
+      const bal = getPartyEffectiveBalance(p);
+      return sum + (bal > 0 ? bal : 0);
+    }, 0);
 
   const totalPayable = safeParties
-    .filter(p => Number(p?.currentBalance || 0) > 0 && p?.type === 'SUPPLIER')
-    .reduce((sum, p) => sum + Number(p?.currentBalance || 0), 0);
+    .filter(p => p.type === 'SUPPLIER' || p.type === 'BOTH')
+    .reduce((sum, p) => {
+      const bal = getPartyEffectiveBalance(p);
+      return sum + (bal > 0 ? bal : 0);
+    }, 0);
 
-  const totalSales = safeInvoices.reduce((sum, inv) => sum + Number(inv?.grandTotal || 0), 0);
-  const receivablePartiesCount = safeParties.filter(p => Number(p?.currentBalance || 0) > 0 && p?.type === 'CUSTOMER').length;
+  const totalSales = safeInvoices.reduce((sum, inv) => sum + safeNum(inv?.grandTotal), 0);
+  const receivablePartiesCount = safeParties.filter(p => getPartyEffectiveBalance(p) > 0 && (p?.type === 'CUSTOMER' || p?.type === 'BOTH')).length;
+
+  // Dynamic Sales Curve Calculation
+  const getSalesPlotData = () => {
+    const buckets = Array(31).fill(0);
+    safeInvoices.forEach(inv => {
+      if (!inv || !inv.invoiceDate) return;
+      const parts = inv.invoiceDate.split('-');
+      if (parts.length === 3) {
+        const day = parseInt(parts[2], 10);
+        if (day >= 1 && day <= 31) {
+          buckets[day - 1] += safeNum(inv.grandTotal);
+        }
+      }
+    });
+
+    const maxVal = Math.max(...buckets, 100);
+    const points = buckets.map((val, idx) => {
+      const x = 20 + (idx / 30) * 460;
+      const y = 130 - (val / maxVal) * 100;
+      return { x, y, val, day: idx + 1 };
+    });
+
+    const pathD = points.reduce((acc, p, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`, '');
+    const areaD = `${pathD} L 480 130 L 20 130 Z`;
+    const peakPoint = points.reduce((prev, current) => (current.val > prev.val ? current : prev), points[0]);
+
+    return { points, pathD, areaD, peakPoint };
+  };
+
+  const { points, pathD, areaD, peakPoint } = getSalesPlotData();
 
   return (
     <div className="flex-1 flex flex-col p-6 bg-[#f3f4f6] overflow-y-auto gap-6 select-none">
@@ -116,20 +186,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ invoices = [],
                 <line x1="0" y1="70" x2="500" y2="70" stroke="#f1f5f9" strokeWidth="1" />
                 <line x1="0" y1="110" x2="500" y2="110" stroke="#f1f5f9" strokeWidth="1" />
 
-                <path
-                  d="M 20 120 L 140 120 C 150 120, 155 20, 160 20 C 165 20, 170 120, 180 120 L 480 120 L 480 140 L 20 140 Z"
-                  fill="url(#salesGrad)"
-                />
+                <path d={areaD} fill="url(#salesGrad)" />
+                <path d={pathD} fill="none" stroke="#2563eb" strokeWidth="3" strokeLinecap="round" />
 
-                <path
-                  d="M 20 120 L 140 120 C 150 120, 155 20, 160 20 C 165 20, 170 120, 180 120 L 480 120"
-                  fill="none"
-                  stroke="#2563eb"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                />
-
-                <circle cx="160" cy="20" r="4.5" fill="#2563eb" stroke="#ffffff" strokeWidth="2.5" />
+                {peakPoint && peakPoint.val > 0 && (
+                  <circle cx={peakPoint.x} cy={peakPoint.y} r="5" fill="#2563eb" stroke="#ffffff" strokeWidth="2.5" />
+                )}
               </svg>
 
               <div className="flex justify-between text-[11px] text-slate-500 font-mono font-bold pt-2">

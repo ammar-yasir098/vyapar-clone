@@ -17,7 +17,7 @@ export const PrinterModal: React.FC<PrinterModalProps> = ({ business }) => {
     invoiceId: 'sample-001',
     tenantId: 'default',
     partyName: 'Sample Customer',
-    partyGstin: '27ABCDE1234F1ZH',
+    partyGstin: '35202-1234567-1',
     invoiceNumber: 'INV-2026-0001',
     invoiceDate: new Date().toISOString().split('T')[0],
     items: [
@@ -182,7 +182,7 @@ export const PrinterModal: React.FC<PrinterModalProps> = ({ business }) => {
             <div className="text-center font-bold text-sm tracking-wider uppercase">{business.name}</div>
             <div className="text-center text-[10px] leading-tight">{business.address}</div>
             <div className="text-center text-[10px]">Ph: {business.phone}</div>
-            <div className="text-center text-[10px]">GSTIN: {business.gstin}</div>
+            <div className="text-center text-[10px]">{business.gstin ? (business.gstin.startsWith('NTN') ? business.gstin : `NTN / Tax ID: ${business.gstin}`) : 'NTN: 1234567-8'}</div>
 
             <div className="border-t border-dashed border-gray-800 my-2"></div>
             <div className="text-[10px]">
@@ -198,17 +198,17 @@ export const PrinterModal: React.FC<PrinterModalProps> = ({ business }) => {
                   <div>
                     {item.itemName} x{item.quantity}
                   </div>
-                  <div className="font-bold">₹{Number(item.totalAmount || 0).toFixed(2)}</div>
+                  <div className="font-bold">Rs {Number(item.totalAmount || 0).toFixed(2)}</div>
                 </div>
               ))}
             </div>
 
             <div className="border-t border-dashed border-gray-800 my-2"></div>
             <div className="text-[10px] space-y-0.5 text-right font-mono">
-              <div>Subtotal: ₹{Number(sampleInvoice.subtotal || 0).toFixed(2)}</div>
-              <div>Tax (GST): ₹{Number(sampleInvoice.taxTotal || 0).toFixed(2)}</div>
+              <div>Subtotal: Rs {Number(sampleInvoice.subtotal || 0).toFixed(2)}</div>
+              <div>Tax (GST): Rs {Number(sampleInvoice.taxTotal || 0).toFixed(2)}</div>
               <div className="text-xs font-bold text-black border-t border-gray-800 pt-0.5">
-                TOTAL: ₹{Number(sampleInvoice.grandTotal || 0).toFixed(2)}
+                TOTAL: Rs {Number(sampleInvoice.grandTotal || 0).toFixed(2)}
               </div>
             </div>
 

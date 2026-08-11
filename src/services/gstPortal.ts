@@ -54,27 +54,29 @@ export function exportEInvoiceNICJSON(invoice: Invoice, business: BusinessDetail
       LglName: business.name || 'Company Name',
       TrdName: business.name || 'Company Name',
       Addr1: business.address || 'Address',
-      Loc: business.state || 'State',
-      Pin: 400001,
-      Stcd: "27"
+      Loc: business.state || 'Punjab',
+      Pin: 54000,
+      Stcd: "PB"
     },
     BuyerDetails: {
       Gstin: invoice?.partyGstin || "URP", // Unregistered Person
       LglName: invoice?.partyName || "Walk-in Retail Customer",
       TrdName: invoice?.partyName || "Walk-in Retail Customer",
-      Pos: "27",
+      Pos: "PB",
       Addr1: invoice?.partyPhone || "Local Customer",
       Loc: "Local City",
-      Pin: 400001,
-      Stcd: "27"
+      Pin: 54000,
+      Stcd: "PB"
     },
     ItemList: itemsList.map((item, idx) => {
       const qty = Number(item.quantity || 0);
       const unitPrice = Number(item.unitPrice || 0);
       const cgst = Number(item.cgstRate || 0);
       const sgst = Number(item.sgstRate || 0);
+      const igst = Number(item.igstRate || 0);
+      const effTaxRate = igst > 0 ? igst : (cgst + sgst);
       const lineSub = qty * unitPrice;
-      const lineTax = (lineSub * (cgst + sgst)) / 100;
+      const lineTax = (lineSub * effTaxRate) / 100;
       return {
         SlNo: (idx + 1).toString(),
         PrdDesc: item.itemName || 'Product',
@@ -86,7 +88,7 @@ export function exportEInvoiceNICJSON(invoice: Invoice, business: BusinessDetail
         TotAmt: lineSub,
         Discount: 0,
         AssAmt: lineSub,
-        GstRt: cgst + sgst,
+        GstRt: effTaxRate,
         CgstAmt: (lineSub * cgst) / 100,
         SgstAmt: (lineSub * sgst) / 100,
         TotItemVal: Number(item.totalAmount || (lineSub + lineTax))
@@ -111,7 +113,7 @@ export function exportEInvoiceNICJSON(invoice: Invoice, business: BusinessDetail
 }
 
 /**
- * Generates official E-Way Bill JSON payload for inter-state goods transport consignment (> ₹50,000).
+ * Generates official E-Way Bill JSON payload for inter-state goods transport consignment (> Rs 50,000).
  */
 export function exportEWayBillJSON(invoice: Invoice, business: BusinessDetails, transporter: TransporterDetails) {
   const invNum = invoice?.invoiceNumber || 'INV-001';
@@ -128,17 +130,17 @@ export function exportEWayBillJSON(invoice: Invoice, business: BusinessDetails, 
     fromGstin: business.gstin || 'NTN: 7654321-0',
     fromTrdName: business.name || 'Company Name',
     fromAddr1: business.address || 'Address',
-    fromPlace: business.state || 'State',
-    fromPincode: 400001,
-    actFromStateCode: 27,
-    fromStateCode: 27,
+    fromPlace: business.state || 'Punjab',
+    fromPincode: 54000,
+    actFromStateCode: "PB",
+    fromStateCode: "PB",
     toGstin: invoice?.partyGstin || "URP",
     toTrdName: invoice?.partyName || "Walk-in Retail Customer",
     toAddr1: invoice?.partyPhone || "Customer",
     toPlace: "Local City",
-    toPincode: 400001,
-    actToStateCode: 27,
-    toStateCode: 27,
+    toPincode: 54000,
+    actToStateCode: "PB",
+    toStateCode: "PB",
     totalValue: Number(invoice?.subtotal || 0),
     cgstValue: Number(invoice?.cgstTotal || 0),
     sgstValue: Number(invoice?.sgstTotal || 0),

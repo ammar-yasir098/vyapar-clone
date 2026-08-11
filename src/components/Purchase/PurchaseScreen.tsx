@@ -279,7 +279,7 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
             </div>
 
             <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1">Purchase Rate (₹)</label>
+              <label className="text-xs font-bold text-slate-600 block mb-1">Purchase Rate (Rs)</label>
               <input
                 type="number"
                 value={unitRate || ''}
@@ -307,8 +307,8 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
                   <tr>
                     <th>Item Description</th>
                     <th>Inward Qty</th>
-                    <th>Purchase Rate (₹)</th>
-                    <th className="text-right">Total Amount (₹)</th>
+                    <th>Purchase Rate (Rs)</th>
+                    <th className="text-right">Total Amount (Rs)</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -361,7 +361,7 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
                               className="w-20 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-900 font-mono font-bold"
                             />
                           </td>
-                          <td className="font-mono text-xs font-black text-blue-600 text-right">₹{itemTotal.toFixed(2)}</td>
+                          <td className="font-mono text-xs font-black text-blue-600 text-right">Rs {itemTotal.toFixed(2)}</td>
                           <td className="text-center">
                             <button
                               onClick={() => setPurchaseItems(prev => prev.filter((_, i) => i !== idx))}
@@ -398,7 +398,7 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
               </div>
               <div className="flex justify-between text-sm font-black text-blue-600 pt-2 border-t border-slate-200">
                 <span>TOTAL COST:</span>
-                <span>₹{Number(totalBillAmount || 0).toFixed(2)}</span>
+                <span>Rs {Number(totalBillAmount || 0).toFixed(2)}</span>
               </div>
             </div>
           </div>

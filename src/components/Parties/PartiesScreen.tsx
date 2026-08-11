@@ -326,14 +326,14 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
             className={`px-3 py-1.5 rounded-lg text-xs font-extrabold cursor-pointer transition ${filterTab === 'CUSTOMER' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
               }`}
           >
-            Customers ({parties.filter(p => p.type === 'CUSTOMER').length})
+            Customers ({parties.filter(p => p.type === 'CUSTOMER' || p.type === 'BOTH').length})
           </button>
           <button
             onClick={() => setFilterTab('SUPPLIER')}
             className={`px-3 py-1.5 rounded-lg text-xs font-extrabold cursor-pointer transition ${filterTab === 'SUPPLIER' ? 'bg-purple-600 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
               }`}
           >
-            Suppliers ({parties.filter(p => p.type === 'SUPPLIER').length})
+            Suppliers ({parties.filter(p => p.type === 'SUPPLIER' || p.type === 'BOTH').length})
           </button>
         </div>
 

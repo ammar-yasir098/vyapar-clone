@@ -62,7 +62,7 @@ export const InvoicesScreen: React.FC<InvoicesScreenProps> = ({ invoices = [], b
                 <th>Customer / Party</th>
                 <th>Payment Method</th>
                 <th>Status</th>
-                <th className="text-right">Grand Total (₹)</th>
+                <th className="text-right">Grand Total (Rs)</th>
                 <th className="text-center">Actions</th>
               </tr>
             </thead>
@@ -100,7 +100,7 @@ export const InvoicesScreen: React.FC<InvoicesScreenProps> = ({ invoices = [], b
                       </span>
                     </td>
                     <td className="font-mono font-black text-xs text-emerald-600 text-right">
-                      ₹{Number(inv.grandTotal || 0).toFixed(2)}
+                      Rs {Number(inv.grandTotal || 0).toFixed(2)}
                     </td>
                     <td className="text-center">
                       <div className="flex items-center justify-center gap-2">
@@ -165,9 +165,9 @@ export const InvoicesScreen: React.FC<InvoicesScreenProps> = ({ invoices = [], b
                       <tr key={i} className="border-b border-slate-200/60 text-slate-800">
                         <td className="py-1 font-bold">{item.itemName || 'Item'}</td>
                         <td className="py-1 text-right font-mono">{Number(item.quantity || 0)}</td>
-                        <td className="py-1 text-right font-mono">₹{Number(item.unitPrice || 0).toFixed(2)}</td>
+                        <td className="py-1 text-right font-mono">Rs {Number(item.unitPrice || 0).toFixed(2)}</td>
                         <td className="py-1 text-right font-mono font-black text-emerald-600">
-                          ₹{Number(item.totalAmount || 0).toFixed(2)}
+                          Rs {Number(item.totalAmount || 0).toFixed(2)}
                         </td>
                       </tr>
                     ))}
@@ -176,10 +176,10 @@ export const InvoicesScreen: React.FC<InvoicesScreenProps> = ({ invoices = [], b
               </div>
 
               <div className="bg-slate-100 p-3 rounded-xl space-y-1 font-mono text-xs text-right text-slate-700">
-                <div>Subtotal: ₹{Number(selectedInvoice.subtotal || 0).toFixed(2)}</div>
-                <div>Tax Total: ₹{Number(selectedInvoice.taxTotal || 0).toFixed(2)}</div>
+                <div>Subtotal: Rs {Number(selectedInvoice.subtotal || 0).toFixed(2)}</div>
+                <div>Tax Total: Rs {Number(selectedInvoice.taxTotal || 0).toFixed(2)}</div>
                 <div className="text-sm font-black text-emerald-600 pt-1 border-t border-slate-200">
-                  Grand Total: ₹{Number(selectedInvoice.grandTotal || 0).toFixed(2)}
+                  Grand Total: Rs {Number(selectedInvoice.grandTotal || 0).toFixed(2)}
                 </div>
               </div>
             </div>

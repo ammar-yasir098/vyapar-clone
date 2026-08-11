@@ -79,11 +79,21 @@ export async function seedDatabaseIfEmpty() {
   // Deduplicate any accidental duplicate Walk-in Customer entries
   const allWalkIns = await db.parties.where('name').equals('Walk-in Retail Customer').toArray();
   if (allWalkIns.length > 1) {
-    // Keep first, delete extra duplicates
     for (let i = 1; i < allWalkIns.length; i++) {
       if (allWalkIns[i].id) {
         await db.parties.delete(allWalkIns[i].id!);
       }
+    }
+  }
+
+  // Deduplicate any duplicate ledger accounts by accountCode
+  const allLedgerAccs = await db.ledgerAccounts.toArray();
+  const seenAccCodes = new Set<string>();
+  for (const acc of allLedgerAccs) {
+    if (seenAccCodes.has(acc.accountCode)) {
+      if (acc.id) await db.ledgerAccounts.delete(acc.id);
+    } else {
+      seenAccCodes.add(acc.accountCode);
     }
   }
 }

@@ -115,12 +115,13 @@ export async function postInvoiceJournalEntry(invoice: Invoice): Promise<Journal
     // Log Journal Entry mutation for cloud sync
     await syncManager.logMutation('JOURNAL', entry.entryNumber, 'INSERT', entry);
 
-    // Update Account balances
+    // Update Account balances based on standard accounting rules
     for (const line of lines) {
       const acc = accounts.find(a => a.id === line.accountId);
       if (acc && acc.id) {
-        const netChange = line.debit - line.credit;
-        const newBal = acc.balance + netChange;
+        const isCreditNormal = acc.accountType === 'LIABILITY' || acc.accountType === 'EQUITY' || acc.accountType === 'REVENUE';
+        const netChange = isCreditNormal ? (line.credit - line.debit) : (line.debit - line.credit);
+        const newBal = (acc.balance || 0) + netChange;
         await db.ledgerAccounts.update(acc.id, { balance: newBal });
       }
     }

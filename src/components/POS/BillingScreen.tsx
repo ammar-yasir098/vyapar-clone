@@ -90,6 +90,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
     const cgst = Number(item.cgstRate || 0);
     const sgst = Number(item.sgstRate || 0);
     const igst = Number(item.igstRate || 0);
+    const effTaxRate = igst > 0 ? igst : (cgst + sgst);
 
     const existingIndex = cartItems.findIndex(i => i.itemId === item.id);
     if (existingIndex > -1) {
@@ -97,7 +98,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
       const newQty = Number(updated[existingIndex].quantity || 0) + 1;
       const uPrice = Number(updated[existingIndex].unitPrice || 0);
       const sub = newQty * uPrice;
-      const tax = (sub * (cgst + sgst)) / 100;
+      const tax = (sub * effTaxRate) / 100;
 
       updated[existingIndex] = {
         ...updated[existingIndex],
@@ -108,7 +109,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
       setCartItems(updated);
     } else {
       const sub = sPrice;
-      const tax = (sub * (cgst + sgst)) / 100;
+      const tax = (sub * effTaxRate) / 100;
 
       const newItem: InvoiceItem = {
         itemId: item.id!,
@@ -139,8 +140,10 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
             const uPrice = Number(item.unitPrice || 0);
             const cgst = Number(item.cgstRate || 0);
             const sgst = Number(item.sgstRate || 0);
+            const igst = Number(item.igstRate || 0);
+            const effTaxRate = igst > 0 ? igst : (cgst + sgst);
             const sub = newQty * uPrice;
-            const tax = (sub * (cgst + sgst)) / 100;
+            const tax = (sub * effTaxRate) / 100;
             return { ...item, quantity: newQty, taxAmount: tax, totalAmount: sub + tax };
           }
           return item;
@@ -156,8 +159,10 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
           const uPrice = Number(newPrice || 0);
           const cgst = Number(item.cgstRate || 0);
           const sgst = Number(item.sgstRate || 0);
+          const igst = Number(item.igstRate || 0);
+          const effTaxRate = igst > 0 ? igst : (cgst + sgst);
           const sub = item.quantity * uPrice;
-          const tax = (sub * (cgst + sgst)) / 100;
+          const tax = (sub * effTaxRate) / 100;
           return { ...item, unitPrice: uPrice, taxAmount: tax, totalAmount: sub + tax };
         }
         return item;
@@ -210,9 +215,11 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   const rawGrandTotal = Math.max(0, subtotal + taxTotal - discountTotal);
   const grandTotal = Math.round(rawGrandTotal);
 
-  const recAmtNum = (receivedAmount !== '' && !isNaN(parseFloat(receivedAmount)))
-    ? Math.max(0, parseFloat(receivedAmount))
-    : 0;
+  const recAmtNum = paymentMethod === 'CREDIT'
+    ? 0
+    : (receivedAmount !== '' && !isNaN(parseFloat(receivedAmount))
+        ? Math.max(0, parseFloat(receivedAmount))
+        : grandTotal);
 
   const changeToReturn = Math.max(0, recAmtNum - grandTotal);
   const dueAmount = paymentMethod === 'CREDIT' ? grandTotal : Math.max(0, grandTotal - recAmtNum);
@@ -438,7 +445,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                           />
                         </td>
                         <td className="font-mono text-xs text-slate-500">
-                          {Number(item.cgstRate || 0) + Number(item.sgstRate || 0)}%
+                          {Number(item.igstRate || (Number(item.cgstRate || 0) + Number(item.sgstRate || 0)))}%
                         </td>
                         <td className="font-mono text-xs text-slate-600">
                           Rs {Number(item.taxAmount || 0).toFixed(2)}

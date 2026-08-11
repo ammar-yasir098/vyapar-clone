@@ -14,13 +14,29 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ invoices = [] }) =
   const averageTicket = totalInvoices > 0 ? totalSales / totalInvoices : 0;
 
   const totalCgst = safeInvoices.reduce(
-    (sum, inv) => sum + Number(inv?.cgstTotal ?? (inv?.taxTotal ? Number(inv.taxTotal) / 2 : 0)),
+    (sum, inv) => sum + Number(inv?.cgstTotal ?? (inv?.taxTotal && !inv?.igstTotal ? Number(inv.taxTotal) / 2 : 0)),
     0
   );
   const totalSgst = safeInvoices.reduce(
-    (sum, inv) => sum + Number(inv?.sgstTotal ?? (inv?.taxTotal ? Number(inv.taxTotal) / 2 : 0)),
+    (sum, inv) => sum + Number(inv?.sgstTotal ?? (inv?.taxTotal && !inv?.igstTotal ? Number(inv.taxTotal) / 2 : 0)),
     0
   );
+  const totalIgst = safeInvoices.reduce(
+    (sum, inv) => sum + Number(inv?.igstTotal || 0),
+    0
+  );
+
+  const cashSales = safeInvoices
+    .filter(i => (i?.paymentMethod || 'CASH') === 'CASH')
+    .reduce((sum, i) => sum + Number(i?.grandTotal || 0), 0);
+
+  const digitalSales = safeInvoices
+    .filter(i => i?.paymentMethod === 'UPI' || i?.paymentMethod === 'CARD')
+    .reduce((sum, i) => sum + Number(i?.grandTotal || 0), 0);
+
+  const creditSales = safeInvoices
+    .filter(i => i?.paymentMethod === 'CREDIT' || Number(i?.dueAmount || 0) > 0)
+    .reduce((sum, i) => sum + Number(i?.dueAmount || i?.grandTotal || 0), 0);
 
   return (
     <div className="flex-1 flex flex-col p-6 bg-[#f3f4f6] overflow-y-auto gap-6 select-none">
@@ -99,6 +115,43 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ invoices = [] }) =
         </div>
       </div>
 
+      {/* Payment Method Breakdown Panel */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
+        <div className="border-b border-slate-100 pb-3">
+          <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+            <Receipt className="w-4 h-4 text-emerald-600" />
+            <span>Sales Revenue Collection Breakdown</span>
+          </h3>
+          <p className="text-xs text-slate-500 font-medium">Categorized revenue by Cash, Digital Payments, and Party Credit</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
+            <div className="text-slate-500 font-bold text-[11px] uppercase">Cash Collections</div>
+            <div className="text-xl font-black text-emerald-600">
+              Rs {cashSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <div className="text-[10px] text-slate-400 font-sans font-semibold">Counter Physical Cash</div>
+          </div>
+
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
+            <div className="text-slate-500 font-bold text-[11px] uppercase">Digital / Card Payments</div>
+            <div className="text-xl font-black text-blue-600">
+              Rs {digitalSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <div className="text-[10px] text-slate-400 font-sans font-semibold">Bank / Card / UPI Transfers</div>
+          </div>
+
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
+            <div className="text-slate-500 font-bold text-[11px] uppercase">Party Credit Dues</div>
+            <div className="text-xl font-black text-amber-600">
+              Rs {creditSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <div className="text-[10px] text-slate-400 font-sans font-semibold">Outstanding Customer Receivables</div>
+          </div>
+        </div>
+      </div>
+
       {/* Tax Liability Breakdown Panel */}
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -130,7 +183,9 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({ invoices = [] }) =
 
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1">
             <div className="text-slate-500 font-bold text-[11px] uppercase">Integrated GST (IGST)</div>
-            <div className="text-xl font-black text-slate-900">Rs 0.00</div>
+            <div className="text-xl font-black text-slate-900">
+              Rs {totalIgst.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
             <div className="text-[10px] text-slate-400 font-sans font-semibold">Inter-State Consignment Tax</div>
           </div>
         </div>

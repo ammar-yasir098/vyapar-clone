@@ -26,13 +26,29 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEnt
     loadPnl();
   }, [journalEntries]);
 
-  const totalAssets = accounts
-    .filter(a => a.accountType === 'ASSET')
-    .reduce((sum, a) => sum + a.balance, 0);
+  const safeAccounts = Array.isArray(accounts) ? accounts : [];
+  const safeJournals = Array.isArray(journalEntries) ? journalEntries : [];
 
-  const totalLiabilities = accounts
-    .filter(a => a.accountType === 'LIABILITY')
-    .reduce((sum, a) => sum + a.balance, 0);
+  // Deduplicate accounts by accountCode for clean chart display
+  const uniqueAccounts = safeAccounts.reduce((accList: LedgerAccount[], current) => {
+    const existingIndex = accList.findIndex(a => a.accountCode === current.accountCode);
+    if (existingIndex === -1) {
+      accList.push({ ...current });
+    } else {
+      accList[existingIndex].balance += current.balance;
+    }
+    return accList;
+  }, []);
+
+  const totalAssets = uniqueAccounts
+    .filter(a => a.accountType === 'ASSET')
+    .reduce((sum, a) => sum + Math.max(0, a.balance), 0);
+
+  const totalLiabilities = Math.abs(
+    uniqueAccounts
+      .filter(a => a.accountType === 'LIABILITY')
+      .reduce((sum, a) => sum + a.balance, 0)
+  );
 
   return (
     <div className="flex-1 flex flex-col p-5 bg-[#f3f4f6] overflow-hidden gap-4 select-none">
@@ -56,7 +72,7 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEnt
               activeTab === 'accounts' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            Chart of Accounts ({accounts.length})
+            Chart of Accounts ({uniqueAccounts.length})
           </button>
           <button
             onClick={() => setActiveTab('journals')}
@@ -64,7 +80,7 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEnt
               activeTab === 'journals' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            Journal Audit Log ({journalEntries.length})
+            Journal Audit Log ({safeJournals.length})
           </button>
           <button
             onClick={() => setActiveTab('pnl')}
@@ -83,7 +99,7 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEnt
           <div>
             <div className="text-xs text-slate-500 font-semibold">Total Assets (Cash, Bank, Inventory)</div>
             <div className="text-xl font-mono font-black text-emerald-600">
-              ₹{totalAssets.toFixed(2)}
+              Rs {totalAssets.toFixed(2)}
             </div>
           </div>
           <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
@@ -95,7 +111,7 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEnt
           <div>
             <div className="text-xs text-slate-500 font-semibold">Total Liabilities & Tax Payable</div>
             <div className="text-xl font-mono font-black text-rose-600">
-              ₹{totalLiabilities.toFixed(2)}
+              Rs {totalLiabilities.toFixed(2)}
             </div>
           </div>
           <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center">
@@ -107,7 +123,7 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEnt
           <div>
             <div className="text-xs text-slate-500 font-semibold">Net Operating Profit</div>
             <div className="text-xl font-mono font-black text-blue-600">
-              ₹{pnlData.grossProfit.toFixed(2)}
+              Rs {pnlData.netProfit.toFixed(2)}
             </div>
           </div>
           <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
@@ -127,11 +143,11 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEnt
                   <th>Account Name</th>
                   <th>Account Type</th>
                   <th>Description</th>
-                  <th className="text-right">Balance (₹)</th>
+                  <th className="text-right">Balance (Rs)</th>
                 </tr>
               </thead>
               <tbody>
-                {accounts.map(acc => (
+                {uniqueAccounts.map(acc => (
                   <tr key={acc.id}>
                     <td className="font-mono font-bold text-xs text-blue-600">{acc.accountCode}</td>
                     <td className="font-bold text-slate-800 text-xs">{acc.accountName}</td>
@@ -152,7 +168,7 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEnt
                     </td>
                     <td className="text-xs text-slate-500">{acc.description || '-'}</td>
                     <td className="text-right font-mono font-black text-xs text-slate-800">
-                      ₹{Math.abs(acc.balance).toFixed(2)}
+                      Rs {Math.abs(acc.balance).toFixed(2)}
                     </td>
                   </tr>
                 ))}
@@ -176,7 +192,7 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEnt
                   </div>
                   <div className="flex items-center gap-1 text-[11px] font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Balanced (Debit = Credit ₹{entry.totalDebit.toFixed(2)})</span>
+                    <span>Balanced (Debit = Credit Rs {entry.totalDebit.toFixed(2)})</span>
                   </div>
                 </div>
 
@@ -186,8 +202,8 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEnt
                   <thead>
                     <tr className="text-slate-500 text-[10px] uppercase border-b border-slate-200">
                       <th className="text-left py-1">Account</th>
-                      <th className="text-right py-1">Debit (₹)</th>
-                      <th className="text-right py-1">Credit (₹)</th>
+                      <th className="text-right py-1">Debit (Rs)</th>
+                      <th className="text-right py-1">Credit (Rs)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -197,10 +213,10 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEnt
                           {line.accountCode} - {line.accountName}
                         </td>
                         <td className="text-right py-1 text-emerald-600 font-bold">
-                          {line.debit > 0 ? `₹${line.debit.toFixed(2)}` : '-'}
+                          {line.debit > 0 ? `Rs ${line.debit.toFixed(2)}` : '-'}
                         </td>
                         <td className="text-right py-1 text-blue-600 font-bold">
-                          {line.credit > 0 ? `₹${line.credit.toFixed(2)}` : '-'}
+                          {line.credit > 0 ? `Rs ${line.credit.toFixed(2)}` : '-'}
                         </td>
                       </tr>
                     ))}
@@ -222,20 +238,20 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEnt
           <div className="space-y-2 text-xs font-mono">
             <div className="flex justify-between py-1.5 border-b border-slate-200">
               <span className="text-slate-600 font-semibold">Gross Sales Revenue:</span>
-              <span className="font-bold text-emerald-600">₹{pnlData.salesRevenue.toFixed(2)}</span>
+              <span className="font-bold text-emerald-600">Rs {pnlData.salesRevenue.toFixed(2)}</span>
             </div>
             <div className="flex justify-between py-1.5 border-b border-slate-200">
               <span className="text-slate-600 font-semibold">Less: Sales Discounts Granted:</span>
-              <span className="text-rose-600">-₹{pnlData.discounts.toFixed(2)}</span>
+              <span className="text-rose-600">-Rs {pnlData.discounts.toFixed(2)}</span>
             </div>
             <div className="flex justify-between py-1.5 border-b border-slate-200">
               <span className="text-slate-600 font-semibold">Less: Cost of Goods Sold (COGS):</span>
-              <span className="text-rose-600">-₹{pnlData.cogs.toFixed(2)}</span>
+              <span className="text-rose-600">-Rs {pnlData.cogs.toFixed(2)}</span>
             </div>
 
             <div className="flex justify-between py-3 text-sm font-black border-t-2 border-b-2 border-slate-300 text-blue-600">
               <span>NET OPERATING PROFIT:</span>
-              <span>₹{pnlData.netProfit.toFixed(2)}</span>
+              <span>Rs {pnlData.netProfit.toFixed(2)}</span>
             </div>
           </div>
         </div>

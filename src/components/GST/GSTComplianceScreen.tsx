@@ -12,9 +12,9 @@ export const GSTComplianceScreen: React.FC<GSTComplianceScreenProps> = ({ invoic
   const safeInvoices = Array.isArray(invoices) ? invoices : [];
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | string>(safeInvoices[0]?.id || safeInvoices[0]?.invoiceNumber || '');
   const [transporter, setTransporter] = useState<TransporterDetails>({
-    transporterId: '27AAAAA0000A1Z5',
-    transporterName: 'VRL Logistics India',
-    vehicleNumber: 'MH-02-AB-1234',
+    transporterId: '35202-1234567-1',
+    transporterName: 'TCS Cargo / Leopard Logistics',
+    vehicleNumber: 'LEA-1234',
     distanceKm: 150,
     mode: 'ROAD'
   });
@@ -55,7 +55,7 @@ export const GSTComplianceScreen: React.FC<GSTComplianceScreenProps> = ({ invoic
             <span>GST Compliance, E-Way Bills & E-Invoicing</span>
           </h2>
           <p className="text-xs text-slate-500 font-semibold">
-            Generate 64-char IRN hashes, E-Way bills ({'>'} ₹50,000), and GSTR-1 tax return payloads
+            Generate 64-char IRN hashes, E-Way bills ({'>'} Rs 50,000), and GSTR-1 tax return payloads
           </p>
         </div>
       </div>
@@ -65,7 +65,7 @@ export const GSTComplianceScreen: React.FC<GSTComplianceScreenProps> = ({ invoic
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-1">
           <div className="text-xs text-slate-500 font-semibold">GSTR-1 Outward Taxable Value</div>
           <div className="text-xl font-mono font-black text-slate-900">
-            ₹{totalTaxableValue.toFixed(2)}
+            Rs {totalTaxableValue.toFixed(2)}
           </div>
           <div className="text-[10px] text-slate-400 font-semibold">Ready for NIC Filing</div>
         </div>
@@ -73,13 +73,13 @@ export const GSTComplianceScreen: React.FC<GSTComplianceScreenProps> = ({ invoic
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-1">
           <div className="text-xs text-slate-500 font-semibold">GSTR-3B Tax Output Collected</div>
           <div className="text-xl font-mono font-black text-blue-600">
-            ₹{totalTaxCollected.toFixed(2)}
+            Rs {totalTaxCollected.toFixed(2)}
           </div>
           <div className="text-[10px] text-emerald-600 font-bold">100% Reconciled</div>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-1">
-          <div className="text-xs text-slate-500 font-semibold">E-Way Bills Threshold ({'>'} ₹50,000)</div>
+          <div className="text-xs text-slate-500 font-semibold">E-Way Bills Threshold ({'>'} Rs 50,000)</div>
           <div className="text-xl font-mono font-black text-purple-600">
             {eligibleEWayBillsCount} Eligible Bills
           </div>
@@ -93,7 +93,7 @@ export const GSTComplianceScreen: React.FC<GSTComplianceScreenProps> = ({ invoic
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
           <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2 border-b border-slate-200 pb-2">
             <Truck className="w-4 h-4 text-blue-600" />
-            <span>Generate E-Way Bill JSON Payload ({'>'} ₹50,000)</span>
+            <span>Generate E-Way Bill JSON Payload ({'>'} Rs 50,000)</span>
           </h3>
 
           <div className="space-y-3">
@@ -109,7 +109,7 @@ export const GSTComplianceScreen: React.FC<GSTComplianceScreenProps> = ({ invoic
                 ) : (
                   safeInvoices.map(inv => (
                     <option key={inv.id || inv.invoiceNumber} value={inv.id || inv.invoiceNumber}>
-                      {inv.invoiceNumber || 'INV-UNKNOWN'} - {inv.partyName || 'Walk-in Customer'} (₹{Number(inv.grandTotal || 0).toFixed(2)})
+                      {inv.invoiceNumber || 'INV-UNKNOWN'} - {inv.partyName || 'Walk-in Customer'} (Rs {Number(inv.grandTotal || 0).toFixed(2)})
                     </option>
                   ))
                 )}
@@ -183,12 +183,12 @@ export const GSTComplianceScreen: React.FC<GSTComplianceScreenProps> = ({ invoic
                   <span className="font-bold text-slate-900">{selectedInvoice.invoiceNumber}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Party GSTIN:</span>
-                  <span className="font-bold text-blue-600">{selectedInvoice.partyGstin || '27ABCDE1234F1ZH'}</span>
+                  <span className="text-slate-500">Party GSTIN / NTN:</span>
+                  <span className="font-bold text-blue-600">{selectedInvoice?.partyGstin || '35202-1234567-1'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Invoice Amount:</span>
-                  <span className="font-bold text-emerald-600">₹{Number(selectedInvoice?.grandTotal || 0).toFixed(2)}</span>
+                  <span className="font-bold text-emerald-600">Rs {Number(selectedInvoice?.grandTotal || 0).toFixed(2)}</span>
                 </div>
               </div>
             )}
