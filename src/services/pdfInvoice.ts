@@ -5,7 +5,8 @@ import { Invoice, BusinessDetails } from '../types';
  */
 export function buildWhatsAppInvoiceLink(invoice: Invoice, business: BusinessDetails): string {
   const phone = invoice.partyPhone?.replace(/\D/g, '') || '';
-  const message = `Hello ${invoice.partyName},\n\nThank you for shopping with ${business.name}!\n\n📄 *Invoice No:* ${invoice.invoiceNumber}\n📅 *Date:* ${invoice.invoiceDate}\n💰 *Grand Total:* Rs ${invoice.grandTotal.toFixed(2)}\n💳 *Payment Status:* ${invoice.paymentStatus} (${invoice.paymentMethod})\n\nPlease let us know if you need any assistance!\n\nPowered by Vyapar POS.`;
+  const grandTotalStr = Number(invoice.grandTotal || 0).toFixed(2);
+  const message = `Hello ${invoice.partyName || 'Customer'},\n\nThank you for shopping with ${business.name}!\n\n📄 *Invoice No:* ${invoice.invoiceNumber}\n📅 *Date:* ${invoice.invoiceDate}\n💰 *Grand Total:* Rs ${grandTotalStr}\n💳 *Payment Status:* ${invoice.paymentStatus} (${invoice.paymentMethod})\n\nPlease let us know if you need any assistance!\n\nPowered by Vyapar POS.`;
 
   return `https://api.whatsapp.com/send?phone=${phone.length === 11 && phone.startsWith('0') ? '92' + phone.substring(1) : phone}&text=${encodeURIComponent(message)}`;
 }
@@ -17,9 +18,14 @@ export function printA4TaxInvoice(invoice: Invoice, business: BusinessDetails, f
   const printWindow = window.open('', '_blank', 'width=800,height=1000');
   if (!printWindow) return;
 
+  const subtotalNum = Number(invoice.subtotal || 0);
+  const taxTotalNum = Number(invoice.taxTotal || 0);
+  const discountTotalNum = Number(invoice.discountTotal || 0);
+  const grandTotalNum = Number(invoice.grandTotal || 0);
+
   const upiQrUrl = business.upiId
     ? `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(
-        `account=${business.upiId}&name=${business.name}&amount=${invoice.grandTotal.toFixed(2)}`
+        `account=${business.upiId}&name=${business.name}&amount=${grandTotalNum.toFixed(2)}`
       )}`
     : '';
 
@@ -100,21 +106,21 @@ export function printA4TaxInvoice(invoice: Invoice, business: BusinessDetails, f
           </tr>
         </thead>
         <tbody>
-          ${invoice.items
+          ${(Array.isArray(invoice.items) ? invoice.items : [])
             .map(
               (item, i) => `
             <tr>
               <td class="font-mono">${i + 1}</td>
               <td>
-                <div class="bold">${item.itemName}</div>
+                <div class="bold">${item.itemName || 'Item'}</div>
                 ${item.batchNumber ? `<div style="font-size: 10px; color: #64748b;">Batch: ${item.batchNumber} (Exp: ${item.expiryDate || 'N/A'})</div>` : ''}
               </td>
-              <td class="font-mono">${item.hsnSacCode}</td>
-              <td class="text-right font-mono">${item.quantity} ${item.unitType}</td>
-              <td class="text-right font-mono">Rs ${item.unitPrice.toFixed(2)}</td>
-              <td class="text-right font-mono">${item.cgstRate + item.sgstRate}%</td>
-              <td class="text-right font-mono">Rs ${item.taxAmount.toFixed(2)}</td>
-              <td class="text-right font-mono bold">Rs ${item.totalAmount.toFixed(2)}</td>
+              <td class="font-mono">${item.hsnSacCode || '-'}</td>
+              <td class="text-right font-mono">${Number(item.quantity || 0)} ${item.unitType || 'PCS'}</td>
+              <td class="text-right font-mono">Rs ${Number(item.unitPrice || 0).toFixed(2)}</td>
+              <td class="text-right font-mono">${Number(item.cgstRate || 0) + Number(item.sgstRate || 0)}%</td>
+              <td class="text-right font-mono">Rs ${Number(item.taxAmount || 0).toFixed(2)}</td>
+              <td class="text-right font-mono bold">Rs ${Number(item.totalAmount || 0).toFixed(2)}</td>
             </tr>
           `
             )
@@ -125,31 +131,31 @@ export function printA4TaxInvoice(invoice: Invoice, business: BusinessDetails, f
       <table class="totals-table">
         <tr>
           <td>Subtotal:</td>
-          <td class="text-right font-mono">Rs ${invoice.subtotal.toFixed(2)}</td>
+          <td class="text-right font-mono">Rs ${subtotalNum.toFixed(2)}</td>
         </tr>
         ${
-          invoice.taxTotal > 0
+          taxTotalNum > 0
             ? `
           <tr>
             <td>Sales Tax (GST):</td>
-            <td class="text-right font-mono">Rs ${invoice.taxTotal.toFixed(2)}</td>
+            <td class="text-right font-mono">Rs ${taxTotalNum.toFixed(2)}</td>
           </tr>
         `
             : ''
         }
         ${
-          invoice.discountTotal > 0
+          discountTotalNum > 0
             ? `
           <tr>
             <td>Discount:</td>
-            <td class="text-right font-mono">-Rs ${invoice.discountTotal.toFixed(2)}</td>
+            <td class="text-right font-mono">-Rs ${discountTotalNum.toFixed(2)}</td>
           </tr>
         `
             : ''
         }
         <tr class="grand-total">
           <td>GRAND TOTAL:</td>
-          <td class="text-right font-mono">Rs ${invoice.grandTotal.toFixed(2)}</td>
+          <td class="text-right font-mono">Rs ${grandTotalNum.toFixed(2)}</td>
         </tr>
       </table>
 

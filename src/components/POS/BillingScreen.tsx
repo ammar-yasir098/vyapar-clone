@@ -36,7 +36,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
 }) => {
   const [cartItems, setCartItems] = useState<InvoiceItem[]>([]);
   const [selectedParty, setSelectedParty] = useState<Party | null>(
-    parties.find(p => p.name.includes('Walk-in')) || parties[0] || null
+    parties.find(p => (p?.name || '').includes('Walk-in')) || parties[0] || null
   );
   const [searchQuery, setSearchQuery] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
@@ -72,11 +72,16 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [cartItems, selectedParty, discountTotal, receivedAmount, paymentMethod]);
 
-  const filteredItems = items.filter(item =>
-    item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.barcode.includes(searchQuery) ||
-    item.skuCode.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredItems = items.filter(item => {
+    const name = item?.name || '';
+    const barcode = item?.barcode || '';
+    const sku = item?.skuCode || '';
+    return (
+      name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      barcode.includes(searchQuery) ||
+      sku.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  });
 
   const handleAddItemToCart = (item: Item) => {
     const existingIndex = cartItems.findIndex(i => i.itemId === item.id);

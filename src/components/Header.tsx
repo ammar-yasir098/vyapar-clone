@@ -55,25 +55,24 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Left: Brand / Store Name & Search Bar */}
       <div className="flex items-center gap-5">
         {/* Official Vyapar Gradient Logo Badge */}
-        <div 
-          className="flex items-center gap-2.5 cursor-pointer group" 
-          onClick={() => onNavigateToTab('home')}
+        {/* Business Selector Dropdown */}
+        <button
+          onClick={() => onNavigateToTab('company')}
+          className="flex items-center gap-2 px-2.5 py-1 rounded-lg hover:bg-slate-100 transition cursor-pointer text-left"
         >
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-600 to-amber-500 flex items-center justify-center text-white font-extrabold text-base shadow-sm shadow-red-500/20 group-hover:scale-105 transition-transform">
-            V
+          <div className="w-8 h-8 rounded-lg bg-red-600 text-white font-extrabold flex items-center justify-center text-sm shadow-sm">
+            {business.name ? business.name.charAt(0).toUpperCase() : 'V'}
           </div>
           <div>
-            <div className="flex items-center gap-1">
-              <span className="font-extrabold text-xs sm:text-sm text-slate-900 tracking-tight leading-none">
-                {business.name}
-              </span>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-600 transition-colors" />
+            <div className="flex items-center gap-1 font-bold text-slate-900 text-sm">
+              <span className="max-w-[180px] truncate">{business.name}</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
             </div>
-            <span className="text-[10px] text-slate-600 font-bold tracking-wide mt-0.5 block">
-              {business.gstin}
-            </span>
+            <div className="text-[10px] font-semibold text-slate-700 font-mono">
+              {business.gstin || 'NTN: 7654321-0'}
+            </div>
           </div>
-        </div>
+        </button>
 
         {/* Vyapar Search "Open Anything (Ctrl+F)" */}
         <div 
@@ -121,7 +120,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="flex items-center gap-3">
         <div className="hidden xl:flex items-center gap-1.5 text-xs text-slate-700 font-semibold bg-slate-50 px-3 py-1 rounded-full border border-slate-200">
           <PhoneCall className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Support: <strong className="text-slate-900 font-bold">+92 300 1234567</strong></span>
+          <span>Support: <strong className="text-slate-900 font-bold">+92 300 xxxxxxx</strong></span>
         </div>
 
         {/* Cloud Sync Status */}

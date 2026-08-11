@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShoppingCart, Plus, Trash2, CheckCircle2, User, FileText, ArrowUpRight } from 'lucide-react';
 import { Item, Party, InvoiceItem, PaymentMethod, BusinessDetails } from '../../types';
 import { db } from '../../db';
@@ -25,6 +25,12 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
   const [selectedItemId, setSelectedItemId] = useState<number | ''>('');
   const [quantity, setQuantity] = useState<number>(1);
   const [unitRate, setUnitRate] = useState<number>(0);
+
+  useEffect(() => {
+    if (!selectedSupplier && suppliers.length > 0) {
+      setSelectedSupplier(suppliers[0]);
+    }
+  }, [suppliers]);
 
   const handleAddItem = () => {
     if (!selectedItemId) return;
@@ -79,8 +85,8 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
     }
 
     // 2. Update Supplier Accounts Payable Ledger Balance
-    if (selectedSupplier.id) {
-      const newBal = selectedSupplier.currentBalance + totalAmount;
+    if (selectedSupplier?.id) {
+      const newBal = (selectedSupplier.currentBalance || 0) + totalAmount;
       await db.parties.update(selectedSupplier.id, {
         currentBalance: newBal
       });
@@ -92,15 +98,16 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
     const apAcc = accounts.find(a => a.accountCode === '2010') || accounts[0];
 
     const count = await db.journalEntries.count();
+    const suppName = selectedSupplier?.name || 'Supplier';
     await db.journalEntries.add({
       tenantId: 'default-tenant',
       entryNumber: `JE-2026-${(count + 1).toString().padStart(4, '0')}`,
       referenceId: billNumber,
       transactionDate: billDate,
-      description: `Purchase Inward Bill ${billNumber} from ${selectedSupplier.name}`,
+      description: `Purchase Inward Bill ${billNumber} from ${suppName}`,
       lines: [
-        { accountId: invAcc.id!, accountCode: invAcc.accountCode, accountName: invAcc.accountName, debit: totalAmount, credit: 0 },
-        { accountId: apAcc.id!, accountCode: apAcc.accountCode, accountName: `Accounts Payable (${selectedSupplier.name})`, debit: 0, credit: totalAmount }
+        { accountId: invAcc?.id || 1, accountCode: invAcc?.accountCode || '1040', accountName: invAcc?.accountName || 'Inventory Asset', debit: totalAmount, credit: 0 },
+        { accountId: apAcc?.id || 2, accountCode: apAcc?.accountCode || '2010', accountName: `Accounts Payable (${suppName})`, debit: 0, credit: totalAmount }
       ],
       totalDebit: totalAmount,
       totalCredit: totalAmount,
@@ -108,13 +115,15 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
     });
 
     // 4. Send to PostgreSQL backend REST API
-    await createServerPurchase({
-      billNumber,
-      billDate,
-      supplierId: selectedSupplier.id,
-      supplierName: selectedSupplier.name,
-      items: purchaseItems
-    });
+    if (selectedSupplier) {
+      await createServerPurchase({
+        billNumber,
+        billDate,
+        supplierId: selectedSupplier.id,
+        supplierName: selectedSupplier.name,
+        items: purchaseItems
+      });
+    }
 
     alert(`Purchase Inward Bill ${billNumber} saved successfully! Inventory stock increased.`);
     setPurchaseItems([]);
@@ -260,8 +269,8 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
                       <tr key={idx}>
                         <td className="font-bold text-slate-800 text-xs">{item.itemName}</td>
                         <td className="font-mono text-xs text-slate-700">{item.quantity} {item.unitType}</td>
-                        <td className="font-mono text-xs text-slate-700">₹{item.unitPrice.toFixed(2)}</td>
-                        <td className="font-mono text-xs font-black text-blue-600 text-right">₹{item.totalAmount.toFixed(2)}</td>
+                        <td className="font-mono text-xs text-slate-700">₹{Number(item.unitPrice || 0).toFixed(2)}</td>
+                        <td className="font-mono text-xs font-black text-blue-600 text-right">₹{Number(item.totalAmount || 0).toFixed(2)}</td>
                         <td className="text-center">
                           <button
                             onClick={() => setPurchaseItems(prev => prev.filter((_, i) => i !== idx))}
@@ -297,7 +306,7 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
               </div>
               <div className="flex justify-between text-sm font-black text-blue-600 pt-2 border-t border-slate-200">
                 <span>TOTAL COST:</span>
-                <span>₹{totalBillAmount.toFixed(2)}</span>
+                <span>₹{Number(totalBillAmount || 0).toFixed(2)}</span>
               </div>
             </div>
           </div>

@@ -30,7 +30,7 @@ async function bootstrapPostgresDatabase() {
     port,
     user,
     password,
-    database: 'postgres', // Default administrative database that always exists in pgAdmin 4
+    database: 'postgres',
     connectionTimeoutMillis: 3000
   });
 
@@ -53,7 +53,6 @@ async function bootstrapPostgresDatabase() {
 
     await rootClient.end();
 
-    // Now connect pool to vyapar_db
     const client = await pool.connect();
     console.log(`✅ Connected to PostgreSQL database '${databaseName}' at ${host}:${port}`);
     isPostgresConnected = true;
@@ -85,6 +84,23 @@ export async function query(text: string, params?: any[]) {
  */
 async function initPostgresSchema() {
   const schemaSql = `
+    CREATE TABLE IF NOT EXISTS company_profile (
+      id SERIAL PRIMARY KEY,
+      tenant_id VARCHAR(64) UNIQUE NOT NULL DEFAULT 'default-tenant',
+      name VARCHAR(255) NOT NULL DEFAULT 'SuperMarket Retail & Traders',
+      phone VARCHAR(64) DEFAULT '+92 300 xxxxxxx',
+      email VARCHAR(128) DEFAULT 'contact@supermarket.com',
+      address TEXT DEFAULT 'Shop #12, Commercial Market, Main Boulevard, Gulberg, Lahore',
+      gstin VARCHAR(64) DEFAULT 'NTN: 7654321-0',
+      business_type VARCHAR(64) DEFAULT 'Retail',
+      business_category VARCHAR(64) DEFAULT 'Supermarket & FMCG',
+      pincode VARCHAR(32) DEFAULT '54000',
+      logo_url TEXT,
+      signature_url TEXT,
+      books_begin_date DATE DEFAULT CURRENT_DATE,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS items (
       id SERIAL PRIMARY KEY,
       tenant_id VARCHAR(64) NOT NULL DEFAULT 'default-tenant',
@@ -168,7 +184,7 @@ async function initPostgresSchema() {
 
   try {
     await pool.query(schemaSql);
-    console.log('✅ PostgreSQL Schema tables (items, parties, invoices, invoice_items, journal_entries) ready for pgAdmin 4.');
+    console.log('✅ PostgreSQL Schema tables (company_profile, items, parties, invoices, invoice_items, journal_entries) ready.');
   } catch (err) {
     console.error('Error initializing PostgreSQL schema:', err);
   }

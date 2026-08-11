@@ -198,17 +198,17 @@ export const PrinterModal: React.FC<PrinterModalProps> = ({ business }) => {
                   <div>
                     {item.itemName} x{item.quantity}
                   </div>
-                  <div className="font-bold">₹{item.totalAmount.toFixed(2)}</div>
+                  <div className="font-bold">₹{Number(item.totalAmount || 0).toFixed(2)}</div>
                 </div>
               ))}
             </div>
 
             <div className="border-t border-dashed border-gray-800 my-2"></div>
             <div className="text-[10px] space-y-0.5 text-right font-mono">
-              <div>Subtotal: ₹{sampleInvoice.subtotal.toFixed(2)}</div>
-              <div>Tax (GST): ₹{sampleInvoice.taxTotal.toFixed(2)}</div>
+              <div>Subtotal: ₹{Number(sampleInvoice.subtotal || 0).toFixed(2)}</div>
+              <div>Tax (GST): ₹{Number(sampleInvoice.taxTotal || 0).toFixed(2)}</div>
               <div className="text-xs font-bold text-black border-t border-gray-800 pt-0.5">
-                TOTAL: ₹{sampleInvoice.grandTotal.toFixed(2)}
+                TOTAL: ₹{Number(sampleInvoice.grandTotal || 0).toFixed(2)}
               </div>
             </div>
 

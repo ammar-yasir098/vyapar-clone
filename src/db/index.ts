@@ -30,7 +30,7 @@ export const db = new VyaparDatabase();
 export const DEFAULT_BUSINESS: BusinessDetails = {
   name: 'SuperMarket Retail & Traders',
   gstin: 'NTN: 7654321-0',
-  phone: '+92 300 1234567',
+  phone: '+92 300 xxxxxxx',
   address: 'Shop #12, Commercial Market, Main Boulevard, Gulberg, Lahore',
   state: 'Punjab, Pakistan',
   tagline: 'Quality Products at Everyday Low Prices',

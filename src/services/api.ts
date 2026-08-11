@@ -1,5 +1,30 @@
 const API_BASE_URL = 'http://localhost:5000/api/v1';
 
+// COMPANY PROFILE
+export async function fetchServerCompanyProfile() {
+  try {
+    const res = await fetch(`${API_BASE_URL}/company`);
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.data || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+export async function saveServerCompanyProfile(companyData: any) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/company`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(companyData)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 // ITEMS
 export async function fetchServerItems() {
   try {
@@ -79,6 +104,15 @@ export async function recordServerPartyPayment(id: number, amount: number, remar
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ amount, remarks, partyType })
     });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function deleteServerParty(id: number) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/parties/${id}`, { method: 'DELETE' });
     return await res.json();
   } catch (err: any) {
     return { success: false, error: err.message };

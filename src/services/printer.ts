@@ -69,19 +69,26 @@ export function buildThermalReceiptBytes(
   pushString(lineSeparator());
 
   // 6. Items List
-  invoice.items.forEach(item => {
+  const itemsList = Array.isArray(invoice.items) ? invoice.items : [];
+  itemsList.forEach(item => {
+    const itemNameStr = item.itemName || 'Item';
+    const quantityNum = Number(item.quantity || 0);
+    const unitPriceNum = Number(item.unitPrice || 0);
+    const taxAmountNum = Number(item.taxAmount || 0);
+    const totalAmountNum = Number(item.totalAmount || 0);
+
     if (options.paperWidth === '80mm') {
-      const name = item.itemName.length > 22 ? item.itemName.substring(0, 20) + '..' : item.itemName.padEnd(22);
-      const qty = item.quantity.toString().padStart(5);
-      const rate = item.unitPrice.toFixed(2).padStart(7);
-      const tax = item.taxAmount.toFixed(2).padStart(6);
-      const total = item.totalAmount.toFixed(2).padStart(8);
+      const name = itemNameStr.length > 22 ? itemNameStr.substring(0, 20) + '..' : itemNameStr.padEnd(22);
+      const qty = quantityNum.toString().padStart(5);
+      const rate = unitPriceNum.toFixed(2).padStart(7);
+      const tax = taxAmountNum.toFixed(2).padStart(6);
+      const total = totalAmountNum.toFixed(2).padStart(8);
       pushString(`${name} ${qty} ${rate} ${tax} ${total}\n`);
     } else {
-      const name = item.itemName.length > 15 ? item.itemName.substring(0, 13) + '..' : item.itemName.padEnd(15);
-      const qty = item.quantity.toString().padStart(3);
-      const price = item.unitPrice.toFixed(0).padStart(5);
-      const total = item.totalAmount.toFixed(0).padStart(6);
+      const name = itemNameStr.length > 15 ? itemNameStr.substring(0, 13) + '..' : itemNameStr.padEnd(15);
+      const qty = quantityNum.toString().padStart(3);
+      const price = unitPriceNum.toFixed(0).padStart(5);
+      const total = totalAmountNum.toFixed(0).padStart(6);
       pushString(`${name} ${qty} ${price} ${total}\n`);
     }
   });
@@ -89,23 +96,29 @@ export function buildThermalReceiptBytes(
   pushString(lineSeparator());
 
   // 7. Totals Summary
+  const subtotalNum = Number(invoice.subtotal || 0);
+  const taxTotalNum = Number(invoice.taxTotal || 0);
+  const discountTotalNum = Number(invoice.discountTotal || 0);
+  const grandTotalNum = Number(invoice.grandTotal || 0);
+  const dueAmountNum = Number(invoice.dueAmount || 0);
+
   bytes.push(ESC, 0x61, 0x02); // Align Right
-  pushString(`Subtotal: Rs ${invoice.subtotal.toFixed(2)}\n`);
-  if (invoice.taxTotal > 0) {
-    pushString(`Sales Tax: Rs ${invoice.taxTotal.toFixed(2)}\n`);
+  pushString(`Subtotal: Rs ${subtotalNum.toFixed(2)}\n`);
+  if (taxTotalNum > 0) {
+    pushString(`Sales Tax: Rs ${taxTotalNum.toFixed(2)}\n`);
   }
-  if (invoice.discountTotal > 0) {
-    pushString(`Discount: -Rs ${invoice.discountTotal.toFixed(2)}\n`);
+  if (discountTotalNum > 0) {
+    pushString(`Discount: -Rs ${discountTotalNum.toFixed(2)}\n`);
   }
 
   // Grand Total Bold
   bytes.push(ESC, 0x21, 0x20); // Bold enlarged
-  pushString(`GRAND TOTAL: Rs ${invoice.grandTotal.toFixed(2)}\n`);
+  pushString(`GRAND TOTAL: Rs ${grandTotalNum.toFixed(2)}\n`);
 
   bytes.push(ESC, 0x21, 0x00); // Reset font
-  pushString(`Payment Mode: ${invoice.paymentMethod} (${invoice.paymentStatus})\n`);
-  if (invoice.dueAmount > 0) {
-    pushString(`Balance Due: Rs ${invoice.dueAmount.toFixed(2)}\n`);
+  pushString(`Payment Mode: ${invoice.paymentMethod || 'CASH'} (${invoice.paymentStatus || 'PAID'})\n`);
+  if (dueAmountNum > 0) {
+    pushString(`Balance Due: Rs ${dueAmountNum.toFixed(2)}\n`);
   }
 
   // 8. Footer
@@ -135,6 +148,11 @@ export function triggerThermalPrint(invoice: Invoice, business: BusinessDetails,
   
   const printWindow = window.open('', '_blank', 'width=400,height=600');
   if (!printWindow) return;
+
+  const subtotalNum = Number(invoice.subtotal || 0);
+  const taxTotalNum = Number(invoice.taxTotal || 0);
+  const discountTotalNum = Number(invoice.discountTotal || 0);
+  const grandTotalNum = Number(invoice.grandTotal || 0);
 
   const html = `
     <!DOCTYPE html>
@@ -186,23 +204,23 @@ export function triggerThermalPrint(invoice: Invoice, business: BusinessDetails,
           </tr>
         </thead>
         <tbody>
-          ${invoice.items.map(i => `
+          ${(Array.isArray(invoice.items) ? invoice.items : []).map(i => `
             <tr>
-              <td>${i.itemName}</td>
-              <td class="text-right">${i.quantity}</td>
-              <td class="text-right">Rs ${i.unitPrice.toFixed(0)}</td>
-              <td class="text-right">Rs ${i.totalAmount.toFixed(2)}</td>
+              <td>${i.itemName || 'Item'}</td>
+              <td class="text-right">${Number(i.quantity || 0)}</td>
+              <td class="text-right">Rs ${Number(i.unitPrice || 0).toFixed(0)}</td>
+              <td class="text-right">Rs ${Number(i.totalAmount || 0).toFixed(2)}</td>
             </tr>
           `).join('')}
         </tbody>
       </table>
 
       <div class="divider"></div>
-      <div class="text-right">Subtotal: Rs ${invoice.subtotal.toFixed(2)}</div>
-      ${invoice.taxTotal > 0 ? `<div class="text-right">Sales Tax: Rs ${invoice.taxTotal.toFixed(2)}</div>` : ''}
-      ${invoice.discountTotal > 0 ? `<div class="text-right">Discount: -Rs ${invoice.discountTotal.toFixed(2)}</div>` : ''}
-      <div class="text-right bold title" style="margin-top: 4px;">TOTAL: Rs ${invoice.grandTotal.toFixed(2)}</div>
-      <div class="text-right">Paid via ${invoice.paymentMethod} (${invoice.paymentStatus})</div>
+      <div class="text-right">Subtotal: Rs ${subtotalNum.toFixed(2)}</div>
+      ${taxTotalNum > 0 ? `<div class="text-right">Sales Tax: Rs ${taxTotalNum.toFixed(2)}</div>` : ''}
+      ${discountTotalNum > 0 ? `<div class="text-right">Discount: -Rs ${discountTotalNum.toFixed(2)}</div>` : ''}
+      <div class="text-right bold title" style="margin-top: 4px;">TOTAL: Rs ${grandTotalNum.toFixed(2)}</div>
+      <div class="text-right">Paid via ${invoice.paymentMethod || 'CASH'} (${invoice.paymentStatus || 'PAID'})</div>
 
       <div class="divider"></div>
       <div class="text-center" style="margin-top: 10px;">

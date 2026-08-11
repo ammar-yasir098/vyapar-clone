@@ -36,15 +36,28 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
 
   // Search Results
   const matchedItems = q
-    ? items.filter(i => i.name.toLowerCase().includes(q) || i.barcode.includes(q) || i.skuCode.toLowerCase().includes(q)).slice(0, 4)
+    ? items.filter(i => {
+        const name = i?.name || '';
+        const barcode = i?.barcode || '';
+        const sku = i?.skuCode || '';
+        return name.toLowerCase().includes(q) || barcode.includes(q) || sku.toLowerCase().includes(q);
+      }).slice(0, 4)
     : [];
 
   const matchedParties = q
-    ? parties.filter(p => p.name.toLowerCase().includes(q) || p.phone.includes(q)).slice(0, 4)
+    ? parties.filter(p => {
+        const name = p?.name || '';
+        const phone = p?.phone || '';
+        return name.toLowerCase().includes(q) || phone.includes(q);
+      }).slice(0, 4)
     : [];
 
   const matchedInvoices = q
-    ? invoices.filter(inv => inv.invoiceNumber.toLowerCase().includes(q) || inv.partyName.toLowerCase().includes(q)).slice(0, 4)
+    ? invoices.filter(inv => {
+        const invNum = inv?.invoiceNumber || '';
+        const partyName = inv?.partyName || '';
+        return invNum.toLowerCase().includes(q) || partyName.toLowerCase().includes(q);
+      }).slice(0, 4)
     : [];
 
   const pages = [

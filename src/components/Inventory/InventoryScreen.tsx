@@ -35,11 +35,14 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items, onItemU
   });
 
   const filteredItems = items.filter(item => {
+    const name = item?.name || '';
+    const sku = item?.skuCode || '';
+    const barcode = item?.barcode || '';
     const matchesSearch =
-      item.name.toLowerCase().includes(search.toLowerCase()) ||
-      item.skuCode.toLowerCase().includes(search.toLowerCase()) ||
-      item.barcode.includes(search);
-    const matchesLowStock = filterLowStock ? item.currentStock <= item.minStockAlert : true;
+      name.toLowerCase().includes(search.toLowerCase()) ||
+      sku.toLowerCase().includes(search.toLowerCase()) ||
+      barcode.includes(search);
+    const matchesLowStock = filterLowStock ? (item?.currentStock ?? 0) <= (item?.minStockAlert ?? 0) : true;
     return matchesSearch && matchesLowStock;
   });
 
@@ -124,7 +127,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items, onItemU
           <p className="text-xs text-slate-500 font-semibold">
             Total Products: <strong className="text-slate-800">{items.length}</strong> | Low Stock Alerts:{' '}
             <strong className="text-amber-600 font-bold">
-              {items.filter(i => i.currentStock <= i.minStockAlert).length}
+              {items.filter(i => (i?.currentStock ?? 0) <= (i?.minStockAlert ?? 0)).length}
             </strong>
           </p>
         </div>
@@ -182,20 +185,22 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items, onItemU
             </thead>
             <tbody>
               {filteredItems.map(item => {
-                const isLowStock = item.currentStock <= item.minStockAlert;
+                const stock = item?.currentStock ?? 0;
+                const minAlert = item?.minStockAlert ?? 0;
+                const isLowStock = stock <= minAlert;
                 return (
                   <tr key={item.id}>
                     <td>
-                      <div className="font-bold text-slate-900 text-xs">{item.name}</div>
+                      <div className="font-bold text-slate-900 text-xs">{item.name || 'Unnamed Product'}</div>
                     </td>
                     <td className="font-mono text-xs text-slate-500">
-                      <div>{item.skuCode}</div>
-                      <div className="text-[10px] text-slate-400">{item.barcode}</div>
+                      <div>{item.skuCode || '-'}</div>
+                      <div className="text-[10px] text-slate-400">{item.barcode || '-'}</div>
                     </td>
-                    <td className="font-mono text-xs text-slate-500">{item.hsnSacCode}</td>
-                    <td className="font-mono text-xs text-slate-700">Rs {item.purchasePrice.toFixed(2)}</td>
+                    <td className="font-mono text-xs text-slate-500">{item.hsnSacCode || '-'}</td>
+                    <td className="font-mono text-xs text-slate-700">Rs {(item.purchasePrice || 0).toFixed(2)}</td>
                     <td className="font-mono text-xs font-black text-emerald-600">
-                      Rs {item.salesPrice.toFixed(2)}
+                      Rs {(item.salesPrice || 0).toFixed(2)}
                     </td>
                     <td>
                       <div className="flex items-center gap-1.5">
@@ -204,7 +209,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items, onItemU
                             isLowStock ? 'text-amber-600' : 'text-slate-800'
                           }`}
                         >
-                          {item.currentStock} {item.unitType}
+                          {stock} {item.unitType || 'PCS'}
                         </span>
                         {isLowStock && (
                           <span className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0.2 rounded border border-amber-300 font-bold">
@@ -214,7 +219,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items, onItemU
                       </div>
                     </td>
                     <td className="font-mono text-xs text-slate-500">
-                      {item.cgstRate + item.sgstRate}%
+                      {(item.cgstRate || 0) + (item.sgstRate || 0)}%
                     </td>
                     <td className="text-center">
                       <div className="flex items-center justify-center gap-2">

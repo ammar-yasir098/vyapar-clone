@@ -1,8 +1,20 @@
 import React, { useState } from 'react';
-import { Users, Plus, Search, Phone, ArrowDownLeft, ArrowUpRight, DollarSign, CheckCircle2 } from 'lucide-react';
+import { 
+  Users, 
+  Plus, 
+  Search, 
+  Phone, 
+  ArrowDownLeft, 
+  ArrowUpRight, 
+  DollarSign, 
+  Trash2, 
+  FileText, 
+  Printer, 
+  MapPin 
+} from 'lucide-react';
 import { Party, PartyType, BalanceType } from '../../types';
 import { db } from '../../db';
-import { createServerParty, recordServerPartyPayment } from '../../services/api';
+import { createServerParty, recordServerPartyPayment, deleteServerParty } from '../../services/api';
 
 interface PartiesScreenProps {
   parties: Party[];
@@ -11,8 +23,10 @@ interface PartiesScreenProps {
 
 export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUpdated }) => {
   const [search, setSearch] = useState('');
+  const [filterTab, setFilterTab] = useState<'ALL' | 'CUSTOMER' | 'SUPPLIER'>('ALL');
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedPartyForPayment, setSelectedPartyForPayment] = useState<Party | null>(null);
+  const [selectedPartyForStatement, setSelectedPartyForStatement] = useState<Party | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentRemarks, setPaymentRemarks] = useState('');
 
@@ -26,11 +40,17 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUp
     address: ''
   });
 
-  const filteredParties = parties.filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    p.phone.includes(search) ||
-    (p.gstin && p.gstin.toLowerCase().includes(search.toLowerCase()))
-  );
+  const filteredParties = parties.filter(p => {
+    const matchesTab =
+      filterTab === 'ALL' ||
+      p.type === filterTab ||
+      p.type === 'BOTH';
+    const matchesSearch =
+      (p.name || '').toLowerCase().includes(search.toLowerCase()) ||
+      (p.phone || '').includes(search) ||
+      (p.gstin && p.gstin.toLowerCase().includes(search.toLowerCase()));
+    return matchesTab && matchesSearch;
+  });
 
   const handleCreateParty = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,7 +89,8 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUp
     if (!selectedPartyForPayment || paymentAmount <= 0) return;
 
     const party = selectedPartyForPayment;
-    const newBal = Math.max(0, party.currentBalance - paymentAmount);
+    const curBal = Number(party.currentBalance || 0);
+    const newBal = Math.max(0, curBal - paymentAmount);
     
     // Update Party Current Balance in Dexie
     if (party.id) {
@@ -101,16 +122,25 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUp
     onPartyUpdated();
   };
 
+  const handleDeleteParty = async (id?: number) => {
+    if (!id) return;
+    if (confirm('Are you sure you want to delete this party account from PostgreSQL database?')) {
+      await db.parties.delete(id);
+      await deleteServerParty(id);
+      onPartyUpdated();
+    }
+  };
+
   const totalReceivable = parties
-    .filter(p => p.currentBalance > 0 && p.type === 'CUSTOMER')
-    .reduce((sum, p) => sum + p.currentBalance, 0);
+    .filter(p => Number(p.currentBalance || 0) > 0 && p.type === 'CUSTOMER')
+    .reduce((sum, p) => sum + Number(p.currentBalance || 0), 0);
 
   const totalPayable = parties
-    .filter(p => p.currentBalance > 0 && p.type === 'SUPPLIER')
-    .reduce((sum, p) => sum + p.currentBalance, 0);
+    .filter(p => Number(p.currentBalance || 0) > 0 && p.type === 'SUPPLIER')
+    .reduce((sum, p) => sum + Number(p.currentBalance || 0), 0);
 
   return (
-    <div className="flex-1 flex flex-col p-6 bg-[#f3f4f6] overflow-hidden gap-5 select-none">
+    <div className="flex-1 flex flex-col p-6 bg-[#f3f4f6] overflow-hidden gap-4 select-none">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -138,7 +168,7 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUp
               <ArrowDownLeft className="w-5 h-5 stroke-[2.5]" />
             </div>
             <div>
-              <div className="text-xs text-slate-500 font-bold">TOTAL RECEIVABLE</div>
+              <div className="text-xs text-slate-500 font-bold">TOTAL RECEIVABLE (FROM CUSTOMERS)</div>
               <div className="text-xl font-mono font-black text-emerald-600">
                 Rs {totalReceivable.toFixed(2)}
               </div>
@@ -152,7 +182,7 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUp
               <ArrowUpRight className="w-5 h-5 stroke-[2.5]" />
             </div>
             <div>
-              <div className="text-xs text-slate-500 font-bold">TOTAL PAYABLE</div>
+              <div className="text-xs text-slate-500 font-bold">TOTAL PAYABLE (TO SUPPLIERS)</div>
               <div className="text-xl font-mono font-black text-rose-600">
                 Rs {totalPayable.toFixed(2)}
               </div>
@@ -161,16 +191,47 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUp
         </div>
       </div>
 
-      {/* Search Input */}
-      <div className="relative">
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search party by Name, Phone Number, NTN..."
-          className="w-full h-10 pl-10 pr-4 bg-white border border-slate-200 rounded-xl text-slate-800 text-xs font-medium outline-none focus:border-blue-500 shadow-xs"
-        />
-        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+      {/* Filter Tabs & Search Bar */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+        {/* Filter Pills */}
+        <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-xs">
+          <button
+            onClick={() => setFilterTab('ALL')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold cursor-pointer transition ${
+              filterTab === 'ALL' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            All Parties ({parties.length})
+          </button>
+          <button
+            onClick={() => setFilterTab('CUSTOMER')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold cursor-pointer transition ${
+              filterTab === 'CUSTOMER' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            Customers ({parties.filter(p => p.type === 'CUSTOMER').length})
+          </button>
+          <button
+            onClick={() => setFilterTab('SUPPLIER')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold cursor-pointer transition ${
+              filterTab === 'SUPPLIER' ? 'bg-purple-600 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            Suppliers ({parties.filter(p => p.type === 'SUPPLIER').length})
+          </button>
+        </div>
+
+        {/* Search Input */}
+        <div className="relative w-full sm:w-72">
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search party by Name, Phone, NTN..."
+            className="w-full h-9 pl-9 pr-4 bg-white border border-slate-200 rounded-xl text-slate-800 text-xs font-medium outline-none focus:border-blue-500 shadow-xs"
+          />
+          <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
+        </div>
       </div>
 
       {/* Parties Table */}
@@ -185,57 +246,87 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUp
                 <th>NTN / CNIC</th>
                 <th>Address</th>
                 <th className="text-right">Ledger Balance (Rs)</th>
-                <th className="text-center">Action</th>
+                <th className="text-center">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filteredParties.map(party => (
-                <tr key={party.id}>
-                  <td>
-                    <div className="font-bold text-slate-900 text-xs">{party.name}</div>
-                  </td>
-                  <td className="font-mono text-xs text-slate-600">
-                    <div className="flex items-center gap-1">
-                      <Phone className="w-3 h-3 text-slate-400" />
-                      <span>{party.phone}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                        party.type === 'CUSTOMER'
-                          ? 'bg-blue-50 text-blue-700 border-blue-200'
-                          : 'bg-purple-50 text-purple-700 border-purple-200'
-                      }`}
-                    >
-                      {party.type}
-                    </span>
-                  </td>
-                  <td className="font-mono text-xs text-slate-500">{party.gstin || '-'}</td>
-                  <td className="text-xs text-slate-500">{party.address || '-'}</td>
-                  <td className="text-right">
-                    <span
-                      className={`font-mono font-black text-xs ${
-                        party.currentBalance > 0
-                          ? party.type === 'CUSTOMER'
-                            ? 'text-emerald-600'
-                            : 'text-rose-600'
-                          : 'text-slate-500'
-                      }`}
-                    >
-                      Rs {party.currentBalance.toFixed(2)}
-                    </span>
-                  </td>
-                  <td className="text-center">
-                    <button
-                      onClick={() => setSelectedPartyForPayment(party)}
-                      className="btn-vyapar-outline text-[11px] font-bold py-1 px-2.5 cursor-pointer"
-                    >
-                      {party.type === 'CUSTOMER' ? 'Receive Cash' : 'Pay Cash'}
-                    </button>
+              {filteredParties.map(party => {
+                const bal = Number(party.currentBalance || 0);
+                return (
+                  <tr key={party.id}>
+                    <td>
+                      <div className="font-bold text-slate-900 text-xs">{party.name}</div>
+                    </td>
+                    <td className="font-mono text-xs text-slate-600">
+                      <div className="flex items-center gap-1">
+                        <Phone className="w-3 h-3 text-slate-400" />
+                        <span>{party.phone}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                          party.type === 'CUSTOMER'
+                            ? 'bg-blue-50 text-blue-700 border-blue-200'
+                            : 'bg-purple-50 text-purple-700 border-purple-200'
+                        }`}
+                      >
+                        {party.type}
+                      </span>
+                    </td>
+                    <td className="font-mono text-xs text-slate-500">{party.gstin || '-'}</td>
+                    <td className="text-xs text-slate-500">{party.address || '-'}</td>
+                    <td className="text-right">
+                      <span
+                        className={`font-mono font-black text-xs ${
+                          bal > 0
+                            ? party.type === 'CUSTOMER'
+                              ? 'text-emerald-600'
+                              : 'text-rose-600'
+                            : 'text-slate-500'
+                        }`}
+                      >
+                        Rs {bal.toFixed(2)}
+                      </span>
+                    </td>
+                    <td className="text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => setSelectedPartyForPayment(party)}
+                          className="btn-vyapar-outline text-[11px] font-bold py-1 px-2 cursor-pointer"
+                          title="Record Payment"
+                        >
+                          {party.type === 'CUSTOMER' ? 'Receive Cash' : 'Pay Cash'}
+                        </button>
+
+                        <button
+                          onClick={() => setSelectedPartyForStatement(party)}
+                          className="p-1 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition cursor-pointer"
+                          title="View Party Statement"
+                        >
+                          <FileText className="w-4 h-4 text-blue-600" />
+                        </button>
+
+                        <button
+                          onClick={() => handleDeleteParty(party.id)}
+                          className="p-1 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition cursor-pointer"
+                          title="Delete Party Account"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {filteredParties.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="text-center py-8 text-slate-400 text-xs font-semibold">
+                    No party accounts found matching your search. Click "+ Add New Party" to create one.
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
@@ -254,7 +345,7 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUp
               <div className="bg-slate-50 p-3 rounded-xl text-xs font-mono">
                 <div className="flex justify-between text-slate-600">
                   <span>Current Dues:</span>
-                  <span className="font-bold text-emerald-600">Rs {selectedPartyForPayment.currentBalance.toFixed(2)}</span>
+                  <span className="font-bold text-emerald-600">Rs {Number(selectedPartyForPayment.currentBalance || 0).toFixed(2)}</span>
                 </div>
               </div>
 
@@ -284,7 +375,7 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUp
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
               <button
                 onClick={() => setSelectedPartyForPayment(null)}
-                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600"
+                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200"
               >
                 Cancel
               </button>
@@ -293,6 +384,60 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUp
                 className="btn-vyapar-blue text-xs font-bold"
               >
                 Save Payment Entry
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* View Party Ledger Statement Modal */}
+      {selectedPartyForStatement && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-2xl p-6 shadow-2xl border border-slate-200 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  Party Statement: {selectedPartyForStatement.name}
+                </h3>
+                <p className="text-xs text-slate-500">Phone: {selectedPartyForStatement.phone} | NTN: {selectedPartyForStatement.gstin || 'N/A'}</p>
+              </div>
+              <button
+                onClick={() => window.print()}
+                className="btn-vyapar-outline text-xs font-bold flex items-center gap-1 cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Print Statement</span>
+              </button>
+            </div>
+
+            {/* Account Overview Box */}
+            <div className="grid grid-cols-3 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+              <div>
+                <div className="text-[10px] font-bold text-slate-500">PARTY TYPE</div>
+                <div className="text-xs font-extrabold text-slate-800">{selectedPartyForStatement.type}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold text-slate-500">OPENING BALANCE</div>
+                <div className="text-xs font-mono font-bold text-slate-700">Rs {Number(selectedPartyForStatement.openingBalance || 0).toFixed(2)}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold text-slate-500">NET OUTSTANDING DUES</div>
+                <div className="text-sm font-mono font-black text-emerald-600">Rs {Number(selectedPartyForStatement.currentBalance || 0).toFixed(2)}</div>
+              </div>
+            </div>
+
+            {/* Address */}
+            <div className="text-xs text-slate-600 flex items-center gap-1.5">
+              <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
+              <span>{selectedPartyForStatement.address || 'No billing address provided.'}</span>
+            </div>
+
+            <div className="flex justify-end pt-4 border-t border-slate-200">
+              <button
+                onClick={() => setSelectedPartyForStatement(null)}
+                className="px-5 py-2 rounded-full bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition cursor-pointer"
+              >
+                Close Statement
               </button>
             </div>
           </div>

@@ -14,14 +14,41 @@ import { GSTComplianceScreen } from './components/GST/GSTComplianceScreen';
 import { ReportsScreen } from './components/Reports/ReportsScreen';
 import { PrinterModal } from './components/Printer/PrinterModal';
 import { CommandPaletteModal } from './components/CommandPalette/CommandPaletteModal';
-import { Invoice } from './types';
+import { EditProfileScreen } from './components/Company/EditProfileScreen';
+import { Invoice, BusinessDetails } from './types';
 import { triggerThermalPrint } from './services/printer';
-import { fetchServerItems, fetchServerParties, fetchServerInvoices } from './services/api';
+import { fetchServerItems, fetchServerParties, fetchServerInvoices, fetchServerCompanyProfile } from './services/api';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState('home');
+  // Read activeTab initial state from hash or localStorage so refresh remembers current screen
+  const getInitialTab = () => {
+    const hash = window.location.hash.replace('#', '');
+    if (hash) return hash;
+    return localStorage.getItem('vyapar_active_tab') || 'home';
+  };
+
+  const [activeTab, setActiveTabState] = useState<string>(getInitialTab());
   const [isDbLoaded, setIsDbLoaded] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [businessDetails, setBusinessDetails] = useState<BusinessDetails>(DEFAULT_BUSINESS);
+
+  const setActiveTab = (tab: string) => {
+    setActiveTabState(tab);
+    localStorage.setItem('vyapar_active_tab', tab);
+    window.location.hash = tab;
+  };
+
+  // Sync hash changes
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (hash && hash !== activeTab) {
+        setActiveTabState(hash);
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [activeTab]);
 
   // Initialize & Sync with PostgreSQL Backend
   useEffect(() => {
@@ -29,12 +56,25 @@ export function App() {
       await seedDatabaseIfEmpty();
 
       try {
-        // Fetch live data from PostgreSQL API
+        // Fetch company profile from PostgreSQL
+        const serverCompany = await fetchServerCompanyProfile();
+        if (serverCompany && serverCompany.name) {
+          setBusinessDetails({
+            name: serverCompany.name,
+            phone: serverCompany.phone || '+92 300 xxxxxxx',
+            address: serverCompany.address || '',
+            gstin: serverCompany.gstin || 'NTN: 7654321-0',
+            state: 'Punjab, Pakistan',
+            tagline: 'Quality Products at Everyday Low Prices',
+            upiId: ''
+          });
+        }
+
+        // Fetch live catalog, parties, and invoices from PostgreSQL API
         const serverItems = await fetchServerItems();
         const serverParties = await fetchServerParties();
         const serverInvoices = await fetchServerInvoices();
 
-        // If PostgreSQL server returns records, sync to local IndexedDB
         if (serverItems && serverItems.length > 0) {
           await db.items.clear();
           await db.items.bulkAdd(serverItems);
@@ -79,7 +119,7 @@ export function App() {
   const journalEntries = useLiveQuery(() => db.journalEntries.reverse().toArray(), []) || [];
 
   const handleInvoiceCreated = (invoice: Invoice) => {
-    triggerThermalPrint(invoice, DEFAULT_BUSINESS, '80mm');
+    triggerThermalPrint(invoice, businessDetails, '80mm');
   };
 
   if (!isDbLoaded) {
@@ -95,7 +135,7 @@ export function App() {
     <div className="h-screen w-screen flex flex-col bg-[#f3f4f6] overflow-hidden select-none">
       {/* Top Header */}
       <Header
-        business={DEFAULT_BUSINESS}
+        business={businessDetails}
         itemCount={items.length}
         invoiceCount={invoices.length}
         activeTab={activeTab}
@@ -120,7 +160,7 @@ export function App() {
             <BillingScreen
               items={items}
               parties={parties}
-              business={DEFAULT_BUSINESS}
+              business={businessDetails}
               onInvoiceCreated={handleInvoiceCreated}
             />
           )}
@@ -137,7 +177,7 @@ export function App() {
             <PurchaseScreen
               items={items}
               parties={parties}
-              business={DEFAULT_BUSINESS}
+              business={businessDetails}
               onPurchaseCreated={() => {}}
             />
           )}
@@ -147,16 +187,24 @@ export function App() {
           )}
 
           {activeTab === 'invoices' && (
-            <InvoicesScreen invoices={invoices} business={DEFAULT_BUSINESS} />
+            <InvoicesScreen invoices={invoices} business={businessDetails} />
           )}
 
           {activeTab === 'gst' && (
-            <GSTComplianceScreen invoices={invoices} business={DEFAULT_BUSINESS} />
+            <GSTComplianceScreen invoices={invoices} business={businessDetails} />
           )}
 
           {activeTab === 'reports' && <ReportsScreen invoices={invoices} />}
 
-          {activeTab === 'settings' && <PrinterModal business={DEFAULT_BUSINESS} />}
+          {activeTab === 'settings' && <PrinterModal business={businessDetails} />}
+
+          {activeTab === 'company' && (
+            <EditProfileScreen
+              business={businessDetails}
+              onUpdateBusiness={(updated) => setBusinessDetails(prev => ({ ...prev, ...updated }))}
+              onCancel={() => setActiveTab('home')}
+            />
+          )}
         </main>
       </div>
 

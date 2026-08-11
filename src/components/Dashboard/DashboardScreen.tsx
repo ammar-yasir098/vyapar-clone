@@ -18,19 +18,22 @@ interface DashboardScreenProps {
   onNavigateTab: (tab: string) => void;
 }
 
-export const DashboardScreen: React.FC<DashboardScreenProps> = ({ invoices, parties, onNavigateTab }) => {
+export const DashboardScreen: React.FC<DashboardScreenProps> = ({ invoices = [], parties = [], onNavigateTab }) => {
   const [period, setPeriod] = useState<'month' | 'week' | 'year'>('month');
 
-  const totalReceivable = parties
-    .filter(p => p.currentBalance > 0 && p.type === 'CUSTOMER')
-    .reduce((sum, p) => sum + p.currentBalance, 0);
+  const safeParties = Array.isArray(parties) ? parties : [];
+  const safeInvoices = Array.isArray(invoices) ? invoices : [];
 
-  const totalPayable = parties
-    .filter(p => p.currentBalance > 0 && p.type === 'SUPPLIER')
-    .reduce((sum, p) => sum + p.currentBalance, 0);
+  const totalReceivable = safeParties
+    .filter(p => Number(p?.currentBalance || 0) > 0 && p?.type === 'CUSTOMER')
+    .reduce((sum, p) => sum + Number(p?.currentBalance || 0), 0);
 
-  const totalSales = invoices.reduce((sum, inv) => sum + inv.grandTotal, 0);
-  const receivablePartiesCount = parties.filter(p => p.currentBalance > 0 && p.type === 'CUSTOMER').length;
+  const totalPayable = safeParties
+    .filter(p => Number(p?.currentBalance || 0) > 0 && p?.type === 'SUPPLIER')
+    .reduce((sum, p) => sum + Number(p?.currentBalance || 0), 0);
+
+  const totalSales = safeInvoices.reduce((sum, inv) => sum + Number(inv?.grandTotal || 0), 0);
+  const receivablePartiesCount = safeParties.filter(p => Number(p?.currentBalance || 0) > 0 && p?.type === 'CUSTOMER').length;
 
   return (
     <div className="flex-1 flex flex-col p-6 bg-[#f3f4f6] overflow-y-auto gap-6 select-none">
