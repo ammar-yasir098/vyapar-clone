@@ -20,6 +20,7 @@ import { db } from '../../db';
 import { postInvoiceJournalEntry } from '../../services/ledger';
 import { printA4TaxInvoice, buildWhatsAppInvoiceLink } from '../../services/pdfInvoice';
 import { createServerInvoice } from '../../services/api';
+import { syncManager } from '../../services/sync';
 
 interface BillingScreenProps {
   items: Item[];
@@ -84,12 +85,19 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   });
 
   const handleAddItemToCart = (item: Item) => {
+    const sPrice = Number(item.salesPrice || 0);
+    const pPrice = Number(item.purchasePrice || 0);
+    const cgst = Number(item.cgstRate || 0);
+    const sgst = Number(item.sgstRate || 0);
+    const igst = Number(item.igstRate || 0);
+
     const existingIndex = cartItems.findIndex(i => i.itemId === item.id);
     if (existingIndex > -1) {
       const updated = [...cartItems];
-      const newQty = updated[existingIndex].quantity + 1;
-      const sub = newQty * updated[existingIndex].unitPrice;
-      const tax = (sub * (updated[existingIndex].cgstRate + updated[existingIndex].sgstRate)) / 100;
+      const newQty = Number(updated[existingIndex].quantity || 0) + 1;
+      const uPrice = Number(updated[existingIndex].unitPrice || 0);
+      const sub = newQty * uPrice;
+      const tax = (sub * (cgst + sgst)) / 100;
       
       updated[existingIndex] = {
         ...updated[existingIndex],
@@ -99,20 +107,20 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
       };
       setCartItems(updated);
     } else {
-      const sub = item.salesPrice;
-      const tax = (sub * (item.cgstRate + item.sgstRate)) / 100;
+      const sub = sPrice;
+      const tax = (sub * (cgst + sgst)) / 100;
       
       const newItem: InvoiceItem = {
         itemId: item.id!,
         itemName: item.name,
-        hsnSacCode: item.hsnSacCode,
-        unitType: item.unitType,
+        hsnSacCode: item.hsnSacCode || '1000',
+        unitType: item.unitType || 'PCS',
         quantity: 1,
-        unitPrice: item.salesPrice,
-        purchasePrice: item.purchasePrice,
-        cgstRate: item.cgstRate,
-        sgstRate: item.sgstRate,
-        igstRate: item.igstRate,
+        unitPrice: sPrice,
+        purchasePrice: pPrice,
+        cgstRate: cgst,
+        sgstRate: sgst,
+        igstRate: igst,
         taxAmount: tax,
         totalAmount: sub + tax
       };
@@ -127,9 +135,12 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
       prev
         .map(item => {
           if (item.itemId === itemId) {
-            const newQty = Math.max(1, item.quantity + delta);
-            const sub = newQty * item.unitPrice;
-            const tax = (sub * (item.cgstRate + item.sgstRate)) / 100;
+            const newQty = Math.max(1, Number(item.quantity || 0) + delta);
+            const uPrice = Number(item.unitPrice || 0);
+            const cgst = Number(item.cgstRate || 0);
+            const sgst = Number(item.sgstRate || 0);
+            const sub = newQty * uPrice;
+            const tax = (sub * (cgst + sgst)) / 100;
             return { ...item, quantity: newQty, taxAmount: tax, totalAmount: sub + tax };
           }
           return item;
@@ -142,9 +153,12 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
     setCartItems(prev =>
       prev.map(item => {
         if (item.itemId === itemId) {
-          const sub = item.quantity * newPrice;
-          const tax = (sub * (item.cgstRate + item.sgstRate)) / 100;
-          return { ...item, unitPrice: newPrice, taxAmount: tax, totalAmount: sub + tax };
+          const uPrice = Number(newPrice || 0);
+          const cgst = Number(item.cgstRate || 0);
+          const sgst = Number(item.sgstRate || 0);
+          const sub = item.quantity * uPrice;
+          const tax = (sub * (cgst + sgst)) / 100;
+          return { ...item, unitPrice: uPrice, taxAmount: tax, totalAmount: sub + tax };
         }
         return item;
       })
@@ -234,6 +248,9 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
     const savedId = await db.invoices.add(newInvoice);
     newInvoice.id = savedId;
 
+    // Log to Offline Sync Queue
+    await syncManager.logMutation('INVOICE', newInvoice.invoiceId, 'INSERT', newInvoice);
+
     // 2. Decrement Item stock levels in local DB
     for (const cItem of cartItems) {
       const dbItem = await db.items.get(cItem.itemId);
@@ -289,8 +306,8 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                         <div className="text-[10px] text-slate-500 font-mono">Barcode: {item.barcode} | SKU: {item.skuCode}</div>
                       </div>
                       <div className="text-right">
-                        <div className="font-extrabold text-xs text-emerald-600 font-mono">Rs {item.salesPrice.toFixed(2)}</div>
-                        <div className={`text-[10px] font-bold ${item.currentStock <= item.minStockAlert ? 'text-amber-600' : 'text-slate-500'}`}>
+                        <div className="font-extrabold text-xs text-emerald-600 font-mono">Rs {Number(item.salesPrice || 0).toFixed(2)}</div>
+                        <div className={`text-[10px] font-bold ${(item?.currentStock ?? 0) <= (item?.minStockAlert ?? 0) ? 'text-amber-600' : 'text-slate-500'}`}>
                           Stock: {item.currentStock} {item.unitType}
                         </div>
                       </div>
@@ -407,13 +424,13 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                           />
                         </td>
                         <td className="font-mono text-xs text-slate-500">
-                          {item.cgstRate + item.sgstRate}%
+                          {Number(item.cgstRate || 0) + Number(item.sgstRate || 0)}%
                         </td>
                         <td className="font-mono text-xs text-slate-600">
-                          Rs {item.taxAmount.toFixed(2)}
+                          Rs {Number(item.taxAmount || 0).toFixed(2)}
                         </td>
                         <td className="font-mono text-xs font-black text-emerald-600 text-right">
-                          Rs {item.totalAmount.toFixed(2)}
+                          Rs {Number(item.totalAmount || 0).toFixed(2)}
                         </td>
                         <td className="text-center">
                           <button

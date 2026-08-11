@@ -60,10 +60,11 @@ export async function seedDatabaseIfEmpty() {
     ]);
   }
 
-  const partyCount = await db.parties.count();
-  if (partyCount === 0) {
-    // Default Walk-in Customer
-    await db.parties.add({
+  const existingWalkIn = await db.parties.where('name').equals('Walk-in Retail Customer').first();
+  if (!existingWalkIn) {
+    // Upsert default Walk-in Customer with explicit id to prevent React 18 StrictMode race condition
+    await db.parties.put({
+      id: 1,
       tenantId: 'default-tenant',
       name: 'Walk-in Retail Customer',
       phone: '03009999999',
@@ -73,6 +74,17 @@ export async function seedDatabaseIfEmpty() {
       currentBalance: 0,
       createdAt: new Date().toISOString()
     });
+  }
+
+  // Deduplicate any accidental duplicate Walk-in Customer entries
+  const allWalkIns = await db.parties.where('name').equals('Walk-in Retail Customer').toArray();
+  if (allWalkIns.length > 1) {
+    // Keep first, delete extra duplicates
+    for (let i = 1; i < allWalkIns.length; i++) {
+      if (allWalkIns[i].id) {
+        await db.parties.delete(allWalkIns[i].id!);
+      }
+    }
   }
 }
 
@@ -95,17 +107,8 @@ export async function clearAllDatabaseData() {
     }
   }
 
-  // Re-add default Walk-in Customer
-  await db.parties.add({
-    tenantId: 'default-tenant',
-    name: 'Walk-in Retail Customer',
-    phone: '03009999999',
-    type: 'CUSTOMER',
-    openingBalance: 0,
-    balanceType: 'RECEIVABLE',
-    currentBalance: 0,
-    createdAt: new Date().toISOString()
-  });
+  // Re-add default Walk-in Customer (will be seeded by initializeDefaultData on next reload)
+  // Removed manual re-add here to prevent duplicate entries on sync
 
   window.location.reload();
 }

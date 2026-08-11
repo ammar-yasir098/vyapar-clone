@@ -1,9 +1,22 @@
 const API_BASE_URL = 'http://localhost:5000/api/v1';
 
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 1500): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return response;
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
+  }
+}
+
 // COMPANY PROFILE
 export async function fetchServerCompanyProfile() {
   try {
-    const res = await fetch(`${API_BASE_URL}/company`);
+    const res = await fetchWithTimeout(`${API_BASE_URL}/company`);
     if (!res.ok) return null;
     const json = await res.json();
     return json.data || null;
@@ -14,7 +27,7 @@ export async function fetchServerCompanyProfile() {
 
 export async function saveServerCompanyProfile(companyData: any) {
   try {
-    const res = await fetch(`${API_BASE_URL}/company`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/company`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(companyData)
@@ -28,7 +41,7 @@ export async function saveServerCompanyProfile(companyData: any) {
 // ITEMS
 export async function fetchServerItems() {
   try {
-    const res = await fetch(`${API_BASE_URL}/items`);
+    const res = await fetchWithTimeout(`${API_BASE_URL}/items`);
     if (!res.ok) return [];
     const json = await res.json();
     return json.data || [];
@@ -47,6 +60,18 @@ export async function createServerItem(itemData: any) {
     return await res.json();
   } catch (err: any) {
     return { success: false, error: err.message };
+  }
+}
+
+export function updateServerItem(id: number, itemData: any) {
+  try {
+    return fetch(`${API_BASE_URL}/items/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(itemData)
+    }).then(res => res.json());
+  } catch (err: any) {
+    return Promise.resolve({ success: false, error: err.message });
   }
 }
 
@@ -75,7 +100,7 @@ export async function deleteServerItem(id: number) {
 // PARTIES
 export async function fetchServerParties() {
   try {
-    const res = await fetch(`${API_BASE_URL}/parties`);
+    const res = await fetchWithTimeout(`${API_BASE_URL}/parties`);
     if (!res.ok) return [];
     const json = await res.json();
     return json.data || [];
@@ -122,7 +147,7 @@ export async function deleteServerParty(id: number) {
 // INVOICES
 export async function fetchServerInvoices() {
   try {
-    const res = await fetch(`${API_BASE_URL}/invoices`);
+    const res = await fetchWithTimeout(`${API_BASE_URL}/invoices`);
     if (!res.ok) return [];
     const json = await res.json();
     return json.data || [];

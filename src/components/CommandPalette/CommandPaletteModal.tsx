@@ -114,7 +114,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
                         <div className="text-[10px] text-slate-400 font-mono">Barcode: {item.barcode} | Stock: {item.currentStock} {item.unitType}</div>
                       </div>
                     </div>
-                    <div className="font-black text-xs text-emerald-600 font-mono">₹{item.salesPrice}</div>
+                    <div className="font-black text-xs text-emerald-600 font-mono">₹{Number(item.salesPrice || 0).toFixed(2)}</div>
                   </div>
                 ))}
               </div>
@@ -144,7 +144,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
                         <div className="text-[10px] text-slate-400 font-mono">Ph: {party.phone} | {party.type}</div>
                       </div>
                     </div>
-                    <div className="font-mono text-xs font-bold text-slate-700">Bal: ₹{party.currentBalance}</div>
+                    <div className="font-mono text-xs font-bold text-slate-700">Bal: ₹{Number(party.currentBalance || 0).toFixed(2)}</div>
                   </div>
                 ))}
               </div>

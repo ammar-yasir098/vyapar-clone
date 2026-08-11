@@ -64,6 +64,26 @@ itemsRouter.post('/', async (req: Request, res: Response) => {
   }
 });
 
+// PUT /api/v1/items/:id - Update full item using Sequelize
+itemsRouter.put('/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+
+    if (isDbConnected()) {
+      const item = await Item.findByPk(Number(id));
+      if (item) {
+        await item.update(updateData);
+        return res.json({ success: true, data: item });
+      }
+      return res.status(404).json({ success: false, error: 'Product not found' });
+    }
+    return res.json({ success: true, data: { id, ...updateData } });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // PUT /api/v1/items/:id/stock - Adjust stock using Sequelize
 itemsRouter.put('/:id/stock', async (req: Request, res: Response) => {
   try {

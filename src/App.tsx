@@ -14,6 +14,7 @@ import { GSTComplianceScreen } from './components/GST/GSTComplianceScreen';
 import { ReportsScreen } from './components/Reports/ReportsScreen';
 import { PrinterModal } from './components/Printer/PrinterModal';
 import { CommandPaletteModal } from './components/CommandPalette/CommandPaletteModal';
+import { SyncModal } from './components/Sync/SyncModal';
 import { EditProfileScreen } from './components/Company/EditProfileScreen';
 import { Invoice, BusinessDetails } from './types';
 import { triggerThermalPrint } from './services/printer';
@@ -27,10 +28,19 @@ export function App() {
     return localStorage.getItem('vyapar_active_tab') || 'home';
   };
 
+  const getInitialBusiness = (): BusinessDetails => {
+    const saved = localStorage.getItem('vyapar_business_details');
+    if (saved) {
+      try { return JSON.parse(saved); } catch {}
+    }
+    return DEFAULT_BUSINESS;
+  };
+
   const [activeTab, setActiveTabState] = useState<string>(getInitialTab());
   const [isDbLoaded, setIsDbLoaded] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-  const [businessDetails, setBusinessDetails] = useState<BusinessDetails>(DEFAULT_BUSINESS);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [businessDetails, setBusinessDetails] = useState<BusinessDetails>(getInitialBusiness());
 
   const setActiveTab = (tab: string) => {
     setActiveTabState(tab);
@@ -141,6 +151,7 @@ export function App() {
         activeTab={activeTab}
         onNavigateToTab={setActiveTab}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+        onOpenSyncModal={() => setIsSyncModalOpen(true)}
       />
 
       {/* Main Body */}
@@ -201,7 +212,13 @@ export function App() {
           {activeTab === 'company' && (
             <EditProfileScreen
               business={businessDetails}
-              onUpdateBusiness={(updated) => setBusinessDetails(prev => ({ ...prev, ...updated }))}
+              onUpdateBusiness={(updated) => {
+                setBusinessDetails(prev => {
+                  const next = { ...prev, ...updated };
+                  localStorage.setItem('vyapar_business_details', JSON.stringify(next));
+                  return next;
+                });
+              }}
               onCancel={() => setActiveTab('home')}
             />
           )}
@@ -216,6 +233,12 @@ export function App() {
         parties={parties}
         invoices={invoices}
         onNavigateTab={setActiveTab}
+      />
+
+      {/* Offline Sync Inspector Modal */}
+      <SyncModal
+        isOpen={isSyncModalOpen}
+        onClose={() => setIsSyncModalOpen(false)}
       />
     </div>
   );

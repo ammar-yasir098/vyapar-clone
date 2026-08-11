@@ -18,6 +18,7 @@ interface HeaderProps {
   activeTab: string;
   onNavigateToTab: (tab: string) => void;
   onOpenCommandPalette: () => void;
+  onOpenSyncModal: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -26,7 +27,8 @@ export const Header: React.FC<HeaderProps> = ({
   invoiceCount,
   activeTab,
   onNavigateToTab,
-  onOpenCommandPalette
+  onOpenCommandPalette,
+  onOpenSyncModal
 }) => {
   const [time, setTime] = useState<string>('');
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({
@@ -125,7 +127,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Cloud Sync Status */}
         <button
-          onClick={() => syncManager.triggerSync()}
+          onClick={onOpenSyncModal}
           className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full border transition cursor-pointer ${
             syncStatus.isSyncing
               ? 'bg-amber-50 text-amber-800 border-amber-300'

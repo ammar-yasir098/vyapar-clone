@@ -98,7 +98,10 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
     // 1. Save to PostgreSQL database
     const res = await saveServerCompanyProfile(profilePayload);
 
-    // 2. Update local state
+    // 2. Save to Browser localStorage
+    localStorage.setItem('vyapar_business_details', JSON.stringify(profilePayload));
+
+    // 3. Update local React state
     onUpdateBusiness({
       name,
       phone,

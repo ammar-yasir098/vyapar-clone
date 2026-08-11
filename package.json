@@ -6,7 +6,7 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
-    "server": "tsx server/index.ts",
+    "server": "tsx watch server/index.ts",
     "electron:dev": "electron .",
     "build": "tsc && vite build",
     "lint": "tsc --noEmit",

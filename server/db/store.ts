@@ -50,6 +50,11 @@ class CloudDataStore {
   public getLatestVersion(): number {
     return this.currentSequence;
   }
+
+  public clear(): void {
+    this.syncLogs = [];
+    this.currentSequence = 1000;
+  }
 }
 
 export const cloudStore = new CloudDataStore();
