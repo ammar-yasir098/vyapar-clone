@@ -74,7 +74,62 @@ class ClientSyncManager {
     this.notify();
 
     try {
-      const unsynced = await db.syncJournal.filter(record => !record.synced).toArray();
+      let unsynced = await db.syncJournal.filter(record => !record.synced).toArray();
+
+      // If sync journal is empty, auto-queue all current local items, parties, and invoices
+      if (unsynced.length === 0) {
+        const localItems = await db.items.toArray();
+        const localParties = await db.parties.toArray();
+        const localInvoices = await db.invoices.toArray();
+
+        for (const item of localItems) {
+          if (item.id) {
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-item-${item.id}`,
+              clientSequence: Date.now(),
+              entityType: 'ITEM',
+              entityId: String(item.id),
+              mutationType: 'INSERT',
+              payload: JSON.stringify(item),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          }
+        }
+
+        for (const party of localParties) {
+          if (party.id) {
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-party-${party.id}`,
+              clientSequence: Date.now(),
+              entityType: 'PARTY',
+              entityId: String(party.id),
+              mutationType: 'INSERT',
+              payload: JSON.stringify(party),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          }
+        }
+
+        for (const inv of localInvoices) {
+          if (inv.id || inv.invoiceId) {
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-inv-${inv.id || inv.invoiceId}`,
+              clientSequence: Date.now(),
+              entityType: 'INVOICE',
+              entityId: String(inv.id || inv.invoiceId),
+              mutationType: 'INSERT',
+              payload: JSON.stringify(inv),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          }
+        }
+
+        // Re-fetch unsynced queue after auto-populating
+        unsynced = await db.syncJournal.filter(record => !record.synced).toArray();
+      }
 
       if (unsynced.length > 0) {
         const response = await fetch(`${SYNC_SERVER_URL}/push`, {

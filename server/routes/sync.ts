@@ -36,7 +36,7 @@ syncRouter.get('/health', (req: Request, res: Response) => {
 });
 
 // POST /api/v1/sync/push
-syncRouter.post('/push', (req: Request, res: Response) => {
+syncRouter.post('/push', async (req: Request, res: Response) => {
   const { tenantId, mutations } = req.body;
 
   if (!tenantId || !Array.isArray(mutations)) {
@@ -45,7 +45,117 @@ syncRouter.post('/push', (req: Request, res: Response) => {
 
   const result = cloudStore.pushMutations(tenantId, mutations);
 
-  console.log(`[CLOUD SYNC PUSH] Processed ${result.syncedCount} delta mutations for tenant: ${tenantId}`);
+  // Persist mutations directly into PostgreSQL Database using Sequelize ORM
+  if (isDbConnected()) {
+    const { Item, Party, Invoice, InvoiceItem, JournalEntry } = await import('../db/sequelize.js');
+
+    for (const m of mutations) {
+      try {
+        const payload = typeof m.payload === 'string' ? JSON.parse(m.payload) : m.payload;
+        const entityType = m.entityType;
+        const mutationType = m.mutationType;
+
+        if (entityType === 'ITEM') {
+          if (mutationType === 'DELETE' && payload.id) {
+            await Item.destroy({ where: { id: payload.id } });
+          } else if (payload.name) {
+            await Item.upsert({
+              id: payload.id,
+              tenantId: tenantId || 'default-tenant',
+              name: payload.name,
+              skuCode: payload.skuCode || '',
+              barcode: payload.barcode || '',
+              hsnSacCode: payload.hsnSacCode || '1000',
+              unitType: payload.unitType || 'PCS',
+              purchasePrice: payload.purchasePrice || 0,
+              salesPrice: payload.salesPrice || 0,
+              minStockAlert: payload.minStockAlert || 5,
+              currentStock: payload.currentStock || 0,
+              cgstRate: payload.cgstRate || 0,
+              sgstRate: payload.sgstRate || 0,
+              igstRate: payload.igstRate || 0
+            });
+          }
+        } else if (entityType === 'PARTY') {
+          if (mutationType === 'DELETE' && payload.id) {
+            await Party.destroy({ where: { id: payload.id } });
+          } else if (payload.name) {
+            await Party.upsert({
+              id: payload.id,
+              tenantId: tenantId || 'default-tenant',
+              name: payload.name,
+              phone: payload.phone || '',
+              type: payload.type || 'CUSTOMER',
+              openingBalance: payload.openingBalance || 0,
+              balanceType: payload.balanceType || 'RECEIVABLE',
+              currentBalance: payload.currentBalance ?? payload.openingBalance ?? 0,
+              gstin: payload.gstin || '',
+              address: payload.address || ''
+            });
+          }
+        } else if (entityType === 'INVOICE') {
+          if (mutationType === 'DELETE' && payload.id) {
+            await Invoice.destroy({ where: { id: payload.id } });
+          } else if (payload.invoiceNumber) {
+            const [createdInvoice] = await Invoice.upsert({
+              id: payload.id,
+              invoiceId: payload.invoiceId || `INV-${Date.now()}`,
+              tenantId: tenantId || 'default-tenant',
+              invoiceNumber: payload.invoiceNumber,
+              invoiceDate: payload.invoiceDate || new Date().toISOString().split('T')[0],
+              partyId: payload.partyId || null,
+              partyName: payload.partyName || 'Walk-in Retail Customer',
+              partyPhone: payload.partyPhone || '',
+              partyGstin: payload.partyGstin || '',
+              subtotal: payload.subtotal || 0,
+              taxTotal: payload.taxTotal || 0,
+              discountTotal: payload.discountTotal || 0,
+              grandTotal: payload.grandTotal || 0,
+              receivedAmount: payload.receivedAmount || 0,
+              dueAmount: payload.dueAmount || 0,
+              paymentStatus: payload.paymentStatus || 'PAID',
+              paymentMethod: payload.paymentMethod || 'CASH'
+            });
+
+            // Save line items
+            if (payload.items && Array.isArray(payload.items)) {
+              for (const item of payload.items) {
+                await InvoiceItem.create({
+                  invoiceId: (createdInvoice as any).id,
+                  itemId: item.itemId || item.id || null,
+                  itemName: item.itemName || item.name || '',
+                  hsnSacCode: item.hsnSacCode || '',
+                  unitType: item.unitType || 'PCS',
+                  quantity: item.quantity || 1,
+                  unitPrice: item.unitPrice || item.price || 0,
+                  purchasePrice: item.purchasePrice || 0,
+                  taxAmount: item.taxAmount || 0,
+                  totalAmount: item.totalAmount || (item.quantity * item.unitPrice) || 0
+                });
+              }
+            }
+          }
+        } else if (entityType === 'JOURNAL') {
+          if (payload.entryNumber) {
+            await JournalEntry.upsert({
+              id: payload.id,
+              tenantId: tenantId || 'default-tenant',
+              entryNumber: payload.entryNumber,
+              referenceId: payload.referenceId || '',
+              transactionDate: payload.transactionDate || new Date().toISOString().split('T')[0],
+              description: payload.description || '',
+              totalDebit: payload.totalDebit || 0,
+              totalCredit: payload.totalCredit || 0
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Error persisting sync mutation to PostgreSQL:', err);
+      }
+    }
+  }
+
+  console.log(`[CLOUD SYNC PUSH] Successfully synced ${result.syncedCount} delta mutations to PostgreSQL for tenant: ${tenantId}`);
 
   return res.json({
     success: true,

@@ -32,7 +32,21 @@ export function isDbConnected(): boolean {
 }
 
 // 1. CompanyProfile Model
-export class CompanyProfile extends Model {}
+export class CompanyProfile extends Model {
+  declare id: number;
+  declare tenantId: string;
+  declare name: string;
+  declare phone: string;
+  declare email: string;
+  declare address: string;
+  declare gstin: string;
+  declare businessType: string;
+  declare businessCategory: string;
+  declare pincode: string;
+  declare logoUrl: string;
+  declare signatureUrl: string;
+  declare booksBeginDate: string;
+}
 CompanyProfile.init(
   {
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
@@ -53,7 +67,23 @@ CompanyProfile.init(
 );
 
 // 2. Item Model
-export class Item extends Model {}
+export class Item extends Model {
+  declare id: number;
+  declare tenantId: string;
+  declare name: string;
+  declare skuCode: string;
+  declare barcode: string;
+  declare hsnSacCode: string;
+  declare unitType: string;
+  declare purchasePrice: number;
+  declare salesPrice: number;
+  declare minStockAlert: number;
+  declare currentStock: number;
+  declare cgstRate: number;
+  declare sgstRate: number;
+  declare igstRate: number;
+  declare isActive: boolean;
+}
 Item.init(
   {
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
@@ -76,7 +106,18 @@ Item.init(
 );
 
 // 3. Party Model
-export class Party extends Model {}
+export class Party extends Model {
+  declare id: number;
+  declare tenantId: string;
+  declare name: string;
+  declare phone: string;
+  declare type: string;
+  declare openingBalance: number;
+  declare balanceType: string;
+  declare currentBalance: number;
+  declare gstin: string;
+  declare address: string;
+}
 Party.init(
   {
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
@@ -94,7 +135,25 @@ Party.init(
 );
 
 // 4. Invoice Model
-export class Invoice extends Model {}
+export class Invoice extends Model {
+  declare id: number;
+  declare invoiceId: string;
+  declare tenantId: string;
+  declare invoiceNumber: string;
+  declare invoiceDate: string;
+  declare partyId: number;
+  declare partyName: string;
+  declare partyPhone: string;
+  declare partyGstin: string;
+  declare subtotal: number;
+  declare taxTotal: number;
+  declare discountTotal: number;
+  declare grandTotal: number;
+  declare receivedAmount: number;
+  declare dueAmount: number;
+  declare paymentStatus: string;
+  declare paymentMethod: string;
+}
 Invoice.init(
   {
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
@@ -119,7 +178,19 @@ Invoice.init(
 );
 
 // 5. InvoiceItem Model
-export class InvoiceItem extends Model {}
+export class InvoiceItem extends Model {
+  declare id: number;
+  declare invoiceId: number;
+  declare itemId: number;
+  declare itemName: string;
+  declare hsnSacCode: string;
+  declare unitType: string;
+  declare quantity: number;
+  declare unitPrice: number;
+  declare purchasePrice: number;
+  declare taxAmount: number;
+  declare totalAmount: number;
+}
 InvoiceItem.init(
   {
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
@@ -142,7 +213,16 @@ Invoice.hasMany(InvoiceItem, { foreignKey: 'invoiceId', as: 'items' });
 InvoiceItem.belongsTo(Invoice, { foreignKey: 'invoiceId' });
 
 // 6. JournalEntry Model
-export class JournalEntry extends Model {}
+export class JournalEntry extends Model {
+  declare id: number;
+  declare tenantId: string;
+  declare entryNumber: string;
+  declare referenceId: string;
+  declare transactionDate: string;
+  declare description: string;
+  declare totalDebit: number;
+  declare totalCredit: number;
+}
 JournalEntry.init(
   {
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },

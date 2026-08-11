@@ -15,6 +15,7 @@ import {
 import { Party, PartyType, BalanceType } from '../../types';
 import { db } from '../../db';
 import { createServerParty, recordServerPartyPayment, deleteServerParty } from '../../services/api';
+import { syncManager } from '../../services/sync';
 
 interface PartiesScreenProps {
   parties: Party[];
@@ -70,7 +71,10 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, onPartyUp
     };
 
     const savedId = await db.parties.add(partyPayload);
-    await createServerParty({ ...partyPayload, id: savedId });
+    const fullParty = { ...partyPayload, id: savedId };
+
+    await createServerParty(fullParty);
+    await syncManager.logMutation('PARTY', String(savedId), 'INSERT', fullParty);
 
     setShowAddModal(false);
     onPartyUpdated();
