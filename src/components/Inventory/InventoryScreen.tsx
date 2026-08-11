@@ -9,7 +9,8 @@ interface InventoryScreenProps {
   onItemUpdated: () => void;
 }
 
-export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items, onItemUpdated }) => {
+export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items = [], onItemUpdated }) => {
+  const safeItems = Array.isArray(items) ? items : [];
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [filterLowStock, setFilterLowStock] = useState(false);
@@ -34,7 +35,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items, onItemU
     igstRate: 18
   });
 
-  const filteredItems = items.filter(item => {
+  const filteredItems = safeItems.filter(item => {
     const name = item?.name || '';
     const sku = item?.skuCode || '';
     const barcode = item?.barcode || '';
@@ -125,9 +126,9 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items, onItemU
             <span>Items & Inventory SKU Manager</span>
           </h2>
           <p className="text-xs text-slate-500 font-semibold">
-            Total Products: <strong className="text-slate-800">{items.length}</strong> | Low Stock Alerts:{' '}
+            Total Products: <strong className="text-slate-800">{safeItems.length}</strong> | Low Stock Alerts:{' '}
             <strong className="text-amber-600 font-bold">
-              {items.filter(i => (i?.currentStock ?? 0) <= (i?.minStockAlert ?? 0)).length}
+              {safeItems.filter(i => (i?.currentStock ?? 0) <= (i?.minStockAlert ?? 0)).length}
             </strong>
           </p>
         </div>
@@ -198,9 +199,9 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items, onItemU
                       <div className="text-[10px] text-slate-400">{item.barcode || '-'}</div>
                     </td>
                     <td className="font-mono text-xs text-slate-500">{item.hsnSacCode || '-'}</td>
-                    <td className="font-mono text-xs text-slate-700">Rs {(item.purchasePrice || 0).toFixed(2)}</td>
+                    <td className="font-mono text-xs text-slate-700">Rs {Number(item.purchasePrice || 0).toFixed(2)}</td>
                     <td className="font-mono text-xs font-black text-emerald-600">
-                      Rs {(item.salesPrice || 0).toFixed(2)}
+                      Rs {Number(item.salesPrice || 0).toFixed(2)}
                     </td>
                     <td>
                       <div className="flex items-center gap-1.5">
