@@ -11,6 +11,7 @@ syncRouter.post('/reset', async (req: Request, res: Response) => {
 
     if (isDbConnected()) {
       await sequelize.query('TRUNCATE TABLE invoice_items, invoices, items, parties, journal_entries RESTART IDENTITY CASCADE;');
+      await sequelize.query('UPDATE ledger_accounts SET balance = 0.0;');
     }
 
     console.log('🧹 [RESET] Successfully wiped all cloud database records for clean start.');

@@ -129,7 +129,7 @@ export async function clearAllDatabaseData() {
   await db.itemBatches.clear();
   await db.journalEntries.clear();
   
-  // Reset account balances to 0
+  // Reset account balances to 0 in local Dexie IndexedDB
   const accounts = await db.ledgerAccounts.toArray();
   for (const acc of accounts) {
     if (acc.id) {
@@ -137,8 +137,12 @@ export async function clearAllDatabaseData() {
     }
   }
 
-  // Re-add default Walk-in Customer (will be seeded by initializeDefaultData on next reload)
-  // Removed manual re-add here to prevent duplicate entries on sync
+  // Call server API to reset PostgreSQL tables and reset ledger balances to 0
+  try {
+    await fetch('http://localhost:5000/api/v1/sync/reset', { method: 'POST' });
+  } catch (err) {
+    console.warn('Server reset notification warning:', err);
+  }
 
   window.location.reload();
 }
