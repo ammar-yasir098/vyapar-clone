@@ -38,33 +38,9 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
     return isNaN(n) || !isFinite(n) ? 0 : n;
   };
 
-  // Helper to compute dynamic party ledger balance considering unpaid invoice dues safely
+  // Helper to compute dynamic party ledger balance considering payments & sales dues safely
   const getPartyEffectiveBalance = (party: Party): number => {
-    const pId = party.id;
-    const pName = (party.name || '').trim().toLowerCase();
-
-    const partyInvoices = invoices.filter(
-      inv => (pId !== undefined && inv.partyId === pId) || (inv.partyName && inv.partyName.trim().toLowerCase() === pName)
-    );
-
-    const unpaidInvoicesDue = partyInvoices.reduce((sum, inv) => {
-      if (inv.paymentStatus === 'PAID') return sum;
-      const dueVal = inv.dueAmount !== undefined && !isNaN(Number(inv.dueAmount))
-        ? safeNum(inv.dueAmount)
-        : Math.max(0, safeNum(inv.grandTotal) - safeNum(inv.receivedAmount));
-      return sum + safeNum(dueVal);
-    }, 0);
-
-    const opening = safeNum(party.openingBalance);
-    const current = safeNum(party.currentBalance);
-
-    if (party.type === 'CUSTOMER') {
-      if (current === 0) {
-        return unpaidInvoicesDue;
-      }
-      return safeNum(opening + unpaidInvoicesDue);
-    }
-    return current;
+    return safeNum(party.currentBalance !== undefined ? party.currentBalance : party.openingBalance);
   };
 
   const [newParty, setNewParty] = useState<Partial<Party>>({
@@ -135,8 +111,7 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
 
       // 1. Update Party Current Balance in Dexie & log sync mutation
       if (party.id) {
-        const newOpening = Math.max(0, safeNum(party.openingBalance) - paymentAmount);
-        await db.parties.update(party.id, { currentBalance: newBal, openingBalance: newOpening });
+        await db.parties.update(party.id, { currentBalance: newBal });
         await syncManager.logMutation('PARTY', String(party.id), 'UPDATE', { id: party.id, currentBalance: newBal });
         await recordServerPartyPayment(party.id, paymentAmount, paymentRemarks, party.type, party.name);
       }

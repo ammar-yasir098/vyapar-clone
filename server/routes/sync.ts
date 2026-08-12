@@ -59,8 +59,15 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
           if (mutationType === 'DELETE' && payload.id) {
             await Item.destroy({ where: { id: payload.id } });
           } else if (payload.name) {
-            await Item.upsert({
-              id: payload.id,
+            let existing = payload.id ? await Item.findByPk(payload.id) : null;
+            if (!existing && payload.skuCode) {
+              existing = await Item.findOne({ where: { skuCode: payload.skuCode } });
+            }
+            if (!existing && payload.name) {
+              existing = await Item.findOne({ where: { name: payload.name } });
+            }
+
+            const itemData = {
               tenantId: tenantId || 'default-tenant',
               name: payload.name,
               skuCode: payload.skuCode || '',
@@ -74,14 +81,24 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               cgstRate: payload.cgstRate || 0,
               sgstRate: payload.sgstRate || 0,
               igstRate: payload.igstRate || 0
-            });
+            };
+
+            if (existing) {
+              await existing.update(itemData);
+            } else {
+              await Item.create(itemData);
+            }
           }
         } else if (entityType === 'PARTY') {
           if (mutationType === 'DELETE' && payload.id) {
             await Party.destroy({ where: { id: payload.id } });
           } else if (payload.name) {
-            await Party.upsert({
-              id: payload.id,
+            let existing = payload.id ? await Party.findByPk(payload.id) : null;
+            if (!existing) {
+              existing = await Party.findOne({ where: { name: payload.name } });
+            }
+
+            const partyData = {
               tenantId: tenantId || 'default-tenant',
               name: payload.name,
               phone: payload.phone || '',
@@ -91,37 +108,63 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               currentBalance: payload.currentBalance ?? payload.openingBalance ?? 0,
               gstin: payload.gstin || '',
               address: payload.address || ''
-            });
+            };
+
+            if (existing) {
+              await existing.update(partyData);
+            } else {
+              await Party.create(partyData);
+            }
           }
         } else if (entityType === 'INVOICE') {
           if (mutationType === 'DELETE' && payload.id) {
             await Invoice.destroy({ where: { id: payload.id } });
           } else if (payload.invoiceNumber) {
-            const [createdInvoice] = await Invoice.upsert({
-              id: payload.id,
-              invoiceId: payload.invoiceId || `INV-${Date.now()}`,
-              tenantId: tenantId || 'default-tenant',
-              invoiceNumber: payload.invoiceNumber,
-              invoiceDate: payload.invoiceDate || new Date().toISOString().split('T')[0],
-              partyId: payload.partyId || null,
-              partyName: payload.partyName || 'Walk-in Retail Customer',
-              partyPhone: payload.partyPhone || '',
-              partyGstin: payload.partyGstin || '',
-              subtotal: payload.subtotal || 0,
-              taxTotal: payload.taxTotal || 0,
-              discountTotal: payload.discountTotal || 0,
-              grandTotal: payload.grandTotal || 0,
-              receivedAmount: payload.receivedAmount || 0,
-              dueAmount: payload.dueAmount || 0,
-              paymentStatus: payload.paymentStatus || 'PAID',
-              paymentMethod: payload.paymentMethod || 'CASH'
+            let existingInvoice = await Invoice.findOne({
+              where: { invoiceNumber: payload.invoiceNumber }
             });
+
+            let targetInvoice: any;
+            if (existingInvoice) {
+              await existingInvoice.update({
+                subtotal: payload.subtotal || 0,
+                taxTotal: payload.taxTotal || 0,
+                discountTotal: payload.discountTotal || 0,
+                grandTotal: payload.grandTotal || 0,
+                receivedAmount: payload.receivedAmount || 0,
+                dueAmount: payload.dueAmount || 0,
+                paymentStatus: payload.paymentStatus || 'PAID',
+                paymentMethod: payload.paymentMethod || 'CASH'
+              });
+              targetInvoice = existingInvoice;
+              // Clear existing items before inserting new ones to avoid duplicates
+              await InvoiceItem.destroy({ where: { invoiceId: existingInvoice.get('id') as number } });
+            } else {
+              targetInvoice = await Invoice.create({
+                invoiceId: payload.invoiceId || `INV-${Date.now()}`,
+                tenantId: tenantId || 'default-tenant',
+                invoiceNumber: payload.invoiceNumber,
+                invoiceDate: payload.invoiceDate || new Date().toISOString().split('T')[0],
+                partyId: payload.partyId || null,
+                partyName: payload.partyName || 'Walk-in Retail Customer',
+                partyPhone: payload.partyPhone || '',
+                partyGstin: payload.partyGstin || '',
+                subtotal: payload.subtotal || 0,
+                taxTotal: payload.taxTotal || 0,
+                discountTotal: payload.discountTotal || 0,
+                grandTotal: payload.grandTotal || 0,
+                receivedAmount: payload.receivedAmount || 0,
+                dueAmount: payload.dueAmount || 0,
+                paymentStatus: payload.paymentStatus || 'PAID',
+                paymentMethod: payload.paymentMethod || 'CASH'
+              });
+            }
 
             // Save line items
             if (payload.items && Array.isArray(payload.items)) {
               for (const item of payload.items) {
                 await InvoiceItem.create({
-                  invoiceId: (createdInvoice as any).id,
+                  invoiceId: targetInvoice.id,
                   itemId: item.itemId || item.id || null,
                   itemName: item.itemName || item.name || '',
                   hsnSacCode: item.hsnSacCode || '',
@@ -137,8 +180,8 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
           }
         } else if (entityType === 'JOURNAL') {
           if (payload.entryNumber) {
-            await JournalEntry.upsert({
-              id: payload.id,
+            let existing = await JournalEntry.findOne({ where: { entryNumber: payload.entryNumber } });
+            const journalData = {
               tenantId: tenantId || 'default-tenant',
               entryNumber: payload.entryNumber,
               referenceId: payload.referenceId || '',
@@ -146,7 +189,12 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               description: payload.description || '',
               totalDebit: payload.totalDebit || 0,
               totalCredit: payload.totalCredit || 0
-            });
+            };
+            if (existing) {
+              await existing.update(journalData);
+            } else {
+              await JournalEntry.create(journalData);
+            }
           }
         }
       } catch (err) {

@@ -111,8 +111,8 @@ async function initPostgresSchema() {
       unit_type VARCHAR(16) DEFAULT 'PCS',
       purchase_price NUMERIC(12,2) DEFAULT 0.00,
       sales_price NUMERIC(12,2) NOT NULL DEFAULT 0.00,
-      min_stock_alert INT DEFAULT 5,
-      current_stock INT DEFAULT 0,
+      min_stock_alert NUMERIC(12,2) DEFAULT 5.00,
+      current_stock NUMERIC(12,2) DEFAULT 0.00,
       cgst_rate NUMERIC(5,2) DEFAULT 0.00,
       sgst_rate NUMERIC(5,2) DEFAULT 0.00,
       igst_rate NUMERIC(5,2) DEFAULT 0.00,
@@ -162,7 +162,7 @@ async function initPostgresSchema() {
       item_name VARCHAR(255) NOT NULL,
       hsn_sac_code VARCHAR(32),
       unit_type VARCHAR(16),
-      quantity INT NOT NULL,
+      quantity NUMERIC(12,2) NOT NULL DEFAULT 1.00,
       unit_price NUMERIC(12,2) NOT NULL,
       purchase_price NUMERIC(12,2) DEFAULT 0.00,
       tax_amount NUMERIC(12,2) DEFAULT 0.00,
@@ -180,11 +180,21 @@ async function initPostgresSchema() {
       total_credit NUMERIC(12,2) NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS ledger_accounts (
+      id SERIAL PRIMARY KEY,
+      tenant_id VARCHAR(64) DEFAULT 'default-tenant',
+      account_code VARCHAR(32) NOT NULL UNIQUE,
+      account_name VARCHAR(255) NOT NULL,
+      account_type VARCHAR(32) DEFAULT 'ASSET',
+      balance NUMERIC(12,2) DEFAULT 0.00,
+      description TEXT
+    );
   `;
 
   try {
     await pool.query(schemaSql);
-    console.log('✅ PostgreSQL Schema tables (company_profile, items, parties, invoices, invoice_items, journal_entries) ready.');
+    console.log('✅ PostgreSQL Schema tables (company_profile, items, parties, invoices, invoice_items, journal_entries, ledger_accounts) ready.');
   } catch (err) {
     console.error('Error initializing PostgreSQL schema:', err);
   }

@@ -69,10 +69,8 @@ partiesRouter.post('/:id/payment', async (req: Request, res: Response) => {
       }
       if (party) {
         const cur = (party.get('currentBalance') as number) || 0;
-        const op = (party.get('openingBalance') as number) || 0;
-        const newBal = Math.max(0, cur - paymentAmt);
-        const newOp = Math.max(0, op - paymentAmt);
-        await party.update({ currentBalance: newBal, openingBalance: newOp });
+        const newBal = cur - paymentAmt;
+        await party.update({ currentBalance: newBal });
 
         await JournalEntry.create({
           tenantId,

@@ -1,9 +1,9 @@
 import { Router, Request, Response } from 'express';
-import { query, pool, isDbConnected } from '../db/postgres.js';
+import { Item, Party, JournalEntry, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const purchasesRouter = Router();
 
-// POST /api/v1/purchases - Insert purchase bill & update stock/payables in PostgreSQL
+// POST /api/v1/purchases - Insert purchase bill & update stock/payables using Sequelize ORM
 purchasesRouter.post('/', async (req: Request, res: Response) => {
   try {
     const {
@@ -26,50 +26,47 @@ purchasesRouter.post('/', async (req: Request, res: Response) => {
     }, 0);
 
     if (isDbConnected()) {
-      const client = await pool.connect();
+      const t = await sequelize.transaction();
       try {
-        await client.query('BEGIN');
-
-        // Update Item Stock Levels & Purchase Rates in PostgreSQL items table
+        // Update Item Stock Levels & Purchase Rates in items table
         for (const item of items) {
-          if (item.itemId) {
-            await client.query(
-              `UPDATE items 
-               SET current_stock = current_stock + $1, 
-                   purchase_price = $2, 
-                   updated_at = CURRENT_TIMESTAMP 
-               WHERE id = $3`,
-              [Number(item.quantity) || 1, Number(item.unitPrice) || 0, item.itemId]
-            );
+          let dbItem = item.itemId ? await Item.findByPk(item.itemId, { transaction: t }) : null;
+          if (!dbItem && item.itemName) {
+            dbItem = await Item.findOne({ where: { name: item.itemName }, transaction: t });
+          }
+          if (dbItem) {
+            const curStock = (dbItem.get('currentStock') as number) || 0;
+            await dbItem.update({
+              currentStock: curStock + (Number(item.quantity) || 1),
+              purchasePrice: Number(item.unitPrice) || (dbItem.get('purchasePrice') as number) || 0
+            }, { transaction: t });
           }
         }
 
-        // Update Supplier Account Balance in PostgreSQL parties table
-        if (supplierId) {
-          await client.query(
-            `UPDATE parties SET current_balance = current_balance + $1 WHERE id = $2`,
-            [totalCost, supplierId]
-          );
+        // Update Supplier Account Balance in parties table
+        if (supplierId || supplierName) {
+          let supplier = supplierId ? await Party.findByPk(supplierId, { transaction: t }) : null;
+          if (!supplier && supplierName) {
+            supplier = await Party.findOne({ where: { name: supplierName }, transaction: t });
+          }
+          if (supplier) {
+            const curBal = (supplier.get('currentBalance') as number) || 0;
+            await supplier.update({ currentBalance: curBal + totalCost }, { transaction: t });
+          }
         }
 
-        // Insert Journal Entry in PostgreSQL journal_entries table
-        await client.query(
-          `INSERT INTO journal_entries 
-            (tenant_id, entry_number, reference_id, transaction_date, description, total_debit, total_credit)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [
-            tenantId,
-            `JE-PUR-${Date.now().toString().slice(-4)}`,
-            billNumber,
-            billDate,
-            `Purchase Inward Bill ${billNumber} from ${supplierName}`,
-            totalCost,
-            totalCost
-          ]
-        );
+        // Insert Journal Entry in journal_entries table
+        await JournalEntry.create({
+          tenantId,
+          entryNumber: `JE-PUR-${Date.now().toString().slice(-4)}`,
+          referenceId: billNumber,
+          transactionDate: billDate,
+          description: `Purchase Inward Bill ${billNumber} from ${supplierName}`,
+          totalDebit: totalCost,
+          totalCredit: totalCost
+        }, { transaction: t });
 
-        await client.query('COMMIT');
-        client.release();
+        await t.commit();
 
         return res.status(201).json({
           success: true,
@@ -77,8 +74,7 @@ purchasesRouter.post('/', async (req: Request, res: Response) => {
           data: { billNumber, supplierName, totalCost }
         });
       } catch (err: any) {
-        await client.query('ROLLBACK');
-        client.release();
+        await t.rollback();
         return res.status(500).json({ success: false, error: err.message });
       }
     }

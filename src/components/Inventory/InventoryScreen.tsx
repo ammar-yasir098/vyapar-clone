@@ -52,7 +52,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items = [], on
 
   const handleCreateItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newItem.name || !newItem.salesPrice) return;
+    if (!newItem.name || newItem.salesPrice === undefined || newItem.salesPrice === null) return;
 
     const itemPayload = {
       tenantId: 'default-tenant',

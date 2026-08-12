@@ -95,8 +95,8 @@ Item.init(
     unitType: { type: DataTypes.STRING, defaultValue: 'PCS', field: 'unit_type' },
     purchasePrice: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'purchase_price' },
     salesPrice: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'sales_price' },
-    minStockAlert: { type: DataTypes.INTEGER, defaultValue: 5, field: 'min_stock_alert' },
-    currentStock: { type: DataTypes.INTEGER, defaultValue: 0, field: 'current_stock' },
+    minStockAlert: { type: DataTypes.FLOAT, defaultValue: 5.0, field: 'min_stock_alert' },
+    currentStock: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'current_stock' },
     cgstRate: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'cgst_rate' },
     sgstRate: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'sgst_rate' },
     igstRate: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'igst_rate' },
@@ -199,7 +199,7 @@ InvoiceItem.init(
     itemName: { type: DataTypes.STRING, allowNull: false, field: 'item_name' },
     hsnSacCode: { type: DataTypes.STRING, allowNull: true, field: 'hsn_sac_code' },
     unitType: { type: DataTypes.STRING, defaultValue: 'PCS', field: 'unit_type' },
-    quantity: { type: DataTypes.INTEGER, allowNull: false },
+    quantity: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 1.0 },
     unitPrice: { type: DataTypes.FLOAT, allowNull: false, field: 'unit_price' },
     purchasePrice: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'purchase_price' },
     taxAmount: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'tax_amount' },
@@ -237,6 +237,56 @@ JournalEntry.init(
   { sequelize, modelName: 'JournalEntry', tableName: 'journal_entries', timestamps: false }
 );
 
+// 7. LedgerAccount Model
+export class LedgerAccount extends Model {
+  declare id: number;
+  declare tenantId: string;
+  declare accountCode: string;
+  declare accountName: string;
+  declare accountType: string;
+  declare balance: number;
+  declare description: string;
+}
+LedgerAccount.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
+    accountCode: { type: DataTypes.STRING, allowNull: false, field: 'account_code' },
+    accountName: { type: DataTypes.STRING, allowNull: false, field: 'account_name' },
+    accountType: { type: DataTypes.STRING, defaultValue: 'ASSET', field: 'account_type' },
+    balance: { type: DataTypes.FLOAT, defaultValue: 0.0 },
+    description: { type: DataTypes.TEXT, allowNull: true }
+  },
+  { sequelize, modelName: 'LedgerAccount', tableName: 'ledger_accounts', timestamps: false }
+);
+
+/**
+ * Seeds standard Chart of Accounts in PostgreSQL if empty
+ */
+export async function seedServerLedgerAccounts() {
+  try {
+    const count = await LedgerAccount.count();
+    if (count === 0) {
+      console.log('🌱 Seeding PostgreSQL Chart of Accounts...');
+      await LedgerAccount.bulkCreate([
+        { tenantId: 'default-tenant', accountCode: '1010', accountName: 'Cash in Hand', accountType: 'ASSET', balance: 0.0, description: 'Physical cash at POS counter' },
+        { tenantId: 'default-tenant', accountCode: '1020', accountName: 'Bank / JazzCash / EasyPaisa', accountType: 'ASSET', balance: 0.0, description: 'Operating bank account for digital payments' },
+        { tenantId: 'default-tenant', accountCode: '1030', accountName: 'Accounts Receivable', accountType: 'ASSET', balance: 0.0, description: 'Customer credit receivables' },
+        { tenantId: 'default-tenant', accountCode: '1040', accountName: 'Merchandise Inventory Asset', accountType: 'ASSET', balance: 0.0, description: 'Total inventory stock value at cost' },
+        { tenantId: 'default-tenant', accountCode: '2010', accountName: 'Accounts Payable', accountType: 'LIABILITY', balance: 0.0, description: 'Supplier payables' },
+        { tenantId: 'default-tenant', accountCode: '2020', accountName: 'Sales Tax / FBR Liability', accountType: 'LIABILITY', balance: 0.0, description: 'Collected Sales Tax payable to FBR / PRA' },
+        { tenantId: 'default-tenant', accountCode: '3010', accountName: 'Owner Equity Capital', accountType: 'EQUITY', balance: 0.0, description: 'Initial owner capital investment' },
+        { tenantId: 'default-tenant', accountCode: '4010', accountName: 'Sales Revenue', accountType: 'REVENUE', balance: 0.0, description: 'Gross merchandise sales revenue' },
+        { tenantId: 'default-tenant', accountCode: '5010', accountName: 'Cost of Goods Sold (COGS)', accountType: 'EXPENSE', balance: 0.0, description: 'Purchase cost of goods sold' },
+        { tenantId: 'default-tenant', accountCode: '5020', accountName: 'Sales Discounts Allowed', accountType: 'EXPENSE', balance: 0.0, description: 'Discounts granted to customers' }
+      ]);
+      console.log('✅ PostgreSQL Chart of Accounts seeded successfully.');
+    }
+  } catch (err) {
+    console.error('Error seeding Ledger Accounts:', err);
+  }
+}
+
 /**
  * Bootstrap database creation and sync Sequelize ORM models
  */
@@ -269,8 +319,9 @@ export async function bootstrapSequelize() {
     console.log(`✅ Sequelize ORM successfully authenticated with PostgreSQL database '${databaseName}'`);
 
     // Sync ORM models with PostgreSQL tables
-    await sequelize.sync();
-    console.log(`✨ Sequelize Migration Complete: Database tables (company_profile, items, parties, invoices, invoice_items, journal_entries) ready!`);
+    await sequelize.sync({ alter: true });
+    await seedServerLedgerAccounts();
+    console.log(`✨ Sequelize Migration Complete: Database tables (company_profile, items, parties, invoices, invoice_items, journal_entries, ledger_accounts) ready!`);
     isSequelizeConnected = true;
   } catch (err: any) {
     console.warn(`⚠️ Sequelize Connection Warning: ${err.message}`);

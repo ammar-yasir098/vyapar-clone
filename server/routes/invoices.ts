@@ -109,8 +109,11 @@ invoicesRouter.post('/', async (req: Request, res: Response) => {
           );
 
           // 3. Decrement Product Stock Level in PostgreSQL
-          if (line.itemId) {
-            const dbItem = await Item.findByPk(line.itemId, { transaction: t });
+          if (line.itemId || line.itemName) {
+            let dbItem = (line.itemId && typeof line.itemId === 'number') ? await Item.findByPk(line.itemId, { transaction: t }) : null;
+            if (!dbItem && line.itemName) {
+              dbItem = await Item.findOne({ where: { name: line.itemName }, transaction: t });
+            }
             if (dbItem) {
               const curStock = (dbItem.get('currentStock') as number) || 0;
               await dbItem.update({ currentStock: Math.max(0, curStock - line.quantity) }, { transaction: t });
@@ -120,7 +123,7 @@ invoicesRouter.post('/', async (req: Request, res: Response) => {
 
         // 4. Update Party Balance if Sale has Unpaid Dues
         if (dueAmount > 0) {
-          let party = partyId ? await Party.findByPk(partyId, { transaction: t }) : null;
+          let party = (partyId && typeof partyId === 'number') ? await Party.findByPk(partyId, { transaction: t }) : null;
           if (!party && partyName && partyName !== 'Walk-in Retail Customer') {
             party = await Party.findOne({ where: { name: partyName }, transaction: t });
           }
