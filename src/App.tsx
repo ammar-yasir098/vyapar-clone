@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, seedDatabaseIfEmpty, DEFAULT_BUSINESS } from './db';
+import { db, seedDatabaseIfEmpty, seedLedgerAccountsForTenant, seedWalkInCustomerForTenant, DEFAULT_BUSINESS } from './db';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { DashboardScreen } from './components/Dashboard/DashboardScreen';
@@ -18,7 +18,17 @@ import { SyncModal } from './components/Sync/SyncModal';
 import { EditProfileScreen } from './components/Company/EditProfileScreen';
 import { Invoice, BusinessDetails } from './types';
 import { triggerThermalPrint } from './services/printer';
-import { fetchServerItems, fetchServerParties, fetchServerInvoices, fetchServerCompanyProfile } from './services/api';
+import { 
+  fetchServerItems, 
+  fetchServerParties, 
+  fetchServerInvoices, 
+  fetchServerCompanyProfile, 
+  fetchServerAllCompanies, 
+  saveServerCompanyProfile,
+  fetchServerLedgerAccounts,
+  fetchServerJournalEntries
+} from './services/api';
+import { syncLedgerAccountBalances } from './services/ledger';
 
 export function App() {
   // Read activeTab initial state from hash or localStorage so refresh remembers current screen
@@ -41,6 +51,8 @@ export function App() {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [businessDetails, setBusinessDetails] = useState<BusinessDetails>(getInitialBusiness());
+  const [companies, setCompanies] = useState<BusinessDetails[]>([]);
+  const [currentTenantId, setCurrentTenantId] = useState<string>(localStorage.getItem('vyapar_current_tenant') || 'default-tenant');
 
   const setActiveTab = (tab: string) => {
     setActiveTabState(tab);
@@ -64,52 +76,102 @@ export function App() {
   useEffect(() => {
     async function syncPostgresToClient() {
       await seedDatabaseIfEmpty();
+      await seedLedgerAccountsForTenant(currentTenantId);
+      await seedWalkInCustomerForTenant(currentTenantId);
+      await syncLedgerAccountBalances(currentTenantId);
 
       try {
-        // Fetch company profile from PostgreSQL
-        const serverCompany = await fetchServerCompanyProfile();
-        if (serverCompany && serverCompany.name) {
-          setBusinessDetails({
-            name: serverCompany.name,
-            phone: serverCompany.phone || '+92 300 xxxxxxx',
-            address: serverCompany.address || '',
-            gstin: serverCompany.gstin || 'NTN: 7654321-0',
+        // Fetch all company profiles (Multi-Store / Multi-Branch)
+        const allCompanies = await fetchServerAllCompanies();
+        if (allCompanies && allCompanies.length > 0) {
+          const mappedCompanies = allCompanies.map((c: any) => ({
+            tenantId: c.tenantId || 'default-tenant',
+            name: c.name || 'My Store',
+            phone: c.phone || '+92 300 xxxxxxx',
+            address: c.address || '',
+            gstin: c.gstin || 'NTN: 7654321-0',
             state: 'Punjab, Pakistan',
             tagline: 'Quality Products at Everyday Low Prices',
-            upiId: ''
-          });
+            email: c.email || '',
+            businessType: c.businessType || 'Retail'
+          }));
+          setCompanies(mappedCompanies);
+
+          // Find active company profile
+          const activeCompany = mappedCompanies.find((c: any) => c.tenantId === currentTenantId) || mappedCompanies[0];
+          setBusinessDetails(activeCompany);
+        } else {
+          const serverCompany = await fetchServerCompanyProfile(currentTenantId);
+          if (serverCompany && serverCompany.name) {
+            const comp = {
+              tenantId: serverCompany.tenantId || currentTenantId,
+              name: serverCompany.name,
+              phone: serverCompany.phone || '+92 300 xxxxxxx',
+              address: serverCompany.address || '',
+              gstin: serverCompany.gstin || 'NTN: 7654321-0',
+              state: 'Punjab, Pakistan',
+              tagline: 'Quality Products at Everyday Low Prices',
+              email: serverCompany.email || ''
+            };
+            setBusinessDetails(comp);
+            setCompanies([comp]);
+          }
         }
 
-        // Fetch live catalog, parties, and invoices from PostgreSQL API
-        const serverItems = await fetchServerItems();
-        const serverParties = await fetchServerParties();
-        const serverInvoices = await fetchServerInvoices();
+        // Fetch live catalog, parties, and invoices for current tenant from PostgreSQL API
+        const serverItems = await fetchServerItems(currentTenantId);
+        const serverParties = await fetchServerParties(currentTenantId);
+        const serverInvoices = await fetchServerInvoices(currentTenantId);
+        const serverAccounts = await fetchServerLedgerAccounts(currentTenantId);
+        const serverJournals = await fetchServerJournalEntries(currentTenantId);
 
         if (serverItems && serverItems.length > 0) {
-          await db.items.clear();
-          await db.items.bulkAdd(serverItems);
+          for (const sItem of serverItems) {
+            const existing = await db.items.where('name').equalsIgnoreCase(sItem.name).first();
+            if (!existing) {
+              await db.items.add({ ...sItem, tenantId: sItem.tenantId || currentTenantId });
+            }
+          }
         }
 
         if (serverParties && serverParties.length > 0) {
-          const localParties = await db.parties.toArray();
-          const mergedParties = serverParties.map((sp: any) => {
-            const lp = localParties.find(p => p.id === sp.id || p.name === sp.name);
-            if (lp) {
-              return {
-                ...sp,
-                currentBalance: lp.currentBalance !== undefined ? lp.currentBalance : sp.currentBalance,
-                openingBalance: lp.openingBalance !== undefined ? lp.openingBalance : sp.openingBalance
-              };
+          for (const sParty of serverParties) {
+            const existing = await db.parties.where('name').equalsIgnoreCase(sParty.name).first();
+            if (!existing) {
+              await db.parties.add({ ...sParty, tenantId: sParty.tenantId || currentTenantId });
             }
-            return sp;
-          });
-          await db.parties.clear();
-          await db.parties.bulkAdd(mergedParties);
+          }
         }
 
         if (serverInvoices && serverInvoices.length > 0) {
-          await db.invoices.clear();
-          await db.invoices.bulkAdd(serverInvoices);
+          for (const sInv of serverInvoices) {
+            const existing = await db.invoices.where('invoiceId').equals(sInv.invoiceId).first();
+            if (!existing) {
+              await db.invoices.add({ ...sInv, tenantId: sInv.tenantId || currentTenantId });
+            }
+          }
+        }
+
+        if (serverAccounts && serverAccounts.length > 0) {
+          for (const sAcc of serverAccounts) {
+            const existing = await db.ledgerAccounts
+              .filter(a => (a.tenantId || 'default-tenant') === currentTenantId && a.accountCode === sAcc.accountCode)
+              .first();
+            if (!existing) {
+              await db.ledgerAccounts.add({ ...sAcc, tenantId: sAcc.tenantId || currentTenantId });
+            }
+          }
+        }
+
+        if (serverJournals && serverJournals.length > 0) {
+          for (const sJe of serverJournals) {
+            const existing = await db.journalEntries
+              .filter(j => (j.tenantId || 'default-tenant') === currentTenantId && j.entryNumber === sJe.entryNumber)
+              .first();
+            if (!existing) {
+              await db.journalEntries.add({ ...sJe, tenantId: sJe.tenantId || currentTenantId });
+            }
+          }
         }
       } catch (err) {
         console.warn('Backend server offline or unreachable. Operating in local mode.', err);
@@ -119,7 +181,7 @@ export function App() {
     }
 
     syncPostgresToClient();
-  }, []);
+  }, [currentTenantId]);
 
   // Global Ctrl+F listener for Command Palette Search
   useEffect(() => {
@@ -133,15 +195,73 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Reactive Dexie Live Queries
-  const items = useLiveQuery(() => db.items.toArray(), []) || [];
-  const parties = useLiveQuery(() => db.parties.toArray(), []) || [];
-  const invoices = useLiveQuery(() => db.invoices.reverse().toArray(), []) || [];
-  const accounts = useLiveQuery(() => db.ledgerAccounts.toArray(), []) || [];
-  const journalEntries = useLiveQuery(() => db.journalEntries.reverse().toArray(), []) || [];
+  // Reactive Dexie Live Queries filtered by active store tenantId
+  const allItems = useLiveQuery(() => db.items.toArray(), []) || [];
+  const allParties = useLiveQuery(() => db.parties.toArray(), []) || [];
+  const allInvoices = useLiveQuery(() => db.invoices.reverse().toArray(), []) || [];
+  const allAccounts = useLiveQuery(() => db.ledgerAccounts.toArray(), []) || [];
+  const allJournalEntries = useLiveQuery(() => db.journalEntries.reverse().toArray(), []) || [];
+
+  const items = allItems.filter(item => (item.tenantId || 'default-tenant') === currentTenantId);
+  const parties = allParties.filter(party => (party.tenantId || 'default-tenant') === currentTenantId);
+  const invoices = allInvoices.filter(inv => (inv.tenantId || 'default-tenant') === currentTenantId);
+  const accounts = allAccounts.filter(acc => (acc.tenantId || 'default-tenant') === currentTenantId);
+  const journalEntries = allJournalEntries.filter(je => (je.tenantId || 'default-tenant') === currentTenantId);
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');
+  };
+
+  const handleSelectCompany = async (tenantId: string) => {
+    setCurrentTenantId(tenantId);
+    localStorage.setItem('vyapar_current_tenant', tenantId);
+
+    const selectedComp = companies.find(c => (c.tenantId || 'default-tenant') === tenantId);
+    if (selectedComp) {
+      setBusinessDetails(selectedComp);
+      localStorage.setItem('vyapar_business_details', JSON.stringify(selectedComp));
+    } else {
+      const serverComp = await fetchServerCompanyProfile(tenantId);
+      if (serverComp && serverComp.name) {
+        const comp = {
+          tenantId: serverComp.tenantId || tenantId,
+          name: serverComp.name,
+          phone: serverComp.phone || '+92 300 xxxxxxx',
+          address: serverComp.address || '',
+          gstin: serverComp.gstin || 'NTN: 7654321-0',
+          state: 'Punjab, Pakistan',
+          tagline: 'Quality Products at Everyday Low Prices',
+          email: serverComp.email || ''
+        };
+        setBusinessDetails(comp);
+        localStorage.setItem('vyapar_business_details', JSON.stringify(comp));
+      }
+    }
+  };
+
+  const handleCreateCompany = async (newCompanyData: Partial<BusinessDetails>) => {
+    const newTenantId = `tenant-${Date.now().toString().slice(-6)}`;
+    const fullCompanyData = {
+      tenantId: newTenantId,
+      name: newCompanyData.name || 'New Branch',
+      phone: newCompanyData.phone || '+92 300 xxxxxxx',
+      email: newCompanyData.email || '',
+      address: newCompanyData.address || '',
+      gstin: newCompanyData.gstin || 'NTN: 1234567-8',
+      businessType: newCompanyData.businessType || 'Retail',
+      businessCategory: newCompanyData.businessCategory || 'Supermarket & FMCG'
+    };
+
+    await saveServerCompanyProfile(fullCompanyData);
+
+    const newCompObj: BusinessDetails = {
+      ...fullCompanyData,
+      state: 'Punjab, Pakistan',
+      tagline: 'Quality Products at Everyday Low Prices'
+    };
+
+    setCompanies(prev => [...prev, newCompObj]);
+    handleSelectCompany(newTenantId);
   };
 
   if (!isDbLoaded) {
@@ -158,12 +278,16 @@ export function App() {
       {/* Top Header */}
       <Header
         business={businessDetails}
+        companies={companies}
+        currentTenantId={currentTenantId}
         itemCount={items.length}
         invoiceCount={invoices.length}
         activeTab={activeTab}
         onNavigateToTab={setActiveTab}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
         onOpenSyncModal={() => setIsSyncModalOpen(true)}
+        onSelectCompany={handleSelectCompany}
+        onCreateCompany={handleCreateCompany}
       />
 
       {/* Main Body */}
@@ -189,11 +313,11 @@ export function App() {
           )}
 
           {activeTab === 'inventory' && (
-            <InventoryScreen items={items} onItemUpdated={() => {}} />
+            <InventoryScreen items={items} business={businessDetails} onItemUpdated={() => {}} />
           )}
 
           {activeTab === 'parties' && (
-            <PartiesScreen parties={parties} invoices={invoices} onPartyUpdated={() => {}} />
+            <PartiesScreen parties={parties} invoices={invoices} business={businessDetails} onPartyUpdated={() => {}} />
           )}
 
           {activeTab === 'purchase' && (
@@ -206,7 +330,7 @@ export function App() {
           )}
 
           {activeTab === 'ledger' && (
-            <LedgerScreen accounts={accounts} journalEntries={journalEntries} />
+            <LedgerScreen accounts={accounts} journalEntries={journalEntries} business={businessDetails} />
           )}
 
           {activeTab === 'invoices' && (

@@ -6,8 +6,11 @@ export const invoicesRouter = Router();
 // GET /api/v1/invoices - Fetch invoices with line items using Sequelize
 invoicesRouter.get('/', async (req: Request, res: Response) => {
   try {
+    const { tenantId } = req.query;
     if (isDbConnected()) {
+      const whereClause = tenantId ? { tenantId: String(tenantId) } : {};
       const invoices = await Invoice.findAll({
+        where: whereClause,
         include: [{ model: InvoiceItem, as: 'items' }],
         order: [['id', 'DESC']]
       });

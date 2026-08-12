@@ -193,7 +193,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   const handleQuickAddParty = async () => {
     if (!newPartyName || !newPartyPhone) return;
     const partyId = await db.parties.add({
-      tenantId: 'default-tenant',
+      tenantId: business.tenantId || 'default-tenant',
       name: newPartyName,
       phone: newPartyPhone,
       type: 'CUSTOMER',
@@ -228,13 +228,17 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   const handleSaveAndPrint = async () => {
     if (cartItems.length === 0) return;
 
+    const activeTenantId = business.tenantId || 'default-tenant';
+    const defaultWalkIn = await db.parties.filter(p => (p.tenantId || 'default-tenant') === activeTenantId && p.name === 'Walk-in Retail Customer').first();
+    const effectiveParty = selectedParty || defaultWalkIn;
+
     const newInvoice: Invoice = {
       invoiceId: `inv-${Date.now()}`,
-      tenantId: 'default-tenant',
-      partyId: selectedParty?.id,
-      partyName: selectedParty ? selectedParty.name : 'Walk-in Retail Customer',
-      partyPhone: selectedParty ? selectedParty.phone : '03009999999',
-      partyGstin: selectedParty?.gstin,
+      tenantId: activeTenantId,
+      partyId: effectiveParty?.id,
+      partyName: effectiveParty ? effectiveParty.name : 'Walk-in Retail Customer',
+      partyPhone: effectiveParty ? effectiveParty.phone : '03009999999',
+      partyGstin: effectiveParty?.gstin,
       invoiceNumber,
       invoiceDate: new Date().toISOString().split('T')[0],
       items: cartItems,
@@ -258,15 +262,15 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
     const savedId = await db.invoices.add(newInvoice);
     newInvoice.id = savedId;
 
-    // Update selected Party balance if dueAmount > 0
-    if (selectedParty && selectedParty.id && dueAmount > 0) {
-      const curVal = Number(selectedParty.currentBalance);
+    // Update Party balance if dueAmount > 0
+    if (effectiveParty && effectiveParty.id && dueAmount > 0) {
+      const curVal = Number(effectiveParty.currentBalance);
       const currentBal = isNaN(curVal) || !isFinite(curVal) ? 0 : curVal;
       const safeDue = isNaN(Number(dueAmount)) ? 0 : Number(dueAmount);
       const newBal = currentBal + safeDue;
       const validBal = isNaN(newBal) || !isFinite(newBal) ? safeDue : newBal;
-      await db.parties.update(selectedParty.id, { currentBalance: validBal });
-      await syncManager.logMutation('PARTY', String(selectedParty.id), 'UPDATE', { id: selectedParty.id, currentBalance: validBal });
+      await db.parties.update(effectiveParty.id, { currentBalance: validBal });
+      await syncManager.logMutation('PARTY', String(effectiveParty.id), 'UPDATE', { id: effectiveParty.id, currentBalance: validBal });
     }
 
     // Log to Offline Sync Queue

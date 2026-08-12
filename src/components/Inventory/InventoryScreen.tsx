@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
 import { Package, Plus, Search, AlertTriangle, Edit2, Trash2, Layers } from 'lucide-react';
-import { Item, UnitType } from '../../types';
+import { Item, UnitType, BusinessDetails } from '../../types';
 import { db } from '../../db';
 import { createServerItem, updateServerItem, adjustServerItemStock, deleteServerItem } from '../../services/api';
 import { syncManager } from '../../services/sync';
 
 interface InventoryScreenProps {
   items: Item[];
+  business?: BusinessDetails;
   onItemUpdated: () => void;
 }
 
-export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items = [], onItemUpdated }) => {
+export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items = [], business, onItemUpdated }) => {
   const safeItems = Array.isArray(items) ? items : [];
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -31,11 +32,11 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items = [], on
     unitType: 'PCS',
     purchasePrice: 0,
     salesPrice: 0,
-    minStockAlert: 10,
-    currentStock: 50,
-    cgstRate: 9,
-    sgstRate: 9,
-    igstRate: 18
+    minStockAlert: 5,
+    currentStock: 0,
+    cgstRate: 0,
+    sgstRate: 0,
+    igstRate: 0
   });
 
   const filteredItems = safeItems.filter(item => {
@@ -55,7 +56,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items = [], on
     if (!newItem.name || newItem.salesPrice === undefined || newItem.salesPrice === null) return;
 
     const itemPayload = {
-      tenantId: 'default-tenant',
+      tenantId: business?.tenantId || 'default-tenant',
       name: newItem.name,
       skuCode: newItem.skuCode || `SKU-${Date.now().toString().slice(-4)}`,
       barcode: newItem.barcode || Math.floor(1000000000000 + Math.random() * 9000000000000).toString(),

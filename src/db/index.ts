@@ -38,34 +38,38 @@ export const DEFAULT_BUSINESS: BusinessDetails = {
 };
 
 /**
- * Initializes clean Chart of Accounts & default Walk-in customer with ZERO pre-loaded products or bills.
+ * Seeds standard 10 Chart of Accounts for a specific store tenant if not present.
  */
-export async function seedDatabaseIfEmpty() {
-  const accountCount = await db.ledgerAccounts.count();
-  if (accountCount === 0) {
-    console.log('Initializing fresh Chart of Accounts...');
-
-    // Standard Chart of Accounts (All Balances starting at 0)
+export async function seedLedgerAccountsForTenant(tenantId: string = 'default-tenant') {
+  const existingAccounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === tenantId).toArray();
+  if (existingAccounts.length === 0) {
     await db.ledgerAccounts.bulkAdd([
-      { tenantId: 'default-tenant', accountCode: '1010', accountName: 'Cash in Hand', accountType: 'ASSET', balance: 0.00, description: 'Physical cash at POS counter' },
-      { tenantId: 'default-tenant', accountCode: '1020', accountName: 'Bank / JazzCash / EasyPaisa', accountType: 'ASSET', balance: 0.00, description: 'Operating bank account for digital payments' },
-      { tenantId: 'default-tenant', accountCode: '1030', accountName: 'Accounts Receivable', accountType: 'ASSET', balance: 0.00, description: 'Customer credit receivables' },
-      { tenantId: 'default-tenant', accountCode: '1040', accountName: 'Merchandise Inventory Asset', accountType: 'ASSET', balance: 0.00, description: 'Total inventory stock value at cost' },
-      { tenantId: 'default-tenant', accountCode: '2010', accountName: 'Accounts Payable', accountType: 'LIABILITY', balance: 0.00, description: 'Supplier payables' },
-      { tenantId: 'default-tenant', accountCode: '2020', accountName: 'Sales Tax / FBR Liability', accountType: 'LIABILITY', balance: 0.00, description: 'Collected Sales Tax payable to FBR / PRA' },
-      { tenantId: 'default-tenant', accountCode: '3010', accountName: 'Owner Equity Capital', accountType: 'EQUITY', balance: 0.00, description: 'Initial owner capital investment' },
-      { tenantId: 'default-tenant', accountCode: '4010', accountName: 'Sales Revenue', accountType: 'REVENUE', balance: 0.00, description: 'Gross merchandise sales revenue' },
-      { tenantId: 'default-tenant', accountCode: '5010', accountName: 'Cost of Goods Sold (COGS)', accountType: 'EXPENSE', balance: 0.00, description: 'Purchase cost of goods sold' },
-      { tenantId: 'default-tenant', accountCode: '5020', accountName: 'Sales Discounts Allowed', accountType: 'EXPENSE', balance: 0.00, description: 'Discounts granted to customers' }
+      { tenantId, accountCode: '1010', accountName: 'Cash in Hand', accountType: 'ASSET', balance: 0.00, description: 'Physical cash at POS counter' },
+      { tenantId, accountCode: '1020', accountName: 'HDFC Bank Account', accountType: 'ASSET', balance: 0.00, description: 'Operating bank account for UPI/Card' },
+      { tenantId, accountCode: '1030', accountName: 'Accounts Receivable', accountType: 'ASSET', balance: 0.00, description: 'Customer credit receivables' },
+      { tenantId, accountCode: '1040', accountName: 'Merchandise Inventory Asset', accountType: 'ASSET', balance: 0.00, description: 'Total inventory stock value at cost' },
+      { tenantId, accountCode: '2010', accountName: 'Accounts Payable', accountType: 'LIABILITY', balance: 0.00, description: 'Supplier payables' },
+      { tenantId, accountCode: '2020', accountName: 'GST Output Tax Liability', accountType: 'LIABILITY', balance: 0.00, description: 'Collected GST payable to tax authority' },
+      { tenantId, accountCode: '3010', accountName: 'Owner Equity Capital', accountType: 'EQUITY', balance: 0.00, description: 'Initial owner capital investment' },
+      { tenantId, accountCode: '4010', accountName: 'Sales Revenue', accountType: 'REVENUE', balance: 0.00, description: 'Gross merchandise sales revenue' },
+      { tenantId, accountCode: '5010', accountName: 'Cost of Goods Sold (COGS)', accountType: 'EXPENSE', balance: 0.00, description: 'Purchase cost of goods sold' },
+      { tenantId, accountCode: '5020', accountName: 'Sales Discounts Allowed', accountType: 'EXPENSE', balance: 0.00, description: 'Discounts granted to customers' }
     ]);
   }
+}
 
-  const existingWalkIn = await db.parties.where('name').equals('Walk-in Retail Customer').first();
-  if (!existingWalkIn) {
-    // Upsert default Walk-in Customer with explicit id to prevent React 18 StrictMode race condition
-    await db.parties.put({
-      id: 1,
-      tenantId: 'default-tenant',
+/**
+ * Seeds default Walk-in Retail Customer for a specific store tenant if not present.
+ * Automatically purges any duplicate Walk-in customer entries for that store.
+ */
+export async function seedWalkInCustomerForTenant(tenantId: string = 'default-tenant') {
+  const walkIns = await db.parties
+    .filter(p => (p.tenantId || 'default-tenant') === tenantId && p.name === 'Walk-in Retail Customer')
+    .toArray();
+
+  if (walkIns.length === 0) {
+    await db.parties.add({
+      tenantId,
       name: 'Walk-in Retail Customer',
       phone: '03009999999',
       type: 'CUSTOMER',
@@ -74,16 +78,32 @@ export async function seedDatabaseIfEmpty() {
       currentBalance: 0,
       createdAt: new Date().toISOString()
     });
-  }
-
-  // Deduplicate any accidental duplicate Walk-in Customer entries
-  const allWalkIns = await db.parties.where('name').equals('Walk-in Retail Customer').toArray();
-  if (allWalkIns.length > 1) {
-    for (let i = 1; i < allWalkIns.length; i++) {
-      if (allWalkIns[i].id) {
-        await db.parties.delete(allWalkIns[i].id!);
+  } else if (walkIns.length > 1) {
+    // Delete duplicate entries, keeping only the first one
+    for (let i = 1; i < walkIns.length; i++) {
+      if (walkIns[i].id) {
+        await db.parties.delete(walkIns[i].id!);
       }
     }
+  }
+}
+
+/**
+ * Initializes clean Chart of Accounts & default Walk-in customer with ZERO pre-loaded products or bills.
+ */
+export async function seedDatabaseIfEmpty() {
+  await seedLedgerAccountsForTenant('default-tenant');
+  await seedWalkInCustomerForTenant('default-tenant');
+
+  // Clean up any dummy basmati items or test customers from local Dexie IndexedDB
+  const basmatiItems = await db.items.filter(i => (i.name || '').toLowerCase().includes('basmati')).toArray();
+  for (const item of basmatiItems) {
+    if (item.id) await db.items.delete(item.id);
+  }
+
+  const testCustomers = await db.parties.filter(p => (p.name || '').toLowerCase().includes('test customer')).toArray();
+  for (const party of testCustomers) {
+    if (party.id) await db.parties.delete(party.id);
   }
 
   // Deduplicate any duplicate ledger accounts by accountCode

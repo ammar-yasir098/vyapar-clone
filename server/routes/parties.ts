@@ -1,13 +1,27 @@
 import { Router, Request, Response } from 'express';
-import { Party, JournalEntry, isDbConnected } from '../db/sequelize.js';
+import { Party, JournalEntry, Invoice, LedgerAccount, isDbConnected } from '../db/sequelize.js';
 
 export const partiesRouter = Router();
 
 // GET /api/v1/parties - Fetch party accounts using Sequelize
 partiesRouter.get('/', async (req: Request, res: Response) => {
   try {
+    const { tenantId = 'default-tenant' } = req.query;
     if (isDbConnected()) {
-      const parties = await Party.findAll({ order: [['name', 'ASC']] });
+      const whereClause = { tenantId: String(tenantId) };
+      let parties = await Party.findAll({ where: whereClause, order: [['name', 'ASC']] });
+      if (parties.length === 0) {
+        const defaultWalkIn = await Party.create({
+          tenantId: String(tenantId),
+          name: 'Walk-in Retail Customer',
+          phone: '03009999999',
+          type: 'CUSTOMER',
+          openingBalance: 0,
+          balanceType: 'RECEIVABLE',
+          currentBalance: 0
+        });
+        parties = [defaultWalkIn];
+      }
       return res.json({ success: true, count: parties.length, data: parties });
     }
     return res.json({ success: true, count: 0, data: [] });
@@ -111,6 +125,7 @@ partiesRouter.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     if (isDbConnected()) {
+      await Invoice.update({ partyId: null }, { where: { partyId: Number(id) } });
       await Party.destroy({ where: { id: Number(id) } });
     }
     return res.json({ success: true, message: `Party ${id} deleted` });

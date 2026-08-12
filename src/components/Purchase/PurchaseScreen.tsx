@@ -145,16 +145,16 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       await syncManager.logMutation('PARTY', String(selectedSupplier.id), 'UPDATE', { id: selectedSupplier.id, currentBalance: newBal });
     }
 
-    // 3. Post Double-Entry Journal Entry
-    const accounts = await db.ledgerAccounts.toArray();
+    // 3. Post Double-Entry Journal Entry & Update Ledger Accounts
+    const currentTenantId = business?.tenantId || 'default-tenant';
+    const accounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === currentTenantId).toArray();
     const invAcc = accounts.find(a => a.accountCode === '1040') || accounts[0];
     const apAcc = accounts.find(a => a.accountCode === '2010') || accounts[0];
 
-    const count = await db.journalEntries.count();
     const suppName = selectedSupplier?.name || 'Supplier';
     const entryNumber = `JE-PUR-${Date.now().toString().slice(-4)}`;
     const journalEntry = {
-      tenantId: 'default-tenant',
+      tenantId: currentTenantId,
       entryNumber,
       referenceId: billNumber,
       transactionDate: billDate,
@@ -170,6 +170,15 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
 
     const jeId = await db.journalEntries.add(journalEntry);
     await syncManager.logMutation('JOURNAL', entryNumber, 'INSERT', { ...journalEntry, id: jeId });
+
+    if (invAcc && invAcc.id) {
+      const newInvBal = (invAcc.balance || 0) + totalAmount;
+      await db.ledgerAccounts.update(invAcc.id, { balance: newInvBal });
+    }
+    if (apAcc && apAcc.id) {
+      const newApBal = (apAcc.balance || 0) + totalAmount;
+      await db.ledgerAccounts.update(apAcc.id, { balance: newApBal });
+    }
 
     // 4. Send to PostgreSQL backend REST API
     if (selectedSupplier) {

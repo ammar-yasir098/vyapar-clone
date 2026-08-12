@@ -1,13 +1,15 @@
 import { Router, Request, Response } from 'express';
-import { Item, isDbConnected } from '../db/sequelize.js';
+import { Item, InvoiceItem, isDbConnected } from '../db/sequelize.js';
 
 export const itemsRouter = Router();
 
 // GET /api/v1/items - Fetch product catalog using Sequelize
 itemsRouter.get('/', async (req: Request, res: Response) => {
   try {
+    const { tenantId } = req.query;
     if (isDbConnected()) {
-      const items = await Item.findAll({ order: [['name', 'ASC']] });
+      const whereClause = tenantId ? { tenantId: String(tenantId) } : {};
+      const items = await Item.findAll({ where: whereClause, order: [['name', 'ASC']] });
       return res.json({ success: true, count: items.length, data: items });
     }
     return res.json({ success: true, count: 0, data: [] });
@@ -109,6 +111,7 @@ itemsRouter.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     if (isDbConnected()) {
+      await InvoiceItem.destroy({ where: { itemId: Number(id) } });
       await Item.destroy({ where: { id: Number(id) } });
     }
     return res.json({ success: true, message: `Product ${id} deleted` });

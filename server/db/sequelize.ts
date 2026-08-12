@@ -263,24 +263,24 @@ LedgerAccount.init(
 /**
  * Seeds standard Chart of Accounts in PostgreSQL if empty
  */
-export async function seedServerLedgerAccounts() {
+export async function seedServerLedgerAccounts(tenantId: string = 'default-tenant') {
   try {
-    const count = await LedgerAccount.count();
+    const count = await LedgerAccount.count({ where: { tenantId } });
     if (count === 0) {
-      console.log('🌱 Seeding PostgreSQL Chart of Accounts...');
+      console.log(`🌱 Seeding PostgreSQL Chart of Accounts for tenant '${tenantId}'...`);
       await LedgerAccount.bulkCreate([
-        { tenantId: 'default-tenant', accountCode: '1010', accountName: 'Cash in Hand', accountType: 'ASSET', balance: 0.0, description: 'Physical cash at POS counter' },
-        { tenantId: 'default-tenant', accountCode: '1020', accountName: 'Bank / JazzCash / EasyPaisa', accountType: 'ASSET', balance: 0.0, description: 'Operating bank account for digital payments' },
-        { tenantId: 'default-tenant', accountCode: '1030', accountName: 'Accounts Receivable', accountType: 'ASSET', balance: 0.0, description: 'Customer credit receivables' },
-        { tenantId: 'default-tenant', accountCode: '1040', accountName: 'Merchandise Inventory Asset', accountType: 'ASSET', balance: 0.0, description: 'Total inventory stock value at cost' },
-        { tenantId: 'default-tenant', accountCode: '2010', accountName: 'Accounts Payable', accountType: 'LIABILITY', balance: 0.0, description: 'Supplier payables' },
-        { tenantId: 'default-tenant', accountCode: '2020', accountName: 'Sales Tax / FBR Liability', accountType: 'LIABILITY', balance: 0.0, description: 'Collected Sales Tax payable to FBR / PRA' },
-        { tenantId: 'default-tenant', accountCode: '3010', accountName: 'Owner Equity Capital', accountType: 'EQUITY', balance: 0.0, description: 'Initial owner capital investment' },
-        { tenantId: 'default-tenant', accountCode: '4010', accountName: 'Sales Revenue', accountType: 'REVENUE', balance: 0.0, description: 'Gross merchandise sales revenue' },
-        { tenantId: 'default-tenant', accountCode: '5010', accountName: 'Cost of Goods Sold (COGS)', accountType: 'EXPENSE', balance: 0.0, description: 'Purchase cost of goods sold' },
-        { tenantId: 'default-tenant', accountCode: '5020', accountName: 'Sales Discounts Allowed', accountType: 'EXPENSE', balance: 0.0, description: 'Discounts granted to customers' }
+        { tenantId, accountCode: '1010', accountName: 'Cash in Hand', accountType: 'ASSET', balance: 0.0, description: 'Physical cash at POS counter' },
+        { tenantId, accountCode: '1020', accountName: 'HDFC Bank Account', accountType: 'ASSET', balance: 0.0, description: 'Operating bank account for UPI/Card' },
+        { tenantId, accountCode: '1030', accountName: 'Accounts Receivable', accountType: 'ASSET', balance: 0.0, description: 'Customer credit receivables' },
+        { tenantId, accountCode: '1040', accountName: 'Merchandise Inventory Asset', accountType: 'ASSET', balance: 0.0, description: 'Total inventory stock value at cost' },
+        { tenantId, accountCode: '2010', accountName: 'Accounts Payable', accountType: 'LIABILITY', balance: 0.0, description: 'Supplier payables' },
+        { tenantId, accountCode: '2020', accountName: 'GST Output Tax Liability', accountType: 'LIABILITY', balance: 0.0, description: 'Collected GST payable to tax authority' },
+        { tenantId, accountCode: '3010', accountName: 'Owner Equity Capital', accountType: 'EQUITY', balance: 0.0, description: 'Initial owner capital investment' },
+        { tenantId, accountCode: '4010', accountName: 'Sales Revenue', accountType: 'REVENUE', balance: 0.0, description: 'Gross merchandise sales revenue' },
+        { tenantId, accountCode: '5010', accountName: 'Cost of Goods Sold (COGS)', accountType: 'EXPENSE', balance: 0.0, description: 'Purchase cost of goods sold' },
+        { tenantId, accountCode: '5020', accountName: 'Sales Discounts Allowed', accountType: 'EXPENSE', balance: 0.0, description: 'Discounts granted to customers' }
       ]);
-      console.log('✅ PostgreSQL Chart of Accounts seeded successfully.');
+      console.log(`✅ PostgreSQL Chart of Accounts seeded successfully for '${tenantId}'.`);
     }
   } catch (err) {
     console.error('Error seeding Ledger Accounts:', err);

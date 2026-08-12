@@ -12,7 +12,7 @@ import {
   Printer,
   MapPin
 } from 'lucide-react';
-import { Party, PartyType, BalanceType, Invoice } from '../../types';
+import { Party, PartyType, BalanceType, Invoice, BusinessDetails } from '../../types';
 import { db } from '../../db';
 import { createServerParty, recordServerPartyPayment, deleteServerParty } from '../../services/api';
 import { syncManager } from '../../services/sync';
@@ -21,10 +21,11 @@ import { postPaymentJournalEntry, syncLedgerAccountBalances } from '../../servic
 interface PartiesScreenProps {
   parties: Party[];
   invoices?: Invoice[];
+  business?: BusinessDetails;
   onPartyUpdated: () => void;
 }
 
-export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices = [], onPartyUpdated }) => {
+export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices = [], business, onPartyUpdated }) => {
   const [search, setSearch] = useState('');
   const [filterTab, setFilterTab] = useState<'ALL' | 'CUSTOMER' | 'SUPPLIER'>('ALL');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -66,12 +67,16 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
     return matchesTab && matchesSearch;
   });
 
+  const displayParties = filteredParties.filter((p, index, self) =>
+    index === self.findIndex(t => (t.name || '').toLowerCase() === (p.name || '').toLowerCase())
+  );
+
   const handleCreateParty = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newParty.name || !newParty.phone) return;
 
     const partyPayload = {
-      tenantId: 'default-tenant',
+      tenantId: business?.tenantId || 'default-tenant',
       name: newParty.name,
       phone: newParty.phone,
       type: (newParty.type as PartyType) || 'CUSTOMER',
@@ -325,7 +330,7 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
               </tr>
             </thead>
             <tbody>
-              {filteredParties.map(party => {
+              {displayParties.map(party => {
                 const bal = getPartyEffectiveBalance(party);
                 const isCustomer = party.type === 'CUSTOMER';
                 return (

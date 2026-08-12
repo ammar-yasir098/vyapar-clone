@@ -14,14 +14,25 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
 }
 
 // COMPANY PROFILE
-export async function fetchServerCompanyProfile() {
+export async function fetchServerCompanyProfile(tenantId = 'default-tenant') {
   try {
-    const res = await fetchWithTimeout(`${API_BASE_URL}/company`);
+    const res = await fetchWithTimeout(`${API_BASE_URL}/company?tenantId=${encodeURIComponent(tenantId)}`);
     if (!res.ok) return null;
     const json = await res.json();
     return json.data || null;
   } catch (err) {
     return null;
+  }
+}
+
+export async function fetchServerAllCompanies() {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/company/all`);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return Array.isArray(json.data) ? json.data : [];
+  } catch (err) {
+    return [];
   }
 }
 
@@ -39,9 +50,10 @@ export async function saveServerCompanyProfile(companyData: any) {
 }
 
 // ITEMS
-export async function fetchServerItems() {
+export async function fetchServerItems(tenantId?: string) {
   try {
-    const res = await fetchWithTimeout(`${API_BASE_URL}/items`);
+    const url = tenantId ? `${API_BASE_URL}/items?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/items`;
+    const res = await fetchWithTimeout(url);
     if (!res.ok) return [];
     const json = await res.json();
     return json.data || [];
@@ -98,9 +110,10 @@ export async function deleteServerItem(id: number) {
 }
 
 // PARTIES
-export async function fetchServerParties() {
+export async function fetchServerParties(tenantId?: string) {
   try {
-    const res = await fetchWithTimeout(`${API_BASE_URL}/parties`);
+    const url = tenantId ? `${API_BASE_URL}/parties?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/parties`;
+    const res = await fetchWithTimeout(url);
     if (!res.ok) return [];
     const json = await res.json();
     return json.data || [];
@@ -145,9 +158,10 @@ export async function deleteServerParty(id: number) {
 }
 
 // INVOICES
-export async function fetchServerInvoices() {
+export async function fetchServerInvoices(tenantId?: string) {
   try {
-    const res = await fetchWithTimeout(`${API_BASE_URL}/invoices`);
+    const url = tenantId ? `${API_BASE_URL}/invoices?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/invoices`;
+    const res = await fetchWithTimeout(url);
     if (!res.ok) return [];
     const json = await res.json();
     return json.data || [];
@@ -184,9 +198,10 @@ export async function createServerPurchase(purchaseData: any) {
 }
 
 // LEDGER
-export async function fetchServerLedgerAccounts() {
+export async function fetchServerLedgerAccounts(tenantId?: string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/ledger/accounts`);
+    const url = tenantId ? `${API_BASE_URL}/ledger/accounts?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/ledger/accounts`;
+    const res = await fetch(url);
     if (!res.ok) return [];
     const json = await res.json();
     return json.data || [];
@@ -195,9 +210,10 @@ export async function fetchServerLedgerAccounts() {
   }
 }
 
-export async function fetchServerJournalEntries() {
+export async function fetchServerJournalEntries(tenantId?: string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/ledger/journals`);
+    const url = tenantId ? `${API_BASE_URL}/ledger/journals?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/ledger/journals`;
+    const res = await fetch(url);
     if (!res.ok) return [];
     const json = await res.json();
     return json.data || [];

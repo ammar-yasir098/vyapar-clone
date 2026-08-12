@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { BookOpen, Scale, ArrowUpRight, ArrowDownLeft, ShieldCheck, CheckCircle2 } from 'lucide-react';
-import { LedgerAccount, JournalEntry } from '../../types';
+import { LedgerAccount, JournalEntry, BusinessDetails } from '../../types';
 import { getProfitAndLossSummary, syncLedgerAccountBalances } from '../../services/ledger';
 
 interface LedgerScreenProps {
   accounts: LedgerAccount[];
   journalEntries: JournalEntry[];
+  business?: BusinessDetails;
 }
 
-export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEntries }) => {
+export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEntries, business }) => {
   const [activeTab, setActiveTab] = useState<'accounts' | 'journals' | 'pnl'>('accounts');
   const [pnlData, setPnlData] = useState({
     salesRevenue: 0,
@@ -18,14 +19,16 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEnt
     netProfit: 0
   });
 
+  const tenantId = business?.tenantId || 'default-tenant';
+
   useEffect(() => {
     async function loadPnl() {
-      await syncLedgerAccountBalances();
-      const summary = await getProfitAndLossSummary();
+      await syncLedgerAccountBalances(tenantId);
+      const summary = await getProfitAndLossSummary(tenantId);
       setPnlData(summary);
     }
     loadPnl();
-  }, [journalEntries]);
+  }, [journalEntries, tenantId]);
 
   const safeAccounts = Array.isArray(accounts) ? accounts : [];
   const safeJournals = Array.isArray(journalEntries) ? journalEntries : [];

@@ -160,6 +160,7 @@ export interface SyncJournal {
 }
 
 export interface BusinessDetails {
+  tenantId?: string;
   name: string;
   gstin: string;
   phone: string;
@@ -167,4 +168,8 @@ export interface BusinessDetails {
   state: string;
   tagline: string;
   upiId?: string;
+  email?: string;
+  businessType?: string;
+  businessCategory?: string;
+  pincode?: string;
 }

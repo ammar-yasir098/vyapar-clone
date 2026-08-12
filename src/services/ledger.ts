@@ -1,4 +1,4 @@
-import { db, seedDatabaseIfEmpty } from '../db';
+import { db, seedDatabaseIfEmpty, seedLedgerAccountsForTenant } from '../db';
 import { Invoice, JournalEntry, JournalLine } from '../types';
 import { syncManager } from './sync';
 
@@ -8,10 +8,11 @@ import { syncManager } from './sync';
  */
 export async function postInvoiceJournalEntry(invoice: Invoice): Promise<JournalEntry | null> {
   try {
-    let accounts = await db.ledgerAccounts.toArray();
+    const tenantId = invoice.tenantId || 'default-tenant';
+    let accounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === tenantId).toArray();
     if (accounts.length === 0) {
-      await seedDatabaseIfEmpty();
-      accounts = await db.ledgerAccounts.toArray();
+      await seedLedgerAccountsForTenant(tenantId);
+      accounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === tenantId).toArray();
     }
 
     // Map standard account codes
@@ -98,7 +99,7 @@ export async function postInvoiceJournalEntry(invoice: Invoice): Promise<Journal
     const entryNumber = `JE-2026-${(count + 1).toString().padStart(4, '0')}`;
 
     const entry: JournalEntry = {
-      tenantId: invoice.tenantId || 'default-tenant',
+      tenantId,
       entryNumber,
       referenceId: invoice.invoiceNumber,
       transactionDate: invoice.invoiceDate || new Date().toISOString().split('T')[0],
@@ -148,7 +149,7 @@ export async function postInvoiceJournalEntry(invoice: Invoice): Promise<Journal
       ];
 
       const cogsEntry: JournalEntry = {
-        tenantId: invoice.tenantId || 'default-tenant',
+        tenantId,
         entryNumber: cogsEntryNumber,
         referenceId: invoice.invoiceNumber,
         transactionDate: invoice.invoiceDate || new Date().toISOString().split('T')[0],
@@ -179,13 +180,14 @@ export async function postPaymentJournalEntry(
   partyName: string,
   partyType: 'CUSTOMER' | 'SUPPLIER' | string,
   paymentAmount: number,
-  paymentRemarks: string = ''
+  paymentRemarks: string = '',
+  tenantId: string = 'default-tenant'
 ): Promise<JournalEntry | null> {
   try {
-    let accounts = await db.ledgerAccounts.toArray();
+    let accounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === tenantId).toArray();
     if (accounts.length === 0) {
-      await seedDatabaseIfEmpty();
-      accounts = await db.ledgerAccounts.toArray();
+      await seedLedgerAccountsForTenant(tenantId);
+      accounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === tenantId).toArray();
     }
 
     const cashAcc = accounts.find(a => a.accountCode === '1010') || accounts[0];
@@ -215,7 +217,7 @@ export async function postPaymentJournalEntry(
     const entryNumber = `JE-PAY-${Date.now().toString().slice(-4)}`;
 
     const journalEntry: JournalEntry = {
-      tenantId: 'default-tenant',
+      tenantId,
       entryNumber,
       referenceId: `PAY-${partyName}`,
       transactionDate: new Date().toISOString().split('T')[0],
@@ -254,17 +256,15 @@ export async function postPaymentJournalEntry(
 
 /**
  * Synchronizes Accounts Receivable (1030) and Accounts Payable (2010) balances
- * with actual party credit receivables and payables in Dexie IndexedDB.
+ * with actual party credit receivables and payables in Dexie IndexedDB for a store tenant.
  */
-export async function syncLedgerAccountBalances() {
+export async function syncLedgerAccountBalances(tenantId: string = 'default-tenant') {
   try {
-    let accounts = await db.ledgerAccounts.toArray();
-    if (accounts.length === 0) {
-      await seedDatabaseIfEmpty();
-      accounts = await db.ledgerAccounts.toArray();
-    }
+    await seedLedgerAccountsForTenant(tenantId);
 
-    const parties = await db.parties.toArray();
+    const accounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === tenantId).toArray();
+    const parties = await db.parties.filter(p => (p.tenantId || 'default-tenant') === tenantId).toArray();
+
     const totalReceivables = parties
       .filter(p => p.type === 'CUSTOMER' || p.type === 'BOTH')
       .reduce((sum, p) => sum + Math.max(0, p.currentBalance || 0), 0);
@@ -288,10 +288,10 @@ export async function syncLedgerAccountBalances() {
 }
 
 /**
- * Calculates Profit and Loss Statement metrics.
+ * Calculates Profit and Loss Statement metrics for a specific store tenant.
  */
-export async function getProfitAndLossSummary() {
-  const accounts = await db.ledgerAccounts.toArray();
+export async function getProfitAndLossSummary(tenantId: string = 'default-tenant') {
+  const accounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === tenantId).toArray();
   const salesRev = accounts.find(a => a.accountCode === '4010')?.balance || 0;
   const cogs = accounts.find(a => a.accountCode === '5010')?.balance || 0;
   const discounts = accounts.find(a => a.accountCode === '5020')?.balance || 0;
