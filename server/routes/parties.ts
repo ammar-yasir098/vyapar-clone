@@ -63,7 +63,8 @@ partiesRouter.post('/:id/payment', async (req: Request, res: Response) => {
     const paymentAmt = Number(amount) || 0;
 
     if (isDbConnected()) {
-      let party = await Party.findByPk(Number(id));
+      const { LedgerAccount } = await import('../db/sequelize.js');
+      let party = (id && !isNaN(Number(id))) ? await Party.findByPk(Number(id)) : null;
       if (!party && partyName) {
         party = await Party.findOne({ where: { name: partyName } });
       }
@@ -81,6 +82,20 @@ partiesRouter.post('/:id/payment', async (req: Request, res: Response) => {
           totalDebit: paymentAmt,
           totalCredit: paymentAmt
         });
+
+        // Update Ledger Account balances in PostgreSQL
+        const isCust = partyType === 'CUSTOMER';
+        const cashAcc = await LedgerAccount.findOne({ where: { accountCode: '1010' } });
+        if (cashAcc) {
+          const curCash = (cashAcc.get('balance') as number) || 0;
+          await cashAcc.update({ balance: curCash + (isCust ? paymentAmt : -paymentAmt) });
+        }
+
+        const arAcc = await LedgerAccount.findOne({ where: { accountCode: isCust ? '1030' : '2010' } });
+        if (arAcc) {
+          const curAr = (arAcc.get('balance') as number) || 0;
+          await arAcc.update({ balance: curAr - paymentAmt });
+        }
 
         return res.json({ success: true, data: party });
       }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BookOpen, Scale, ArrowUpRight, ArrowDownLeft, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { LedgerAccount, JournalEntry } from '../../types';
-import { getProfitAndLossSummary } from '../../services/ledger';
+import { getProfitAndLossSummary, syncLedgerAccountBalances } from '../../services/ledger';
 
 interface LedgerScreenProps {
   accounts: LedgerAccount[];
@@ -20,6 +20,7 @@ export const LedgerScreen: React.FC<LedgerScreenProps> = ({ accounts, journalEnt
 
   useEffect(() => {
     async function loadPnl() {
+      await syncLedgerAccountBalances();
       const summary = await getProfitAndLossSummary();
       setPnlData(summary);
     }

@@ -173,6 +173,121 @@ export async function postInvoiceJournalEntry(invoice: Invoice): Promise<Journal
 }
 
 /**
+ * Automatically creates double-entry Journal Entry and updates Ledger Accounts for Party Payments.
+ */
+export async function postPaymentJournalEntry(
+  partyName: string,
+  partyType: 'CUSTOMER' | 'SUPPLIER' | string,
+  paymentAmount: number,
+  paymentRemarks: string = ''
+): Promise<JournalEntry | null> {
+  try {
+    let accounts = await db.ledgerAccounts.toArray();
+    if (accounts.length === 0) {
+      await seedDatabaseIfEmpty();
+      accounts = await db.ledgerAccounts.toArray();
+    }
+
+    const cashAcc = accounts.find(a => a.accountCode === '1010') || accounts[0];
+    const arAcc = accounts.find(a => a.accountCode === '1030') || accounts[0];
+    const apAcc = accounts.find(a => a.accountCode === '2010') || accounts[0];
+
+    const isCustomer = partyType === 'CUSTOMER' || partyType === 'BOTH';
+
+    const lines: JournalLine[] = [
+      {
+        accountId: cashAcc ? cashAcc.id! : 1,
+        accountCode: cashAcc ? cashAcc.accountCode : '1010',
+        accountName: cashAcc ? cashAcc.accountName : 'Cash in Hand',
+        debit: isCustomer ? paymentAmount : 0,
+        credit: isCustomer ? 0 : paymentAmount
+      },
+      {
+        accountId: isCustomer ? (arAcc ? arAcc.id! : 3) : (apAcc ? apAcc.id! : 5),
+        accountCode: isCustomer ? (arAcc ? arAcc.accountCode : '1030') : (apAcc ? apAcc.accountCode : '2010'),
+        accountName: isCustomer ? `Accounts Receivable (${partyName})` : `Accounts Payable (${partyName})`,
+        debit: isCustomer ? 0 : paymentAmount,
+        credit: isCustomer ? paymentAmount : 0
+      }
+    ];
+
+    const count = await db.journalEntries.count();
+    const entryNumber = `JE-PAY-${Date.now().toString().slice(-4)}`;
+
+    const journalEntry: JournalEntry = {
+      tenantId: 'default-tenant',
+      entryNumber,
+      referenceId: `PAY-${partyName}`,
+      transactionDate: new Date().toISOString().split('T')[0],
+      description: `Payment ${isCustomer ? 'Received from' : 'Made to'} ${partyName}: ${paymentRemarks}`,
+      lines,
+      totalDebit: paymentAmount,
+      totalCredit: paymentAmount,
+      createdAt: new Date().toISOString()
+    };
+
+    const savedId = await db.journalEntries.add(journalEntry);
+    journalEntry.id = savedId;
+
+    await syncManager.logMutation('JOURNAL', entryNumber, 'INSERT', journalEntry);
+
+    // Update Ledger Account Balances in Dexie
+    if (cashAcc && cashAcc.id) {
+      const newCashBal = (cashAcc.balance || 0) + (isCustomer ? paymentAmount : -paymentAmount);
+      await db.ledgerAccounts.update(cashAcc.id, { balance: newCashBal });
+    }
+
+    if (isCustomer && arAcc && arAcc.id) {
+      const newArBal = (arAcc.balance || 0) - paymentAmount;
+      await db.ledgerAccounts.update(arAcc.id, { balance: newArBal });
+    } else if (!isCustomer && apAcc && apAcc.id) {
+      const newApBal = (apAcc.balance || 0) - paymentAmount;
+      await db.ledgerAccounts.update(apAcc.id, { balance: newApBal });
+    }
+
+    return journalEntry;
+  } catch (err) {
+    console.error('Error posting payment journal entry:', err);
+    return null;
+  }
+}
+
+/**
+ * Synchronizes Accounts Receivable (1030) and Accounts Payable (2010) balances
+ * with actual party credit receivables and payables in Dexie IndexedDB.
+ */
+export async function syncLedgerAccountBalances() {
+  try {
+    let accounts = await db.ledgerAccounts.toArray();
+    if (accounts.length === 0) {
+      await seedDatabaseIfEmpty();
+      accounts = await db.ledgerAccounts.toArray();
+    }
+
+    const parties = await db.parties.toArray();
+    const totalReceivables = parties
+      .filter(p => p.type === 'CUSTOMER' || p.type === 'BOTH')
+      .reduce((sum, p) => sum + Math.max(0, p.currentBalance || 0), 0);
+
+    const totalPayables = parties
+      .filter(p => p.type === 'SUPPLIER' || p.type === 'BOTH')
+      .reduce((sum, p) => sum + Math.max(0, p.currentBalance || 0), 0);
+
+    const arAcc = accounts.find(a => a.accountCode === '1030');
+    if (arAcc && arAcc.id) {
+      await db.ledgerAccounts.update(arAcc.id, { balance: totalReceivables });
+    }
+
+    const apAcc = accounts.find(a => a.accountCode === '2010');
+    if (apAcc && apAcc.id) {
+      await db.ledgerAccounts.update(apAcc.id, { balance: totalPayables });
+    }
+  } catch (err) {
+    console.error('Error syncing ledger account balances:', err);
+  }
+}
+
+/**
  * Calculates Profit and Loss Statement metrics.
  */
 export async function getProfitAndLossSummary() {

@@ -16,6 +16,7 @@ import { Party, PartyType, BalanceType, Invoice } from '../../types';
 import { db } from '../../db';
 import { createServerParty, recordServerPartyPayment, deleteServerParty } from '../../services/api';
 import { syncManager } from '../../services/sync';
+import { postPaymentJournalEntry, syncLedgerAccountBalances } from '../../services/ledger';
 
 interface PartiesScreenProps {
   parties: Party[];
@@ -178,26 +179,9 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
         }
       }
 
-      // 3. Post Journal Entry for payment
-      const count = await db.journalEntries.count();
-      const entryNumber = `JE-PAY-${Date.now().toString().slice(-4)}`;
-      const journalEntry = {
-        tenantId: 'default-tenant',
-        entryNumber,
-        referenceId: `PAY-${party.name}`,
-        transactionDate: new Date().toISOString().split('T')[0],
-        description: `Payment ${party.type === 'CUSTOMER' ? 'Received from' : 'Made to'} ${party.name}: ${paymentRemarks}`,
-        lines: [
-          { accountId: 1, accountCode: '1010', accountName: 'Cash in Hand', debit: party.type === 'CUSTOMER' ? paymentAmount : 0, credit: party.type === 'CUSTOMER' ? 0 : paymentAmount },
-          { accountId: 3, accountCode: party.type === 'CUSTOMER' ? '1030' : '2010', accountName: party.type === 'CUSTOMER' ? 'Accounts Receivable' : 'Accounts Payable', debit: party.type === 'CUSTOMER' ? 0 : paymentAmount, credit: party.type === 'CUSTOMER' ? paymentAmount : 0 }
-        ],
-        totalDebit: paymentAmount,
-        totalCredit: paymentAmount,
-        createdAt: new Date().toISOString()
-      };
-
-      const jeSavedId = await db.journalEntries.add(journalEntry);
-      await syncManager.logMutation('JOURNAL', entryNumber, 'INSERT', { ...journalEntry, id: jeSavedId });
+      // 3. Post Journal Entry for payment & update Ledger Account balances (Cash in Hand & Accounts Receivable)
+      await postPaymentJournalEntry(party.name, party.type, paymentAmount, paymentRemarks);
+      await syncLedgerAccountBalances();
 
       alert(`Payment of Rs ${paymentAmount} recorded successfully for ${party.name}! Ledger balance & invoice statuses updated.`);
       setSelectedPartyForPayment(null);
