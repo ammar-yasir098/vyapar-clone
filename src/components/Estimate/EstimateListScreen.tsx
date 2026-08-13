@@ -317,60 +317,148 @@ export const EstimateListScreen: React.FC<EstimateListScreenProps> = ({
         </div>
       )}
 
-      {/* PRINT QUOTATION RECEIPT MODAL */}
+      {/* PRINT QUOTATION RECEIPT MODAL (A4 Professional Template) */}
       {isPrintModalOpen && selectedEstimate && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl overflow-hidden border border-slate-200">
-            <div className="bg-slate-900 text-white px-5 py-3 flex items-center justify-between">
-              <span className="font-bold text-xs">Print Estimate Receipt</span>
-              <button onClick={() => setIsPrintModalOpen(false)} className="text-slate-400 hover:text-white">
-                <X className="w-4 h-4" />
+          <div className="bg-white rounded-3xl max-w-4xl w-full shadow-2xl overflow-hidden border border-slate-200">
+            <div className="bg-slate-900 text-white px-6 py-3.5 flex items-center justify-between">
+              <span className="font-bold text-sm flex items-center gap-2">
+                <Printer className="w-4 h-4 text-amber-400" />
+                <span>Print Professional A4 Quotation</span>
+              </span>
+              <button onClick={() => setIsPrintModalOpen(false)} className="text-slate-400 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-6 overflow-y-auto max-h-[75vh]">
-              {/* Thermal Receipt Box */}
-              <div className="bg-white border border-slate-300 p-4 font-mono text-slate-900 text-xs shadow-xs rounded-xl space-y-3">
-                <div className="text-center border-b border-dashed border-slate-300 pb-2">
-                  <div className="font-bold text-sm uppercase">{business.name || 'My Business'}</div>
-                  <div className="text-[10px] text-slate-600">{business.address}</div>
-                  <div className="text-[10px] text-slate-600">Phone: {business.phone}</div>
-                  <div className="mt-1 font-bold text-amber-700 border border-amber-300 rounded px-2 py-0.5 inline-block text-[10px]">
-                    *** ESTIMATE / QUOTATION ***
+            <div className="p-6 overflow-y-auto max-h-[80vh]">
+              {/* Professional A4 Quotation Template */}
+              <div id="quotation-print-area" className="bg-white p-8 font-sans text-slate-900 border border-slate-300 rounded-xl shadow-xs space-y-6">
+                {/* Header: Store Details Left, QUOTATION & Metadata Right */}
+                <div className="flex justify-between items-start border-b border-slate-300 pb-6">
+                  <div className="space-y-1">
+                    <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">{business.name || 'Company Name'}</h1>
+                    <p className="text-xs text-slate-600 font-medium">{business.address || 'Store Location / Street Address'}</p>
+                    <p className="text-xs text-slate-600">Phone: {business.phone || '+92 300 0000000'}</p>
+                    {business.email && <p className="text-xs text-slate-600">Email: {business.email}</p>}
+                    {business.gstin && <p className="text-xs text-slate-600 font-mono font-semibold">{business.gstin}</p>}
+                  </div>
+
+                  <div className="flex flex-col items-end space-y-3">
+                    <h2 className="text-3xl font-black text-slate-800 uppercase tracking-wider">QUOTATION</h2>
+                    
+                    {/* Quote Metadata Table Box */}
+                    <table className="border-collapse border border-slate-400 text-[11px] font-sans w-64 text-center">
+                      <thead>
+                        <tr className="bg-slate-200 text-slate-800 font-bold uppercase border-b border-slate-400">
+                          <th className="py-1 px-2 border-r border-slate-400">QUOTE #</th>
+                          <th className="py-1 px-2">DATE</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="border-b border-slate-400 font-mono font-bold">
+                          <td className="py-1 px-2 border-r border-slate-400 text-slate-900">{selectedEstimate.estimateNumber}</td>
+                          <td className="py-1 px-2 text-slate-900">{selectedEstimate.estimateDate}</td>
+                        </tr>
+                        <tr className="bg-slate-200 text-slate-800 font-bold uppercase border-b border-slate-400">
+                          <th className="py-1 px-2 border-r border-slate-400">CUSTOMER ID</th>
+                          <th className="py-1 px-2">VALID UNTIL</th>
+                        </tr>
+                        <tr className="font-mono font-bold">
+                          <td className="py-1 px-2 border-r border-slate-400 text-slate-900">{selectedEstimate.partyId ? `CUST-${selectedEstimate.partyId}` : 'WALK-IN'}</td>
+                          <td className="py-1 px-2 text-slate-900">30 Days</td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 </div>
 
-                <div className="text-[10px] space-y-0.5 border-b border-dashed border-slate-300 pb-2">
-                  <div>Quotation #: <span className="font-bold">{selectedEstimate.estimateNumber}</span></div>
-                  <div>Date: {selectedEstimate.estimateDate}</div>
-                  <div>Client: <span className="font-bold">{selectedEstimate.partyName}</span></div>
+                {/* CUSTOMER INFO SECTION */}
+                <div>
+                  <div className="bg-slate-200 border border-slate-400 px-3 py-1.5 font-bold text-xs uppercase tracking-wider text-slate-800 mb-2">
+                    CUSTOMER INFO
+                  </div>
+                  <div className="px-2 text-xs space-y-0.5">
+                    <div className="font-bold text-slate-900 text-sm">{selectedEstimate.partyName}</div>
+                    {selectedEstimate.partyPhone && <div className="text-slate-600">Phone: {selectedEstimate.partyPhone}</div>}
+                    {selectedEstimate.partyGstin && <div className="text-slate-600 font-mono">GSTIN/NTN: {selectedEstimate.partyGstin}</div>}
+                  </div>
                 </div>
 
-                <table className="w-full text-left text-[10px]">
-                  <thead>
-                    <tr className="border-b border-slate-300 font-bold">
-                      <th className="pb-1">ITEM</th>
-                      <th className="pb-1 text-center">QTY</th>
-                      <th className="pb-1 text-right">TOTAL</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {selectedEstimate.items?.map((item, idx) => (
-                      <tr key={idx}>
-                        <td className="py-1">{item.itemName}</td>
-                        <td className="py-1 text-center">{item.quantity}</td>
-                        <td className="py-1 text-right">Rs. {item.totalAmount}</td>
+                {/* ITEMIZED COSTS TABLE */}
+                <div className="border border-slate-400 rounded-xs overflow-hidden">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-200 text-slate-800 font-extrabold uppercase border-b border-slate-400">
+                        <th className="py-2 px-3 border-r border-slate-400">ITEMIZED COSTS</th>
+                        <th className="py-2 px-3 text-center border-r border-slate-400 w-20">QTY</th>
+                        <th className="py-2 px-3 text-right border-r border-slate-400 w-28">UNIT PRICE</th>
+                        <th className="py-2 px-3 text-right w-32">AMOUNT</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-
-                <div className="border-t border-dashed border-slate-300 pt-2 text-right font-bold text-xs">
-                  <div>QUOTED TOTAL: Rs. {selectedEstimate.grandTotal}</div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-300">
+                      {selectedEstimate.items?.map((item, idx) => (
+                        <tr key={idx} className="font-medium text-slate-800">
+                          <td className="py-2.5 px-3 border-r border-slate-300 font-bold">{item.itemName}</td>
+                          <td className="py-2.5 px-3 text-center border-r border-slate-300 font-mono">{item.quantity} {item.unitType || 'PCS'}</td>
+                          <td className="py-2.5 px-3 text-right border-r border-slate-300 font-mono">Rs. {(item.unitPrice || 0).toFixed(2)}</td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">Rs. {(item.totalAmount || 0).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
 
-                <div className="text-[9px] text-slate-500 text-center border-t border-dashed border-slate-300 pt-2">
-                  Note: This is a price quotation only and not an official tax invoice or receipt.
+                {/* FINANCIAL TOTALS SUMMARY */}
+                <div className="flex justify-between items-start pt-2">
+                  <div className="italic text-xs text-slate-600 font-medium">
+                    Thank you for your business!
+                  </div>
+
+                  <table className="border-collapse border border-slate-400 text-xs w-64">
+                    <tbody>
+                      <tr className="border-b border-slate-300">
+                        <td className="py-1.5 px-3 font-extrabold uppercase bg-slate-100 text-slate-700">SUBTOTAL</td>
+                        <td className="py-1.5 px-3 text-right font-bold font-mono">Rs. {(selectedEstimate.subtotal || 0).toFixed(2)}</td>
+                      </tr>
+                      {selectedEstimate.discountTotal > 0 && (
+                        <tr className="border-b border-slate-300">
+                          <td className="py-1.5 px-3 font-extrabold uppercase bg-slate-100 text-slate-700">DISCOUNT</td>
+                          <td className="py-1.5 px-3 text-right font-bold font-mono text-red-600">- Rs. {(selectedEstimate.discountTotal || 0).toFixed(2)}</td>
+                        </tr>
+                      )}
+                      <tr className="bg-slate-200 border-t-2 border-slate-400">
+                        <td className="py-2 px-3 font-black uppercase text-slate-900 text-sm">TOTAL QUOTE</td>
+                        <td className="py-2 px-3 text-right font-black text-slate-900 text-sm font-mono">
+                          Rs. {(selectedEstimate.grandTotal || 0).toFixed(2)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* TERMS & SIGNATURE SECTION */}
+                <div className="border-t border-slate-300 pt-4 space-y-4">
+                  <p className="text-[10px] text-slate-600 leading-normal text-justify">
+                    This quotation is not a contract or a bill. It is our best guess at the total price for the service and goods described above. The customer will be billed after indicating acceptance of this quote. Payment will be due prior to the delivery of service and goods.
+                  </p>
+
+                  <div>
+                    <div className="text-[10px] font-bold uppercase text-slate-700 mb-1">Customer Acceptance</div>
+                    <table className="w-full border-collapse border border-slate-400 text-[10px]">
+                      <tbody>
+                        <tr>
+                          <td className="h-8 border-r border-slate-400 w-1/2 p-1 align-bottom text-slate-400">Signature</td>
+                          <td className="h-8 border-r border-slate-400 w-1/4 p-1 align-bottom text-slate-400">Printed Name</td>
+                          <td className="h-8 w-1/4 p-1 align-bottom text-slate-400">Date</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="text-[10px] text-center text-slate-500 pt-2 border-t border-slate-200">
+                    If you have any questions, please contact {business.name || 'our store'} ({business.phone || business.email || 'Customer Support'})
+                  </div>
                 </div>
               </div>
             </div>
@@ -378,18 +466,16 @@ export const EstimateListScreen: React.FC<EstimateListScreenProps> = ({
             <div className="bg-slate-50 p-4 border-t border-slate-200 flex justify-end gap-2">
               <button
                 onClick={() => setIsPrintModalOpen(false)}
-                className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
               >
                 Close
               </button>
               <button
-                onClick={() => {
-                  window.print();
-                }}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-sm flex items-center gap-1.5"
+                onClick={() => window.print()}
+                className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center gap-1.5 cursor-pointer"
               >
                 <Printer className="w-4 h-4" />
-                <span>Print Receipt</span>
+                <span>Print Full A4 Quotation</span>
               </button>
             </div>
           </div>
