@@ -3,6 +3,7 @@ import { Pencil, Upload, Calendar, Building, Phone, Mail, MapPin, CheckCircle2 }
 import { BusinessDetails } from '../../types';
 import { fetchServerCompanyProfile, saveServerCompanyProfile } from '../../services/api';
 import { db } from '../../db';
+import { useToast } from '../Common/ToastContext';
 
 interface EditProfileScreenProps {
   business: BusinessDetails;
@@ -15,6 +16,7 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
   onUpdateBusiness,
   onCancel
 }) => {
+  const { showToast } = useToast();
   const activeTenantId = business.tenantId || 'default-tenant';
 
   const [name, setName] = useState(business.name || 'My Company');
@@ -86,8 +88,8 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name) {
-      alert('Business Name is required');
+    if (!name.trim()) {
+      showToast('Business Name is required', 'warning');
       return;
     }
 
@@ -143,6 +145,7 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
 
     setIsSaving(false);
     setSaveSuccess(true);
+    showToast('Company profile & branding updated successfully!', 'success');
     setTimeout(() => setSaveSuccess(false), 3000);
   };
 

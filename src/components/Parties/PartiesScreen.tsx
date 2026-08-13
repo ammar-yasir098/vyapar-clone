@@ -17,15 +17,18 @@ import { db } from '../../db';
 import { createServerParty, recordServerPartyPayment, deleteServerParty } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { postPaymentJournalEntry, syncLedgerAccountBalances } from '../../services/ledger';
+import { useToast } from '../Common/ToastContext';
 
 interface PartiesScreenProps {
   parties: Party[];
   invoices?: Invoice[];
   business?: BusinessDetails;
   onPartyUpdated: () => void;
+  onNavigateToPaymentIn?: (party: Party) => void;
 }
 
-export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices = [], business, onPartyUpdated }) => {
+export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices = [], business, onPartyUpdated, onNavigateToPaymentIn }) => {
+  const { showToast, showConfirm } = useToast();
   const [search, setSearch] = useState('');
   const [filterTab, setFilterTab] = useState<'ALL' | 'CUSTOMER' | 'SUPPLIER'>('ALL');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -188,24 +191,31 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
       await postPaymentJournalEntry(party.name, party.type, paymentAmount, paymentRemarks);
       await syncLedgerAccountBalances();
 
-      alert(`Payment of Rs ${paymentAmount} recorded successfully for ${party.name}! Ledger balance & invoice statuses updated.`);
+      showToast(`Payment of Rs ${paymentAmount} recorded successfully for ${party.name}!`, 'success');
       setSelectedPartyForPayment(null);
       setPaymentAmount(0);
       setPaymentRemarks('');
       onPartyUpdated();
     } catch (err: any) {
       console.error('Error recording payment:', err);
-      alert(`Error saving payment: ${err?.message || err}`);
+      showToast(`Error saving payment: ${err?.message || err}`, 'error');
     }
   };
 
   const handleDeleteParty = async (id?: number) => {
     if (!id) return;
-    if (confirm('Are you sure you want to delete this party account from PostgreSQL database?')) {
-      await db.parties.delete(id);
-      await deleteServerParty(id);
-      onPartyUpdated();
-    }
+    showConfirm({
+      title: 'Delete Party Account',
+      message: 'Are you sure you want to delete this party account from PostgreSQL database?',
+      type: 'danger',
+      confirmText: 'Yes, Delete',
+      onConfirm: async () => {
+        await db.parties.delete(id);
+        await deleteServerParty(id);
+        showToast('Party account deleted successfully', 'info');
+        onPartyUpdated();
+      }
+    });
   };
 
   const totalReceivable = parties
@@ -401,13 +411,15 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
                     </td>
                     <td className="text-center">
                       <div className="flex items-center justify-center gap-1.5">
-                        <button
-                          onClick={() => setSelectedPartyForPayment(party)}
-                          className="btn-vyapar-outline text-[11px] font-bold py-1 px-2 cursor-pointer"
-                          title="Record Payment"
-                        >
-                          {party.type === 'CUSTOMER' ? 'Receive Cash' : 'Pay Cash'}
-                        </button>
+                        {party.type === 'SUPPLIER' && (
+                          <button
+                            onClick={() => setSelectedPartyForPayment(party)}
+                            className="btn-vyapar-outline text-[11px] font-bold py-1 px-2 cursor-pointer"
+                            title="Record Supplier Payment"
+                          >
+                            Pay Cash
+                          </button>
+                        )}
 
                         <button
                           onClick={() => setSelectedPartyForStatement(party)}

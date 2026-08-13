@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { Package, Plus, Search, AlertTriangle, Edit2, Trash2, Layers } from 'lucide-react';
 import { Item, UnitType, BusinessDetails } from '../../types';
 import { db } from '../../db';
-import { createServerItem, updateServerItem, adjustServerItemStock, deleteServerItem } from '../../services/api';
+import { createServerItem, updateServerItem, deleteServerItem, adjustServerItemStock } from '../../services/api';
 import { syncManager } from '../../services/sync';
+import { useToast } from '../Common/ToastContext';
 
 interface InventoryScreenProps {
   items: Item[];
@@ -12,6 +13,7 @@ interface InventoryScreenProps {
 }
 
 export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items = [], business, onItemUpdated }) => {
+  const { showToast, showConfirm } = useToast();
   const safeItems = Array.isArray(items) ? items : [];
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -146,12 +148,19 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ items = [], bu
 
   const handleDeleteItem = async (id?: number) => {
     if (!id) return;
-    if (confirm('Are you sure you want to delete this product?')) {
-      await db.items.delete(id);
-      await deleteServerItem(id);
-      await syncManager.logMutation('ITEM', String(id), 'DELETE', { id });
-      onItemUpdated();
-    }
+    showConfirm({
+      title: 'Delete Product SKU',
+      message: 'Are you sure you want to delete this product from catalog and cloud database?',
+      type: 'danger',
+      confirmText: 'Yes, Delete',
+      onConfirm: async () => {
+        await db.items.delete(id);
+        await deleteServerItem(id);
+        await syncManager.logMutation('ITEM', String(id), 'DELETE', { id });
+        showToast('Product SKU deleted successfully', 'info');
+        onItemUpdated();
+      }
+    });
   };
 
   return (

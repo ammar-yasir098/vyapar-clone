@@ -3,6 +3,7 @@ import { Cloud, RefreshCw, Database, Server, CheckCircle2, AlertCircle, HardDriv
 import { db, clearAllDatabaseData } from '../../db';
 import { syncManager, SyncStatus } from '../../services/sync';
 import { SyncJournal } from '../../types';
+import { useToast } from '../Common/ToastContext';
 
 interface SyncModalProps {
   isOpen: boolean;
@@ -10,6 +11,7 @@ interface SyncModalProps {
 }
 
 export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
+  const { showToast, showConfirm } = useToast();
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({
     isOnline: true,
     pendingCount: 0,
@@ -60,19 +62,26 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
 
   const handleManualSync = async () => {
     await syncManager.triggerSync();
+    showToast('Cloud sync triggered successfully!', 'success');
     await refreshModalData();
   };
 
   const handleResetAllData = async () => {
-    if (confirm('Are you sure you want to delete ALL data in both local IndexedDB and PostgreSQL database to start 100% fresh?')) {
-      try {
-        await fetch('http://localhost:5000/api/v1/sync/reset', { method: 'POST' });
-      } catch (err) {
-        console.warn('Server reset warning:', err);
+    showConfirm({
+      title: 'Reset All Local & Cloud Data',
+      message: 'Are you sure you want to delete ALL data in both local IndexedDB and PostgreSQL database to start 100% fresh?',
+      type: 'danger',
+      confirmText: 'Yes, Reset All Data',
+      onConfirm: async () => {
+        try {
+          await fetch('http://localhost:5000/api/v1/sync/reset', { method: 'POST' });
+        } catch (err) {
+          console.warn('Server reset warning:', err);
+        }
+        await clearAllDatabaseData();
+        window.location.reload();
       }
-      await clearAllDatabaseData();
-      window.location.reload();
-    }
+    });
   };
 
   if (!isOpen) return null;

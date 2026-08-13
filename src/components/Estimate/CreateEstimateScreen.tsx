@@ -16,6 +16,7 @@ import {
 import { Item, Party, BusinessDetails, Estimate } from '../../types';
 import { db } from '../../db';
 import { saveServerEstimate } from '../../services/api';
+import { useToast } from '../Common/ToastContext';
 
 interface CreateEstimateScreenProps {
   items: Item[];
@@ -32,6 +33,7 @@ export const CreateEstimateScreen: React.FC<CreateEstimateScreenProps> = ({
   onEstimateSaved,
   onCancel
 }) => {
+  const { showToast } = useToast();
   const activeTenantId = business.tenantId || 'default-tenant';
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -195,6 +197,7 @@ export const CreateEstimateScreen: React.FC<CreateEstimateScreenProps> = ({
       await saveServerEstimate(newEstimate);
 
       setIsSaving(false);
+      showToast(`Quotation ${newEstimate.estimateNumber} saved successfully!`, 'success');
       // Return back to Estimate List Screen
       onEstimateSaved();
     } catch (err) {

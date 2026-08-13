@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Estimate, BusinessDetails } from '../../types';
 import { db } from '../../db';
+import { useToast } from '../Common/ToastContext';
 
 interface EstimateListScreenProps {
   estimates: Estimate[];
@@ -30,6 +31,7 @@ export const EstimateListScreen: React.FC<EstimateListScreenProps> = ({
   onCreateEstimate,
   onEstimateUpdated
 }) => {
+  const { showToast, showConfirm } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEstimate, setSelectedEstimate] = useState<Estimate | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -43,14 +45,21 @@ export const EstimateListScreen: React.FC<EstimateListScreenProps> = ({
 
   const handleDeleteEstimate = async (id?: number) => {
     if (!id) return;
-    if (confirm('Are you sure you want to delete this estimate/quotation?')) {
-      await db.estimates.delete(id);
-      onEstimateUpdated();
-      if (selectedEstimate?.id === id) {
-        setIsDetailModalOpen(false);
-        setIsPrintModalOpen(false);
+    showConfirm({
+      title: 'Delete Quotation',
+      message: 'Are you sure you want to delete this estimate/quotation?',
+      type: 'danger',
+      confirmText: 'Yes, Delete',
+      onConfirm: async () => {
+        await db.estimates.delete(id);
+        showToast('Quotation deleted successfully', 'info');
+        onEstimateUpdated();
+        if (selectedEstimate?.id === id) {
+          setIsDetailModalOpen(false);
+          setIsPrintModalOpen(false);
+        }
       }
-    }
+    });
   };
 
   const handlePrintQuotation = (est: Estimate) => {

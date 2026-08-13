@@ -19,7 +19,7 @@ import { EditProfileScreen } from './components/Company/EditProfileScreen';
 import { EstimateListScreen } from './components/Estimate/EstimateListScreen';
 import { CreateEstimateScreen } from './components/Estimate/CreateEstimateScreen';
 import { PaymentInScreen } from './components/PaymentIn/PaymentInScreen';
-import { Invoice, BusinessDetails } from './types';
+import { Invoice, BusinessDetails, Party } from './types';
 import { triggerThermalPrint } from './services/printer';
 import { 
   fetchServerItems, 
@@ -51,12 +51,15 @@ export function App() {
     return DEFAULT_BUSINESS;
   };
 
-  const [activeTab, setActiveTabState] = useState<string>(getInitialTab());
+  const [activeTab, setActiveTabState] = useState<string>(
+    window.location.hash ? window.location.hash.replace('#', '') : (localStorage.getItem('vyapar_active_tab') || 'home')
+  );
   const [isDbLoaded, setIsDbLoaded] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [businessDetails, setBusinessDetails] = useState<BusinessDetails>(getInitialBusiness());
   const [companies, setCompanies] = useState<BusinessDetails[]>([]);
+  const [partyForPaymentIn, setPartyForPaymentIn] = useState<Party | null>(null);
   const [currentTenantId, setCurrentTenantId] = useState<string>(localStorage.getItem('vyapar_current_tenant') || 'default-tenant');
 
   const setActiveTab = (tab: string) => {
@@ -389,7 +392,16 @@ export function App() {
           )}
 
           {activeTab === 'parties' && (
-            <PartiesScreen parties={parties} invoices={invoices} business={businessDetails} onPartyUpdated={() => {}} />
+            <PartiesScreen
+              parties={parties}
+              invoices={invoices}
+              business={businessDetails}
+              onPartyUpdated={() => {}}
+              onNavigateToPaymentIn={(party) => {
+                setPartyForPaymentIn(party);
+                setActiveTab('payment-in');
+              }}
+            />
           )}
 
           {activeTab === 'purchase' && (
@@ -416,6 +428,8 @@ export function App() {
               invoices={invoices}
               business={businessDetails}
               onPaymentRecorded={() => {}}
+              selectedPartyFromParties={partyForPaymentIn}
+              onClearSelectedParty={() => setPartyForPaymentIn(null)}
             />
           )}
 

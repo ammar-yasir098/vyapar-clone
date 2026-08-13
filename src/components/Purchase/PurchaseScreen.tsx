@@ -4,6 +4,7 @@ import { Item, Party, InvoiceItem, PaymentMethod, BusinessDetails } from '../../
 import { db } from '../../db';
 import { createServerPurchase } from '../../services/api';
 import { syncManager } from '../../services/sync';
+import { useToast } from '../Common/ToastContext';
 
 interface PurchaseScreenProps {
   items: Item[];
@@ -18,6 +19,7 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
   business,
   onPurchaseCreated
 }) => {
+  const { showToast } = useToast();
   const suppliers = parties.filter(p => p.type === 'SUPPLIER' || p.type === 'BOTH');
   const [selectedSupplier, setSelectedSupplier] = useState<Party | null>(suppliers[0] || null);
   const [billNumber, setBillNumber] = useState(`PUR-${Date.now().toString().slice(-4)}`);
@@ -191,7 +193,7 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       });
     }
 
-    alert(`Purchase Inward Bill ${billNumber} saved successfully! Total Rs ${totalAmount.toFixed(2)} added to stock & supplier payable balance.`);
+    showToast(`Purchase Inward Bill ${billNumber} saved successfully! Total Rs ${totalAmount.toFixed(2)} added to stock & supplier payable.`, 'success');
     setPurchaseItems([]);
     setBillNumber(`PUR-${Date.now().toString().slice(-4)}`);
     onPurchaseCreated();
