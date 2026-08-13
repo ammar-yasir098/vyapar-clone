@@ -136,21 +136,39 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
     localStorage.setItem('vyapar_business_details', JSON.stringify(fullPayload));
 
     // Also update Dexie companyProfiles table locally
-    await db.companyProfiles.put({
-      tenantId: activeTenantId,
-      name,
-      phone,
-      email,
-      address,
-      gstin,
-      businessType,
-      businessCategory,
-      pincode,
-      logoUrl: offlineLogo || savedLogo,
-      signatureUrl: offlineSig || savedSig,
-      booksBeginDate,
-      updatedAt: new Date().toISOString()
-    } as any);
+    const existingComp = await db.companyProfiles.where('tenantId').equals(activeTenantId).first();
+    if (existingComp && existingComp.id) {
+      await db.companyProfiles.update(existingComp.id, {
+        name,
+        phone,
+        email,
+        address,
+        gstin,
+        businessType,
+        businessCategory,
+        pincode,
+        logoUrl: offlineLogo || savedLogo,
+        signatureUrl: offlineSig || savedSig,
+        booksBeginDate,
+        updatedAt: new Date().toISOString()
+      });
+    } else {
+      await db.companyProfiles.add({
+        tenantId: activeTenantId,
+        name,
+        phone,
+        email,
+        address,
+        gstin,
+        businessType,
+        businessCategory,
+        pincode,
+        logoUrl: offlineLogo || savedLogo,
+        signatureUrl: offlineSig || savedSig,
+        booksBeginDate,
+        updatedAt: new Date().toISOString()
+      } as any);
+    }
 
     // 3. Update parent React state
     onUpdateBusiness({

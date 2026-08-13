@@ -86,7 +86,26 @@ export function App() {
       await seedDatabaseIfEmpty();
       await seedLedgerAccountsForTenant(currentTenantId);
       await seedWalkInCustomerForTenant(currentTenantId);
-      await syncLedgerAccountBalances(currentTenantId);
+      // 1. Read local Dexie companyProfiles FIRST for 0ms instant offline startup
+      const localDexieProfiles = await db.companyProfiles.toArray();
+      if (localDexieProfiles && localDexieProfiles.length > 0) {
+        const mappedLocal = localDexieProfiles.map(c => ({
+          tenantId: c.tenantId || 'default-tenant',
+          name: c.name || 'My Store',
+          phone: c.phone || '+92 300 xxxxxxx',
+          address: c.address || '',
+          gstin: c.gstin || 'NTN: 7654321-0',
+          state: 'Punjab, Pakistan',
+          tagline: 'Quality Products at Everyday Low Prices',
+          email: c.email || '',
+          businessType: c.businessType || 'Retail',
+          logoUrl: c.logoUrl || null,
+          signatureUrl: c.signatureUrl || null
+        }));
+        setCompanies(mappedLocal);
+        const activeComp = mappedLocal.find(c => (c.tenantId || 'default-tenant') === currentTenantId) || mappedLocal[0];
+        if (activeComp) setBusinessDetails(activeComp);
+      }
 
       try {
         // Fetch all company profiles (Multi-Store / Multi-Branch)
@@ -251,12 +270,12 @@ export function App() {
         }
       } catch (err) {
         console.warn('Backend server offline or unreachable. Operating in Dexie local offline mode.', err);
-        // Fallback to reading company profiles from Dexie IndexedDB
+        // Fallback to reading company profiles from Dexie IndexedDB or localStorage
         const dexieProfiles = await db.companyProfiles.toArray();
         if (dexieProfiles && dexieProfiles.length > 0) {
           const mappedDexie = dexieProfiles.map(c => ({
-            tenantId: c.tenantId,
-            name: c.name,
+            tenantId: c.tenantId || 'default-tenant',
+            name: c.name || 'My Store',
             phone: c.phone || '+92 300 xxxxxxx',
             address: c.address || '',
             gstin: c.gstin || 'NTN: 7654321-0',
@@ -268,8 +287,25 @@ export function App() {
             signatureUrl: c.signatureUrl || null
           }));
           setCompanies(mappedDexie);
-          const activeDexieComp = mappedDexie.find(c => c.tenantId === currentTenantId) || mappedDexie[0];
+          const activeDexieComp = mappedDexie.find(c => (c.tenantId || 'default-tenant') === currentTenantId) || mappedDexie[0];
           setBusinessDetails(activeDexieComp);
+        } else {
+          const localSaved = getInitialBusiness();
+          setBusinessDetails(localSaved);
+          setCompanies([localSaved]);
+          // Seed into local Dexie companyProfiles table
+          await db.companyProfiles.put({
+            tenantId: localSaved.tenantId || currentTenantId,
+            name: localSaved.name,
+            phone: localSaved.phone,
+            address: localSaved.address,
+            gstin: localSaved.gstin,
+            businessType: localSaved.businessType || 'Retail',
+            email: localSaved.email,
+            logoUrl: localSaved.logoUrl,
+            signatureUrl: localSaved.signatureUrl,
+            updatedAt: new Date().toISOString()
+          } as any);
         }
       }
 
