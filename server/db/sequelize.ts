@@ -328,6 +328,35 @@ EstimateItem.init(
 Estimate.hasMany(EstimateItem, { foreignKey: 'estimateId', as: 'items', onDelete: 'CASCADE' });
 EstimateItem.belongsTo(Estimate, { foreignKey: 'estimateId' });
 
+// 9. PaymentIn Model
+export class PaymentIn extends Model {
+  declare id: number;
+  declare receiptNumber: string;
+  declare tenantId: string;
+  declare partyId: number;
+  declare partyName: string;
+  declare partyPhone: string;
+  declare paymentDate: string;
+  declare paymentMethod: string;
+  declare amount: number;
+  declare notes: string;
+}
+PaymentIn.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    receiptNumber: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'receipt_number' },
+    tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
+    partyId: { type: DataTypes.INTEGER, allowNull: true, field: 'party_id' },
+    partyName: { type: DataTypes.STRING, allowNull: false, field: 'party_name' },
+    partyPhone: { type: DataTypes.STRING, allowNull: true, field: 'party_phone' },
+    paymentDate: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW, field: 'payment_date' },
+    paymentMethod: { type: DataTypes.STRING, defaultValue: 'CASH', field: 'payment_method' },
+    amount: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 0.0 },
+    notes: { type: DataTypes.TEXT, allowNull: true }
+  },
+  { sequelize, modelName: 'PaymentIn', tableName: 'payment_in', timestamps: false }
+);
+
 /**
  * Seeds standard Chart of Accounts in PostgreSQL if empty
  */

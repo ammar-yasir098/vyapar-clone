@@ -151,7 +151,7 @@ export interface SyncJournal {
   id?: number;
   versionId: string;
   clientSequence: number;
-  entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'JOURNAL' | 'ESTIMATE';
+  entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'JOURNAL' | 'ESTIMATE' | 'PAYMENT_IN';
   entityId: string;
   mutationType: 'INSERT' | 'UPDATE' | 'DELETE';
   payload: string; // JSON string
@@ -221,5 +221,19 @@ export interface Estimate {
   grandTotal: number;
   status: 'OPEN' | 'CONVERTED' | 'EXPIRED';
   items: EstimateItem[];
+  createdAt?: string;
+}
+
+export interface PaymentIn {
+  id?: number;
+  receiptNumber: string;
+  tenantId: string;
+  partyId?: number;
+  partyName: string;
+  partyPhone?: string;
+  paymentDate: string;
+  paymentMethod: 'CASH' | 'DIGITAL / APP' | 'CARD' | 'CHEQUE';
+  amount: number;
+  notes?: string;
   createdAt?: string;
 }

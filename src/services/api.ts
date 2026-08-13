@@ -247,3 +247,29 @@ export async function saveServerEstimate(estimateData: any) {
     return { success: false, error: err.message };
   }
 }
+
+// PAYMENTS IN
+export async function fetchServerPaymentsIn(tenantId?: string) {
+  try {
+    const url = tenantId ? `${API_BASE_URL}/payments/in?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/payments/in`;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data || [];
+  } catch (err) {
+    return [];
+  }
+}
+
+export async function createServerPaymentIn(paymentData: any) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/payments/in`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(paymentData)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}

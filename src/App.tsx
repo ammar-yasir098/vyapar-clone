@@ -18,6 +18,7 @@ import { SyncModal } from './components/Sync/SyncModal';
 import { EditProfileScreen } from './components/Company/EditProfileScreen';
 import { EstimateListScreen } from './components/Estimate/EstimateListScreen';
 import { CreateEstimateScreen } from './components/Estimate/CreateEstimateScreen';
+import { PaymentInScreen } from './components/PaymentIn/PaymentInScreen';
 import { Invoice, BusinessDetails } from './types';
 import { triggerThermalPrint } from './services/printer';
 import { 
@@ -29,7 +30,8 @@ import {
   saveServerCompanyProfile,
   fetchServerLedgerAccounts,
   fetchServerJournalEntries,
-  fetchServerEstimates
+  fetchServerEstimates,
+  fetchServerPaymentsIn
 } from './services/api';
 import { syncLedgerAccountBalances } from './services/ledger';
 
@@ -149,6 +151,7 @@ export function App() {
         const serverAccounts = await fetchServerLedgerAccounts(currentTenantId);
         const serverJournals = await fetchServerJournalEntries(currentTenantId);
         const serverEstimates = await fetchServerEstimates(currentTenantId);
+        const serverPaymentsIn = await fetchServerPaymentsIn(currentTenantId);
 
         if (serverItems && serverItems.length > 0) {
           for (const sItem of serverItems) {
@@ -207,6 +210,15 @@ export function App() {
             }
           }
         }
+
+        if (serverPaymentsIn && serverPaymentsIn.length > 0) {
+          for (const sPay of serverPaymentsIn) {
+            const existing = await db.paymentIn.where('receiptNumber').equals(sPay.receiptNumber).first();
+            if (!existing) {
+              await db.paymentIn.add({ ...sPay, tenantId: sPay.tenantId || currentTenantId });
+            }
+          }
+        }
       } catch (err) {
         console.warn('Backend server offline or unreachable. Operating in Dexie local offline mode.', err);
         // Fallback to reading company profiles from Dexie IndexedDB
@@ -256,6 +268,7 @@ export function App() {
   const allAccounts = useLiveQuery(() => db.ledgerAccounts.toArray(), []) || [];
   const allJournalEntries = useLiveQuery(() => db.journalEntries.reverse().toArray(), []) || [];
   const allEstimates = useLiveQuery(() => db.estimates.reverse().toArray(), []) || [];
+  const allPaymentsIn = useLiveQuery(() => db.paymentIn.reverse().toArray(), []) || [];
 
   const items = allItems.filter(item => (item.tenantId || 'default-tenant') === currentTenantId);
   const parties = allParties.filter(party => (party.tenantId || 'default-tenant') === currentTenantId);
@@ -263,6 +276,7 @@ export function App() {
   const accounts = allAccounts.filter(acc => (acc.tenantId || 'default-tenant') === currentTenantId);
   const journalEntries = allJournalEntries.filter(je => (je.tenantId || 'default-tenant') === currentTenantId);
   const estimates = allEstimates.filter(est => (est.tenantId || 'default-tenant') === currentTenantId);
+  const paymentsIn = allPaymentsIn.filter(p => (p.tenantId || 'default-tenant') === currentTenantId);
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');
@@ -393,6 +407,16 @@ export function App() {
 
           {activeTab === 'invoices' && (
             <InvoicesScreen invoices={invoices} business={businessDetails} />
+          )}
+
+          {activeTab === 'payment-in' && (
+            <PaymentInScreen
+              payments={paymentsIn}
+              parties={parties}
+              invoices={invoices}
+              business={businessDetails}
+              onPaymentRecorded={() => {}}
+            />
           )}
 
           {activeTab === 'estimates' && (

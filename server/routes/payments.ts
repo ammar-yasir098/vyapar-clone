@@ -1,0 +1,95 @@
+import { Router, Request, Response } from 'express';
+import { PaymentIn, Party, isDbConnected } from '../db/sequelize.js';
+
+export const paymentsRouter = Router();
+
+// GET /api/v1/payments/in - Fetch all Payment-In receipts for tenant
+paymentsRouter.get('/in', async (req: Request, res: Response) => {
+  try {
+    const { tenantId = 'default-tenant' } = req.query;
+
+    if (isDbConnected()) {
+      const payments = await PaymentIn.findAll({
+        where: { tenantId: String(tenantId) },
+        order: [['id', 'DESC']]
+      });
+      return res.json({ success: true, data: payments });
+    }
+
+    return res.json({ success: true, data: [] });
+  } catch (err: any) {
+    console.error('Error fetching Payment-In receipts:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v1/payments/in - Create new Payment-In receipt
+paymentsRouter.post('/in', async (req: Request, res: Response) => {
+  try {
+    const {
+      tenantId = 'default-tenant',
+      receiptNumber,
+      partyId,
+      partyName,
+      partyPhone,
+      paymentDate,
+      paymentMethod = 'CASH',
+      amount = 0,
+      notes = ''
+    } = req.body;
+
+    if (isDbConnected()) {
+      const recNum = receiptNumber || `PAYIN-${Date.now()}`;
+
+      const newPayment = await PaymentIn.create({
+        receiptNumber: recNum,
+        tenantId,
+        partyId: partyId || null,
+        partyName: partyName || 'Walk-in Customer',
+        partyPhone: partyPhone || '',
+        paymentDate: paymentDate || new Date().toISOString().split('T')[0],
+        paymentMethod,
+        amount,
+        notes
+      });
+
+      // Optionally update party balance in PostgreSQL
+      if (partyId) {
+        const party = await Party.findByPk(partyId);
+        if (party) {
+          const curBal = Number(party.get('currentBalance')) || 0;
+          const newBal = Math.max(0, curBal - Number(amount));
+          await party.update({ currentBalance: newBal });
+        }
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: 'Payment-In recorded in PostgreSQL',
+        data: newPayment
+      });
+    }
+
+    return res.status(201).json({ success: true, data: req.body });
+  } catch (err: any) {
+    console.error('Error creating Payment-In:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/v1/payments/in/:id - Delete Payment-In receipt
+paymentsRouter.delete('/in/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    if (isDbConnected()) {
+      await PaymentIn.destroy({ where: { id } });
+      return res.json({ success: true, message: 'Payment-In receipt deleted' });
+    }
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting Payment-In:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});

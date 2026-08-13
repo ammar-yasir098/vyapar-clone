@@ -145,3 +145,18 @@ CREATE TABLE IF NOT EXISTS estimate_items (
     tax_amount NUMERIC(12,2) DEFAULT 0.00,
     total_amount NUMERIC(12,2) NOT NULL
 );
+
+-- 9. PAYMENT IN (CUSTOMER PAYMENTS RECEIVED)
+CREATE TABLE IF NOT EXISTS payment_in (
+    id SERIAL PRIMARY KEY,
+    receipt_number VARCHAR(64) UNIQUE NOT NULL,
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default-tenant',
+    party_id INT REFERENCES parties(id),
+    party_name VARCHAR(255) NOT NULL,
+    party_phone VARCHAR(32),
+    payment_date DATE NOT NULL,
+    payment_method VARCHAR(32) DEFAULT 'CASH',
+    amount NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

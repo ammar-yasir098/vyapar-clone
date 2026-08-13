@@ -25,12 +25,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
 
   // Automatically expand Sale group if active tab is under Sale
   useEffect(() => {
-    if (activeTab === 'pos' || activeTab === 'invoices' || activeTab === 'estimates' || activeTab === 'create-estimate') {
+    if (activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices') {
       setIsSaleOpen(true);
     }
   }, [activeTab]);
 
-  const isSaleActive = activeTab === 'pos' || activeTab === 'invoices' || activeTab === 'estimates' || activeTab === 'create-estimate';
+  const isSaleActive = activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices';
 
   const menuGroups = [
     { id: 'home', label: 'Home', icon: Home },
@@ -106,6 +106,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                   <span>POS</span>
                 </div>
                 <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 font-mono font-bold">Counter</span>
+              </button>
+
+              {/* Payment-In Sub-option */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('payment-in')}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  activeTab === 'payment-in'
+                    ? 'bg-red-600 text-white font-bold shadow-xs'
+                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'payment-in' ? 'bg-white' : 'bg-emerald-400'}`}></div>
+                  <span>Payment-In</span>
+                </div>
+                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold">Recv</span>
               </button>
 
               {/* Estimate / Quotation Sub-option */}
