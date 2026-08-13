@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { Item, Party, Invoice, SyncJournal, BusinessDetails, ItemBatch, LedgerAccount, JournalEntry, CompanyProfileEntity, Estimate, PaymentIn } from '../types';
+import { Item, Party, Invoice, SyncJournal, BusinessDetails, ItemBatch, LedgerAccount, JournalEntry, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock } from '../types';
 
 export class VyaparDatabase extends Dexie {
   items!: Table<Item, number>;
@@ -12,11 +12,12 @@ export class VyaparDatabase extends Dexie {
   companyProfiles!: Table<CompanyProfileEntity, number>;
   estimates!: Table<Estimate, number>;
   paymentIn!: Table<PaymentIn, number>;
+  itemRestocks!: Table<ItemRestock, number>;
 
   constructor() {
     super('VyaparOfflineDB');
     
-    this.version(5).stores({
+    this.version(6).stores({
       items: '++id, skuCode, barcode, name, currentStock, tenantId',
       parties: '++id, name, phone, type, tenantId',
       invoices: '++id, invoiceNumber, invoiceDate, paymentStatus, partyId, syncStatus, tenantId',
@@ -26,7 +27,8 @@ export class VyaparDatabase extends Dexie {
       journalEntries: '++id, entryNumber, referenceId, transactionDate, tenantId',
       companyProfiles: '++id, &tenantId, name',
       estimates: '++id, estimateId, estimateNumber, estimateDate, partyId, tenantId',
-      paymentIn: '++id, receiptNumber, partyId, paymentDate, tenantId'
+      paymentIn: '++id, receiptNumber, partyId, paymentDate, tenantId',
+      itemRestocks: '++id, itemId, supplierId, restockDate, tenantId'
     });
   }
 }

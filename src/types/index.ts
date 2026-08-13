@@ -237,3 +237,20 @@ export interface PaymentIn {
   notes?: string;
   createdAt?: string;
 }
+
+export interface ItemRestock {
+  id?: number;
+  itemId: number;
+  itemName: string;
+  tenantId: string;
+  supplierId?: number;
+  supplierName: string;
+  supplierPhone?: string;
+  billNumber: string;
+  restockDate: string;
+  quantityAdded: number;
+  purchasePrice: number;
+  totalCost: number;
+  source: 'PURCHASE_BILL' | 'MANUAL_ADJUSTMENT';
+  createdAt: string;
+}

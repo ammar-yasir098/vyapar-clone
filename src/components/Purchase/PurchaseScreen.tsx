@@ -124,7 +124,7 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
 
     const totalAmount = totalBillAmount;
 
-    // 1. Stock Inward: Increase Item stock levels in Dexie DB
+    // 1. Stock Inward: Increase Item stock levels in Dexie DB & log Restock record
     for (const pItem of purchaseItems) {
       const dbItem = await db.items.get(pItem.itemId);
       if (dbItem) {
@@ -135,6 +135,22 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
           updatedAt: new Date().toISOString()
         });
       }
+
+      await db.itemRestocks.add({
+        itemId: pItem.itemId,
+        itemName: pItem.itemName,
+        tenantId: business?.tenantId || 'default-tenant',
+        supplierId: selectedSupplier?.id,
+        supplierName: selectedSupplier?.name || 'Supplier Restock',
+        supplierPhone: selectedSupplier?.phone || '',
+        billNumber,
+        restockDate: billDate,
+        quantityAdded: pItem.quantity,
+        purchasePrice: pItem.unitPrice,
+        totalCost: pItem.totalAmount,
+        source: 'PURCHASE_BILL',
+        createdAt: new Date().toISOString()
+      });
     }
 
     // 2. Update Supplier Accounts Payable Ledger Balance

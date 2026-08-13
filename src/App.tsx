@@ -388,7 +388,7 @@ export function App() {
           )}
 
           {activeTab === 'inventory' && (
-            <InventoryScreen items={items} business={businessDetails} onItemUpdated={() => {}} />
+            <InventoryScreen items={items} parties={parties} business={businessDetails} onItemUpdated={() => {}} />
           )}
 
           {activeTab === 'parties' && (
