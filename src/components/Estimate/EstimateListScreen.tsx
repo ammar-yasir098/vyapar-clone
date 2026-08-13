@@ -90,7 +90,7 @@ export const EstimateListScreen: React.FC<EstimateListScreenProps> = ({
               className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-md transition cursor-pointer"
             >
               <Plus className="w-4 h-4 stroke-[3]" />
-              <span>+ Create Estimate / Quotation</span>
+              <span> Create Estimate / Quotation</span>
             </button>
           </div>
         </div>
@@ -164,7 +164,7 @@ export const EstimateListScreen: React.FC<EstimateListScreenProps> = ({
                 onClick={onCreateEstimate}
                 className="mt-2 bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm cursor-pointer"
               >
-                + Create Estimate / Quotation
+                 Create Estimate / Quotation
               </button>
             </div>
           ) : (

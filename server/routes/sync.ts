@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { cloudStore } from '../db/store.js';
-import { sequelize, isDbConnected } from '../db/sequelize.js';
+import { sequelize, isDbConnected, InvoiceItem, Invoice, Item, Party, JournalEntry, EstimateItem, Estimate, PaymentIn } from '../db/sequelize.js';
 
 export const syncRouter = Router();
 
@@ -10,8 +10,21 @@ syncRouter.post('/reset', async (req: Request, res: Response) => {
     cloudStore.clear();
 
     if (isDbConnected()) {
-      await sequelize.query('TRUNCATE TABLE invoice_items, invoices, items, parties, journal_entries RESTART IDENTITY CASCADE;');
-      await sequelize.query('UPDATE ledger_accounts SET balance = 0.0;');
+      try {
+        await sequelize.query('TRUNCATE TABLE invoice_items, invoices, items, parties, journal_entries, estimates, estimate_items, payment_in RESTART IDENTITY CASCADE;');
+      } catch (truncateErr) {
+        console.warn('Truncate SQL warning, using Sequelize destroy fallback:', truncateErr);
+        await InvoiceItem.destroy({ where: {} }).catch(() => {});
+        await Invoice.destroy({ where: {} }).catch(() => {});
+        await Item.destroy({ where: {} }).catch(() => {});
+        await Party.destroy({ where: {} }).catch(() => {});
+        await JournalEntry.destroy({ where: {} }).catch(() => {});
+        await EstimateItem.destroy({ where: {} }).catch(() => {});
+        await Estimate.destroy({ where: {} }).catch(() => {});
+        await PaymentIn.destroy({ where: {} }).catch(() => {});
+      }
+
+      await sequelize.query('UPDATE ledger_accounts SET balance = 0.0;').catch(() => {});
     }
 
     console.log('🧹 [RESET] Successfully wiped all cloud database records for clean start.');

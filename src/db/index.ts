@@ -17,10 +17,10 @@ export class VyaparDatabase extends Dexie {
   constructor() {
     super('VyaparOfflineDB');
     
-    this.version(6).stores({
+    this.version(7).stores({
       items: '++id, skuCode, barcode, name, currentStock, tenantId',
       parties: '++id, name, phone, type, tenantId',
-      invoices: '++id, invoiceNumber, invoiceDate, paymentStatus, partyId, syncStatus, tenantId',
+      invoices: '++id, invoiceId, invoiceNumber, invoiceDate, paymentStatus, partyId, syncStatus, tenantId',
       syncJournal: '++id, versionId, clientSequence, entityType, timestamp, synced',
       itemBatches: '++id, itemId, batchNumber, expiryDate',
       ledgerAccounts: '++id, accountCode, accountName, accountType, tenantId',
@@ -136,6 +136,9 @@ export async function clearAllDatabaseData() {
   await db.syncJournal.clear();
   await db.itemBatches.clear();
   await db.journalEntries.clear();
+  await db.estimates.clear();
+  await db.paymentIn.clear();
+  await db.itemRestocks.clear();
   
   // Reset account balances to 0 in local Dexie IndexedDB
   const accounts = await db.ledgerAccounts.toArray();

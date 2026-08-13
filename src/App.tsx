@@ -191,9 +191,21 @@ export function App() {
 
         if (serverInvoices && serverInvoices.length > 0) {
           for (const sInv of serverInvoices) {
-            const existing = await db.invoices.where('invoiceId').equals(sInv.invoiceId).first();
+            const rawInv = sInv.dataValues || sInv;
+            const invId = rawInv.invoiceId || rawInv.invoice_id;
+            const invNum = rawInv.invoiceNumber || rawInv.invoice_number;
+
+            const existing = await db.invoices
+              .filter(i => (invId && i.invoiceId === invId) || (invNum && i.invoiceNumber === invNum))
+              .first();
+
             if (!existing) {
-              await db.invoices.add({ ...sInv, tenantId: sInv.tenantId || currentTenantId });
+              await db.invoices.add({
+                ...rawInv,
+                invoiceId: invId || `inv-${Date.now()}-${Math.random()}`,
+                invoiceNumber: invNum || `INV-${Date.now()}`,
+                tenantId: rawInv.tenantId || rawInv.tenant_id || currentTenantId
+              });
             }
           }
         }
