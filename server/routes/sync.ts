@@ -138,9 +138,18 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               where: { invoiceNumber: payload.invoiceNumber }
             });
 
+            // Verify partyId foreign key in PostgreSQL
+            let validPartyId: number | null = null;
+            if (payload.partyId && typeof payload.partyId === 'number') {
+              const partyExists = await Party.findByPk(payload.partyId);
+              if (partyExists) validPartyId = payload.partyId;
+            }
+
             let targetInvoice: any;
             if (existingInvoice) {
               await existingInvoice.update({
+                partyId: validPartyId,
+                partyName: payload.partyName || 'Walk-in Retail Customer',
                 subtotal: payload.subtotal || 0,
                 taxTotal: payload.taxTotal || 0,
                 discountTotal: payload.discountTotal || 0,
@@ -159,7 +168,7 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
                 tenantId: tenantId || 'default-tenant',
                 invoiceNumber: payload.invoiceNumber,
                 invoiceDate: payload.invoiceDate || new Date().toISOString().split('T')[0],
-                partyId: payload.partyId || null,
+                partyId: validPartyId,
                 partyName: payload.partyName || 'Walk-in Retail Customer',
                 partyPhone: payload.partyPhone || '',
                 partyGstin: payload.partyGstin || '',
@@ -174,12 +183,23 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               });
             }
 
-            // Save line items
+            // Save line items with safe foreign key resolution
             if (payload.items && Array.isArray(payload.items)) {
               for (const item of payload.items) {
+                const rawItemId = item.itemId || item.id;
+                let validItemId: number | null = null;
+                if (rawItemId && typeof rawItemId === 'number') {
+                  const itemExists = await Item.findByPk(rawItemId);
+                  if (itemExists) validItemId = rawItemId;
+                }
+                if (!validItemId && (item.itemName || item.name)) {
+                  const itemByName = await Item.findOne({ where: { name: item.itemName || item.name } });
+                  if (itemByName) validItemId = itemByName.id;
+                }
+
                 await InvoiceItem.create({
                   invoiceId: targetInvoice.id,
-                  itemId: item.itemId || item.id || null,
+                  itemId: validItemId,
                   itemName: item.itemName || item.name || '',
                   hsnSacCode: item.hsnSacCode || '',
                   unitType: item.unitType || 'PCS',

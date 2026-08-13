@@ -78,6 +78,13 @@ invoicesRouter.post('/', async (req: Request, res: Response) => {
     if (isDbConnected()) {
       const t = await sequelize.transaction();
       try {
+        // Verify partyId foreign key in PostgreSQL
+        let validPartyId: number | null = null;
+        if (partyId && typeof partyId === 'number') {
+          const partyExists = await Party.findByPk(partyId, { transaction: t });
+          if (partyExists) validPartyId = partyId;
+        }
+
         // 1. Create Invoice Header in PostgreSQL
         const newInvoice = await Invoice.create(
           {
@@ -85,7 +92,7 @@ invoicesRouter.post('/', async (req: Request, res: Response) => {
             tenantId,
             invoiceNumber,
             invoiceDate,
-            partyId,
+            partyId: validPartyId,
             partyName,
             partyPhone,
             partyGstin,
@@ -103,10 +110,28 @@ invoicesRouter.post('/', async (req: Request, res: Response) => {
 
         // 2. Create Invoice Line Items
         for (const line of formattedLineItems) {
+          let validItemId: number | null = null;
+          if (line.itemId && typeof line.itemId === 'number') {
+            const itemExists = await Item.findByPk(line.itemId, { transaction: t });
+            if (itemExists) validItemId = line.itemId;
+          }
+          if (!validItemId && line.itemName) {
+            const itemByName = await Item.findOne({ where: { name: line.itemName }, transaction: t });
+            if (itemByName) validItemId = itemByName.id;
+          }
+
           await InvoiceItem.create(
             {
               invoiceId: (newInvoice as any).id,
-              ...line
+              itemId: validItemId,
+              itemName: line.itemName,
+              hsnSacCode: line.hsnSacCode,
+              unitType: line.unitType,
+              quantity: line.quantity,
+              unitPrice: line.unitPrice,
+              purchasePrice: line.purchasePrice,
+              taxAmount: line.taxAmount,
+              totalAmount: line.totalAmount
             },
             { transaction: t }
           );
