@@ -119,13 +119,19 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
             className="flex items-center gap-2.5 px-2.5 py-1 rounded-xl hover:bg-slate-100/90 transition cursor-pointer text-left border border-transparent hover:border-slate-200"
           >
-            {business.logoUrl ? (
-              <img src={business.logoUrl.startsWith('/uploads/') ? `http://localhost:5000${business.logoUrl}` : business.logoUrl} alt="Logo" className="w-8 h-8 rounded-lg object-cover border border-slate-200 shadow-xs shrink-0" />
-            ) : (
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-600 to-rose-700 text-white font-extrabold flex items-center justify-center text-sm shadow-sm shrink-0">
-                {business.name ? business.name.charAt(0).toUpperCase() : 'V'}
-              </div>
-            )}
+            {(() => {
+              const offlineCached = localStorage.getItem('vyapar_offline_logo');
+              const logoSrc = business.logoUrl?.startsWith('data:image/')
+                ? business.logoUrl
+                : (offlineCached || (business.logoUrl?.startsWith('/uploads/') ? `http://localhost:5000${business.logoUrl}` : business.logoUrl));
+              return logoSrc ? (
+                <img src={logoSrc} alt="Logo" className="w-8 h-8 rounded-lg object-cover border border-slate-200 shadow-xs shrink-0" />
+              ) : (
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-600 to-rose-700 text-white font-extrabold flex items-center justify-center text-sm shadow-sm shrink-0">
+                  {business.name ? business.name.charAt(0).toUpperCase() : 'V'}
+                </div>
+              );
+            })()}
             <div>
               <div className="flex items-center gap-1 font-bold text-slate-900 text-sm">
                 <span className="max-w-[180px] truncate">{business.name}</span>

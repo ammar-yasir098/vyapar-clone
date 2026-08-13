@@ -112,21 +112,45 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
 
     // 1. Save to PostgreSQL database
     const res = await saveServerCompanyProfile(profilePayload);
-
     const savedLogo = res?.data?.logoUrl || profilePayload.logoUrl;
     const savedSig = res?.data?.signatureUrl || profilePayload.signatureUrl;
 
-    if (savedLogo) setLogoUrl(savedLogo);
-    if (savedSig) setSignatureUrl(savedSig);
+    // Preserve Base64 string locally so logo works 100% OFFLINE without server
+    const offlineLogo = logoUrl && logoUrl.startsWith('data:image/') ? logoUrl : (localStorage.getItem('vyapar_offline_logo') || savedLogo);
+    const offlineSig = signatureUrl && signatureUrl.startsWith('data:image/') ? signatureUrl : (localStorage.getItem('vyapar_offline_sig') || savedSig);
+
+    if (offlineLogo && offlineLogo.startsWith('data:image/')) {
+      localStorage.setItem('vyapar_offline_logo', offlineLogo);
+    }
+    if (offlineSig && offlineSig.startsWith('data:image/')) {
+      localStorage.setItem('vyapar_offline_sig', offlineSig);
+    }
 
     const fullPayload = {
       ...profilePayload,
-      logoUrl: savedLogo,
-      signatureUrl: savedSig
+      logoUrl: offlineLogo || savedLogo,
+      signatureUrl: offlineSig || savedSig
     };
 
     // 2. Save to Browser localStorage
     localStorage.setItem('vyapar_business_details', JSON.stringify(fullPayload));
+
+    // Also update Dexie companyProfiles table locally
+    await db.companyProfiles.put({
+      tenantId: activeTenantId,
+      name,
+      phone,
+      email,
+      address,
+      gstin,
+      businessType,
+      businessCategory,
+      pincode,
+      logoUrl: offlineLogo || savedLogo,
+      signatureUrl: offlineSig || savedSig,
+      booksBeginDate,
+      updatedAt: new Date().toISOString()
+    } as any);
 
     // 3. Update parent React state
     onUpdateBusiness({
@@ -139,8 +163,8 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
       businessType,
       businessCategory,
       pincode,
-      logoUrl: savedLogo,
-      signatureUrl: savedSig
+      logoUrl: offlineLogo || savedLogo,
+      signatureUrl: offlineSig || savedSig
     });
 
     setIsSaving(false);

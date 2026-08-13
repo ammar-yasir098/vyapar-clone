@@ -117,8 +117,23 @@ export function App() {
             }
           }
 
-          // Find active company profile
+          // Find active company profile & auto-cache logo for 100% offline display
           const activeCompany = mappedCompanies.find((c: any) => c.tenantId === currentTenantId) || mappedCompanies[0];
+          if (activeCompany && activeCompany.logoUrl && activeCompany.logoUrl.startsWith('/uploads/')) {
+            try {
+              const fullUrl = `http://localhost:5000${activeCompany.logoUrl}`;
+              fetch(fullUrl).then(res => res.blob()).then(blob => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  const base64 = reader.result as string;
+                  if (base64 && base64.startsWith('data:image/')) {
+                    localStorage.setItem('vyapar_offline_logo', base64);
+                  }
+                };
+                reader.readAsDataURL(blob);
+              }).catch(() => {});
+            } catch {}
+          }
           setBusinessDetails(activeCompany);
         } else {
           const serverCompany = await fetchServerCompanyProfile(currentTenantId);
