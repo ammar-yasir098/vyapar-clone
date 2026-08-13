@@ -113,3 +113,35 @@ CREATE TABLE IF NOT EXISTS ledger_accounts (
     balance NUMERIC(12,2) DEFAULT 0.00,
     description TEXT
 );
+
+-- 8. ESTIMATES / QUOTATIONS
+CREATE TABLE IF NOT EXISTS estimates (
+    id SERIAL PRIMARY KEY,
+    estimate_id VARCHAR(64) UNIQUE NOT NULL,
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default-tenant',
+    estimate_number VARCHAR(64) NOT NULL,
+    estimate_date DATE NOT NULL,
+    party_id INT REFERENCES parties(id),
+    party_name VARCHAR(255) NOT NULL,
+    party_phone VARCHAR(32),
+    party_gstin VARCHAR(32),
+    subtotal NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+    tax_total NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+    discount_total NUMERIC(12,2) DEFAULT 0.00,
+    grand_total NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+    status VARCHAR(32) DEFAULT 'OPEN',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS estimate_items (
+    id SERIAL PRIMARY KEY,
+    estimate_id INT REFERENCES estimates(id) ON DELETE CASCADE,
+    item_id INT REFERENCES items(id),
+    item_name VARCHAR(255) NOT NULL,
+    hsn_sac_code VARCHAR(32),
+    unit_type VARCHAR(16),
+    quantity NUMERIC(12,2) NOT NULL DEFAULT 1.00,
+    unit_price NUMERIC(12,2) NOT NULL,
+    tax_amount NUMERIC(12,2) DEFAULT 0.00,
+    total_amount NUMERIC(12,2) NOT NULL
+);

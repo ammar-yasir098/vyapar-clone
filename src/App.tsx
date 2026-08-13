@@ -16,6 +16,8 @@ import { PrinterModal } from './components/Printer/PrinterModal';
 import { CommandPaletteModal } from './components/CommandPalette/CommandPaletteModal';
 import { SyncModal } from './components/Sync/SyncModal';
 import { EditProfileScreen } from './components/Company/EditProfileScreen';
+import { EstimateListScreen } from './components/Estimate/EstimateListScreen';
+import { CreateEstimateScreen } from './components/Estimate/CreateEstimateScreen';
 import { Invoice, BusinessDetails } from './types';
 import { triggerThermalPrint } from './services/printer';
 import { 
@@ -26,7 +28,8 @@ import {
   fetchServerAllCompanies, 
   saveServerCompanyProfile,
   fetchServerLedgerAccounts,
-  fetchServerJournalEntries
+  fetchServerJournalEntries,
+  fetchServerEstimates
 } from './services/api';
 import { syncLedgerAccountBalances } from './services/ledger';
 
@@ -145,6 +148,7 @@ export function App() {
         const serverInvoices = await fetchServerInvoices(currentTenantId);
         const serverAccounts = await fetchServerLedgerAccounts(currentTenantId);
         const serverJournals = await fetchServerJournalEntries(currentTenantId);
+        const serverEstimates = await fetchServerEstimates(currentTenantId);
 
         if (serverItems && serverItems.length > 0) {
           for (const sItem of serverItems) {
@@ -191,6 +195,15 @@ export function App() {
               .first();
             if (!existing) {
               await db.journalEntries.add({ ...sJe, tenantId: sJe.tenantId || currentTenantId });
+            }
+          }
+        }
+
+        if (serverEstimates && serverEstimates.length > 0) {
+          for (const sEst of serverEstimates) {
+            const existing = await db.estimates.where('estimateId').equals(sEst.estimateId).first();
+            if (!existing) {
+              await db.estimates.add({ ...sEst, tenantId: sEst.tenantId || currentTenantId });
             }
           }
         }
@@ -242,12 +255,14 @@ export function App() {
   const allInvoices = useLiveQuery(() => db.invoices.reverse().toArray(), []) || [];
   const allAccounts = useLiveQuery(() => db.ledgerAccounts.toArray(), []) || [];
   const allJournalEntries = useLiveQuery(() => db.journalEntries.reverse().toArray(), []) || [];
+  const allEstimates = useLiveQuery(() => db.estimates.reverse().toArray(), []) || [];
 
   const items = allItems.filter(item => (item.tenantId || 'default-tenant') === currentTenantId);
   const parties = allParties.filter(party => (party.tenantId || 'default-tenant') === currentTenantId);
   const invoices = allInvoices.filter(inv => (inv.tenantId || 'default-tenant') === currentTenantId);
   const accounts = allAccounts.filter(acc => (acc.tenantId || 'default-tenant') === currentTenantId);
   const journalEntries = allJournalEntries.filter(je => (je.tenantId || 'default-tenant') === currentTenantId);
+  const estimates = allEstimates.filter(est => (est.tenantId || 'default-tenant') === currentTenantId);
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');
@@ -378,6 +393,25 @@ export function App() {
 
           {activeTab === 'invoices' && (
             <InvoicesScreen invoices={invoices} business={businessDetails} />
+          )}
+
+          {activeTab === 'estimates' && (
+            <EstimateListScreen
+              estimates={estimates}
+              business={businessDetails}
+              onCreateEstimate={() => setActiveTab('create-estimate')}
+              onEstimateUpdated={() => {}}
+            />
+          )}
+
+          {activeTab === 'create-estimate' && (
+            <CreateEstimateScreen
+              items={items}
+              parties={parties}
+              business={businessDetails}
+              onEstimateSaved={() => setActiveTab('estimates')}
+              onCancel={() => setActiveTab('estimates')}
+            />
           )}
 
           {activeTab === 'gst' && (

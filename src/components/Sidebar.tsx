@@ -25,12 +25,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
 
   // Automatically expand Sale group if active tab is under Sale
   useEffect(() => {
-    if (activeTab === 'pos' || activeTab === 'invoices') {
+    if (activeTab === 'pos' || activeTab === 'invoices' || activeTab === 'estimates' || activeTab === 'create-estimate') {
       setIsSaleOpen(true);
     }
   }, [activeTab]);
 
-  const isSaleActive = activeTab === 'pos' || activeTab === 'invoices';
+  const isSaleActive = activeTab === 'pos' || activeTab === 'invoices' || activeTab === 'estimates' || activeTab === 'create-estimate';
 
   const menuGroups = [
     { id: 'home', label: 'Home', icon: Home },
@@ -106,6 +106,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                   <span>POS</span>
                 </div>
                 <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 font-mono font-bold">Counter</span>
+              </button>
+
+              {/* Estimate / Quotation Sub-option */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('estimates')}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  activeTab === 'estimates' || activeTab === 'create-estimate'
+                    ? 'bg-red-600 text-white font-bold shadow-xs'
+                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'estimates' || activeTab === 'create-estimate' ? 'bg-white' : 'bg-amber-400'}`}></div>
+                  <span>Estimate / Quotation</span>
+                </div>
               </button>
 
               {/* Sale Invoices Sub-option */}

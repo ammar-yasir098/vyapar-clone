@@ -221,3 +221,29 @@ export async function fetchServerJournalEntries(tenantId?: string) {
     return [];
   }
 }
+
+// ESTIMATES
+export async function fetchServerEstimates(tenantId?: string) {
+  try {
+    const url = tenantId ? `${API_BASE_URL}/estimates?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/estimates`;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data || [];
+  } catch (err) {
+    return [];
+  }
+}
+
+export async function saveServerEstimate(estimateData: any) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/estimates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(estimateData)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}

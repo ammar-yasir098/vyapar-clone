@@ -41,7 +41,7 @@ class ClientSyncManager {
    * Logs a local mutation to the sync journal queue.
    */
   public async logMutation(
-    entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'JOURNAL',
+    entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'JOURNAL' | 'ESTIMATE',
     entityId: string,
     mutationType: 'INSERT' | 'UPDATE' | 'DELETE',
     payload: any
@@ -137,6 +137,22 @@ class ClientSyncManager {
               entityId: String(je.id || je.entryNumber),
               mutationType: 'INSERT',
               payload: JSON.stringify(je),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          }
+        }
+
+        const localEstimates = await db.estimates.toArray();
+        for (const est of localEstimates) {
+          if (est.id || est.estimateId) {
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-est-${est.id || est.estimateId}`,
+              clientSequence: Date.now(),
+              entityType: 'ESTIMATE',
+              entityId: String(est.id || est.estimateId),
+              mutationType: 'INSERT',
+              payload: JSON.stringify(est),
               timestamp: new Date().toISOString(),
               synced: false
             });

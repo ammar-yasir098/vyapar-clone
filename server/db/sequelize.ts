@@ -260,6 +260,74 @@ LedgerAccount.init(
   { sequelize, modelName: 'LedgerAccount', tableName: 'ledger_accounts', timestamps: false }
 );
 
+// 8. Estimate & EstimateItem Models
+export class Estimate extends Model {
+  declare id: number;
+  declare estimateId: string;
+  declare tenantId: string;
+  declare estimateNumber: string;
+  declare estimateDate: string;
+  declare partyId: number;
+  declare partyName: string;
+  declare partyPhone: string;
+  declare partyGstin: string;
+  declare subtotal: number;
+  declare taxTotal: number;
+  declare discountTotal: number;
+  declare grandTotal: number;
+  declare status: string;
+}
+Estimate.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    estimateId: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'estimate_id' },
+    tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
+    estimateNumber: { type: DataTypes.STRING, allowNull: false, field: 'estimate_number' },
+    estimateDate: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW, field: 'estimate_date' },
+    partyId: { type: DataTypes.INTEGER, allowNull: true, field: 'party_id' },
+    partyName: { type: DataTypes.STRING, allowNull: false, field: 'party_name' },
+    partyPhone: { type: DataTypes.STRING, allowNull: true, field: 'party_phone' },
+    partyGstin: { type: DataTypes.STRING, allowNull: true, field: 'party_gstin' },
+    subtotal: { type: DataTypes.FLOAT, defaultValue: 0.0 },
+    taxTotal: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'tax_total' },
+    discountTotal: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'discount_total' },
+    grandTotal: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'grand_total' },
+    status: { type: DataTypes.STRING, defaultValue: 'OPEN' }
+  },
+  { sequelize, modelName: 'Estimate', tableName: 'estimates', timestamps: false }
+);
+
+export class EstimateItem extends Model {
+  declare id: number;
+  declare estimateId: number;
+  declare itemId: number;
+  declare itemName: string;
+  declare hsnSacCode: string;
+  declare unitType: string;
+  declare quantity: number;
+  declare unitPrice: number;
+  declare taxAmount: number;
+  declare totalAmount: number;
+}
+EstimateItem.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    estimateId: { type: DataTypes.INTEGER, allowNull: false, field: 'estimate_id' },
+    itemId: { type: DataTypes.INTEGER, allowNull: true, field: 'item_id' },
+    itemName: { type: DataTypes.STRING, allowNull: false, field: 'item_name' },
+    hsnSacCode: { type: DataTypes.STRING, allowNull: true, field: 'hsn_sac_code' },
+    unitType: { type: DataTypes.STRING, defaultValue: 'PCS', field: 'unit_type' },
+    quantity: { type: DataTypes.FLOAT, defaultValue: 1.0 },
+    unitPrice: { type: DataTypes.FLOAT, allowNull: false, field: 'unit_price' },
+    taxAmount: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'tax_amount' },
+    totalAmount: { type: DataTypes.FLOAT, allowNull: false, field: 'total_amount' }
+  },
+  { sequelize, modelName: 'EstimateItem', tableName: 'estimate_items', timestamps: false }
+);
+
+Estimate.hasMany(EstimateItem, { foreignKey: 'estimateId', as: 'items', onDelete: 'CASCADE' });
+EstimateItem.belongsTo(Estimate, { foreignKey: 'estimateId' });
+
 /**
  * Seeds standard Chart of Accounts in PostgreSQL if empty
  */

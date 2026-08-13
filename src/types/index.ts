@@ -151,7 +151,7 @@ export interface SyncJournal {
   id?: number;
   versionId: string;
   clientSequence: number;
-  entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'JOURNAL';
+  entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'JOURNAL' | 'ESTIMATE';
   entityId: string;
   mutationType: 'INSERT' | 'UPDATE' | 'DELETE';
   payload: string; // JSON string
@@ -191,4 +191,35 @@ export interface CompanyProfileEntity {
   signatureUrl?: string | null;
   booksBeginDate?: string;
   updatedAt?: string;
+}
+
+export interface EstimateItem {
+  id?: number;
+  itemId?: number;
+  itemName: string;
+  hsnSacCode?: string;
+  unitType?: string;
+  quantity: number;
+  unitPrice: number;
+  taxAmount?: number;
+  totalAmount: number;
+}
+
+export interface Estimate {
+  id?: number;
+  estimateId: string;
+  tenantId: string;
+  estimateNumber: string;
+  estimateDate: string;
+  partyId?: number;
+  partyName: string;
+  partyPhone?: string;
+  partyGstin?: string;
+  subtotal: number;
+  taxTotal: number;
+  discountTotal: number;
+  grandTotal: number;
+  status: 'OPEN' | 'CONVERTED' | 'EXPIRED';
+  items: EstimateItem[];
+  createdAt?: string;
 }

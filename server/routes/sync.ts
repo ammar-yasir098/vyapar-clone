@@ -197,6 +197,57 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               await JournalEntry.create(journalData);
             }
           }
+        } else if (entityType === 'ESTIMATE') {
+          const { Estimate, EstimateItem } = await import('../db/sequelize.js');
+          if (mutationType === 'DELETE' && payload.id) {
+            await Estimate.destroy({ where: { id: payload.id } });
+          } else if (payload.estimateId || payload.estimateNumber) {
+            let existingEst = payload.estimateId ? await Estimate.findOne({ where: { estimateId: payload.estimateId } }) : null;
+            if (!existingEst && payload.estimateNumber) {
+              existingEst = await Estimate.findOne({ where: { estimateNumber: payload.estimateNumber } });
+            }
+
+            const estData = {
+              estimateId: payload.estimateId || `EST-${Date.now()}`,
+              tenantId: tenantId || 'default-tenant',
+              estimateNumber: payload.estimateNumber || `EST-${Math.floor(1000 + Math.random() * 9000)}`,
+              estimateDate: payload.estimateDate || new Date().toISOString().split('T')[0],
+              partyId: payload.partyId || null,
+              partyName: payload.partyName || 'Walk-in Customer',
+              partyPhone: payload.partyPhone || '',
+              partyGstin: payload.partyGstin || '',
+              subtotal: payload.subtotal || 0,
+              taxTotal: payload.taxTotal || 0,
+              discountTotal: payload.discountTotal || 0,
+              grandTotal: payload.grandTotal || 0,
+              status: payload.status || 'OPEN'
+            };
+
+            let targetEst: any;
+            if (existingEst) {
+              await existingEst.update(estData);
+              targetEst = existingEst;
+              await EstimateItem.destroy({ where: { estimateId: existingEst.get('id') as number } });
+            } else {
+              targetEst = await Estimate.create(estData);
+            }
+
+            if (payload.items && Array.isArray(payload.items)) {
+              for (const item of payload.items) {
+                await EstimateItem.create({
+                  estimateId: targetEst.id,
+                  itemId: item.itemId || item.id || null,
+                  itemName: item.itemName || item.name || 'Quoted Product',
+                  hsnSacCode: item.hsnSacCode || '',
+                  unitType: item.unitType || 'PCS',
+                  quantity: item.quantity || 1,
+                  unitPrice: item.unitPrice || item.salesPrice || 0,
+                  taxAmount: item.taxAmount || 0,
+                  totalAmount: item.totalAmount || (item.quantity * (item.unitPrice || 0))
+                });
+              }
+            }
+          }
         }
       } catch (err) {
         console.error('Error persisting sync mutation to PostgreSQL:', err);

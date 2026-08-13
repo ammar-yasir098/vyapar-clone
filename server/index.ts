@@ -10,6 +10,7 @@ import { invoicesRouter } from './routes/invoices.js';
 import { ledgerRouter } from './routes/ledger.js';
 import { purchasesRouter } from './routes/purchases.js';
 import { companyRouter } from './routes/company.js';
+import { estimatesRouter } from './routes/estimates.js';
 
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -39,6 +40,7 @@ app.use('/api/v1/parties', partiesRouter);
 app.use('/api/v1/invoices', invoicesRouter);
 app.use('/api/v1/ledger', ledgerRouter);
 app.use('/api/v1/purchases', purchasesRouter);
+app.use('/api/v1/estimates', estimatesRouter);
 
 // Root Status
 app.get('/', (req: Request, res: Response) => {
