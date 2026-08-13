@@ -11,7 +11,13 @@ import { ledgerRouter } from './routes/ledger.js';
 import { purchasesRouter } from './routes/purchases.js';
 import { companyRouter } from './routes/company.js';
 
+import path from 'path';
+import { fileURLToPath } from 'url';
+
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app: Express = express();
 const PORT = process.env.PORT || 5000;
@@ -20,6 +26,9 @@ const PORT = process.env.PORT || 5000;
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Serve static uploaded images
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // REST API v1 Routes
 app.use('/api/v1/auth', authRouter);

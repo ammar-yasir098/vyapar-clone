@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Pencil, Upload, Calendar, Building, Phone, Mail, MapPin, CheckCircle2 } from 'lucide-react';
 import { BusinessDetails } from '../../types';
 import { fetchServerCompanyProfile, saveServerCompanyProfile } from '../../services/api';
+import { db } from '../../db';
 
 interface EditProfileScreenProps {
   business: BusinessDetails;
@@ -14,40 +15,52 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
   onUpdateBusiness,
   onCancel
 }) => {
+  const activeTenantId = business.tenantId || 'default-tenant';
+
   const [name, setName] = useState(business.name || 'My Company');
   const [phone, setPhone] = useState(business.phone || '+92 300 xxxxxxx');
-  const [email, setEmail] = useState('contact@supermarket.com');
+  const [email, setEmail] = useState(business.email || 'contact@supermarket.com');
   const [address, setAddress] = useState(business.address || '');
   const [gstin, setGstin] = useState(business.gstin || 'NTN: 7654321-0');
-  const [businessType, setBusinessType] = useState('Retail');
-  const [businessCategory, setBusinessCategory] = useState('Supermarket & FMCG');
-  const [pincode, setPincode] = useState('54000');
+  const [businessType, setBusinessType] = useState(business.businessType || 'Retail');
+  const [businessCategory, setBusinessCategory] = useState(business.businessCategory || 'Supermarket & FMCG');
+  const [pincode, setPincode] = useState(business.pincode || '54000');
   const [booksBeginDate, setBooksBeginDate] = useState('2026-08-10');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // Load from PostgreSQL API on mount
+  // Load profile from PostgreSQL API or Dexie local IndexedDB fallback
   useEffect(() => {
+    setName(business.name || 'My Company');
+    setPhone(business.phone || '+92 300 xxxxxxx');
+    setEmail(business.email || 'contact@supermarket.com');
+    setAddress(business.address || '');
+    setGstin(business.gstin || 'NTN: 7654321-0');
+    setBusinessType(business.businessType || 'Retail');
+    setBusinessCategory(business.businessCategory || 'Supermarket & FMCG');
+    setPincode(business.pincode || '54000');
+
     async function loadCompanyProfile() {
-      const serverProfile = await fetchServerCompanyProfile();
-      if (serverProfile) {
-        if (serverProfile.name) setName(serverProfile.name);
-        if (serverProfile.phone) setPhone(serverProfile.phone);
-        if (serverProfile.email) setEmail(serverProfile.email);
-        if (serverProfile.address) setAddress(serverProfile.address);
-        if (serverProfile.gstin) setGstin(serverProfile.gstin);
-        if (serverProfile.businessType) setBusinessType(serverProfile.businessType);
-        if (serverProfile.businessCategory) setBusinessCategory(serverProfile.businessCategory);
-        if (serverProfile.pincode) setPincode(serverProfile.pincode);
-        if (serverProfile.logoUrl) setLogoUrl(serverProfile.logoUrl);
-        if (serverProfile.signatureUrl) setSignatureUrl(serverProfile.signatureUrl);
-        if (serverProfile.booksBeginDate) setBooksBeginDate(serverProfile.booksBeginDate);
+      const serverProfile = await fetchServerCompanyProfile(activeTenantId);
+      const profile = serverProfile || (await db.companyProfiles.where('tenantId').equals(activeTenantId).first());
+      if (profile) {
+        if (profile.name) setName(profile.name);
+        if (profile.phone) setPhone(profile.phone);
+        if (profile.email) setEmail(profile.email);
+        if (profile.address) setAddress(profile.address);
+        if (profile.gstin) setGstin(profile.gstin);
+        if (profile.businessType) setBusinessType(profile.businessType);
+        if (profile.businessCategory) setBusinessCategory(profile.businessCategory);
+        if (profile.pincode) setPincode(profile.pincode);
+        if (profile.logoUrl) setLogoUrl(profile.logoUrl);
+        if (profile.signatureUrl) setSignatureUrl(profile.signatureUrl);
+        if (profile.booksBeginDate) setBooksBeginDate(profile.booksBeginDate);
       }
     }
     loadCompanyProfile();
-  }, []);
+  }, [activeTenantId, business]);
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -81,7 +94,7 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
     setIsSaving(true);
 
     const profilePayload = {
-      tenantId: 'default-tenant',
+      tenantId: activeTenantId,
       name,
       phone,
       email,
@@ -98,21 +111,43 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
     // 1. Save to PostgreSQL database
     const res = await saveServerCompanyProfile(profilePayload);
 
-    // 2. Save to Browser localStorage
-    localStorage.setItem('vyapar_business_details', JSON.stringify(profilePayload));
+    const savedLogo = res?.data?.logoUrl || profilePayload.logoUrl;
+    const savedSig = res?.data?.signatureUrl || profilePayload.signatureUrl;
 
-    // 3. Update local React state
+    if (savedLogo) setLogoUrl(savedLogo);
+    if (savedSig) setSignatureUrl(savedSig);
+
+    const fullPayload = {
+      ...profilePayload,
+      logoUrl: savedLogo,
+      signatureUrl: savedSig
+    };
+
+    // 2. Save to Browser localStorage
+    localStorage.setItem('vyapar_business_details', JSON.stringify(fullPayload));
+
+    // 3. Update parent React state
     onUpdateBusiness({
+      tenantId: activeTenantId,
       name,
       phone,
+      email,
       address,
-      gstin
+      gstin,
+      businessType,
+      businessCategory,
+      pincode,
+      logoUrl: savedLogo,
+      signatureUrl: savedSig
     });
 
     setIsSaving(false);
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
   };
+
+  const displayLogoUrl = logoUrl ? (logoUrl.startsWith('/uploads/') ? `http://localhost:5000${logoUrl}` : logoUrl) : null;
+  const displaySignatureUrl = signatureUrl ? (signatureUrl.startsWith('/uploads/') ? `http://localhost:5000${signatureUrl}` : signatureUrl) : null;
 
   return (
     <div className="flex-1 bg-[#f0f4f8] p-6 overflow-y-auto flex flex-col justify-between select-none">
@@ -132,10 +167,15 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
         <div className="flex items-center justify-start">
           <div className="relative">
             <div className="w-36 h-36 rounded-full border-4 border-sky-400 bg-sky-50 flex flex-col items-center justify-center text-sky-600 font-semibold cursor-pointer overflow-hidden group shadow-sm hover:border-sky-500 transition">
-              {logoUrl ? (
-                <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" />
+              {displayLogoUrl ? (
+                <img src={displayLogoUrl} alt="Logo" className="w-full h-full object-cover" />
               ) : (
-                <span className="text-sm font-bold text-sky-400">Add Logo</span>
+                <div className="flex flex-col items-center justify-center text-center p-2">
+                  <span className="text-4xl font-extrabold text-sky-600 mb-0.5">
+                    {name ? name.charAt(0).toUpperCase() : 'C'}
+                  </span>
+                  <span className="text-[10px] font-bold text-sky-500 uppercase tracking-wider">Add Logo</span>
+                </div>
               )}
               <input
                 type="file"
@@ -285,13 +325,15 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Add Signature</label>
               <div className="w-full h-32 border-2 border-dashed border-slate-300 rounded-xl bg-white flex flex-col items-center justify-center text-slate-400 cursor-pointer relative hover:border-sky-400 transition overflow-hidden">
-                {signatureUrl ? (
-                  <img src={signatureUrl} alt="Signature" className="h-full object-contain p-2" />
+                {displaySignatureUrl ? (
+                  <img src={displaySignatureUrl} alt="Signature" className="h-full object-contain p-2" />
                 ) : (
-                  <>
-                    <Upload className="w-6 h-6 text-slate-400 mb-1" />
+                  <div className="flex flex-col items-center justify-center text-center">
+                    <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 font-extrabold text-sm mb-1 border border-slate-200 shadow-xs">
+                      {name ? name.charAt(0).toUpperCase() : 'S'}
+                    </div>
                     <span className="text-xs font-semibold text-slate-500">Upload Signature</span>
-                  </>
+                  </div>
                 )}
                 <input
                   type="file"

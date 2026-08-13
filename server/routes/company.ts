@@ -1,7 +1,44 @@
 import { Router, Request, Response } from 'express';
 import { CompanyProfile, isDbConnected } from '../db/sequelize.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 export const companyRouter = Router();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const uploadsDir = path.join(__dirname, '../uploads');
+
+function saveBase64Image(base64Data: string | undefined | null, subfolder: string, prefix: string, tenantId: string): string | null {
+  if (!base64Data) return null;
+  if (!base64Data.startsWith('data:image/')) {
+    return base64Data; // Already a file path or URL
+  }
+
+  try {
+    const matches = base64Data.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
+    if (!matches) return base64Data;
+
+    const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+    const buffer = Buffer.from(matches[2], 'base64');
+
+    const folderPath = path.join(uploadsDir, subfolder);
+    if (!fs.existsSync(folderPath)) {
+      fs.mkdirSync(folderPath, { recursive: true });
+    }
+
+    const safeTenant = tenantId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `${prefix}_${safeTenant}.${ext}`;
+    const filePath = path.join(folderPath, filename);
+
+    fs.writeFileSync(filePath, buffer);
+    return `/uploads/${subfolder}/${filename}`;
+  } catch (err) {
+    console.error('Error saving image file:', err);
+    return base64Data;
+  }
+}
 
 // GET /api/v1/company/all - Fetch all company profiles (Multi-Store / Multi-Branch)
 companyRouter.get('/all', async (req: Request, res: Response) => {
@@ -105,6 +142,9 @@ companyRouter.post('/', async (req: Request, res: Response) => {
       booksBeginDate
     } = req.body;
 
+    const savedLogoUrl = saveBase64Image(logoUrl, 'logos', 'logo', tenantId);
+    const savedSignatureUrl = saveBase64Image(signatureUrl, 'signatures', 'sig', tenantId);
+
     if (isDbConnected()) {
       let profile = await CompanyProfile.findOne({ where: { tenantId } });
 
@@ -118,8 +158,8 @@ companyRouter.post('/', async (req: Request, res: Response) => {
           businessType: businessType || profile.get('businessType'),
           businessCategory: businessCategory || profile.get('businessCategory'),
           pincode: pincode || profile.get('pincode'),
-          logoUrl: logoUrl !== undefined ? logoUrl : profile.get('logoUrl'),
-          signatureUrl: signatureUrl !== undefined ? signatureUrl : profile.get('signatureUrl'),
+          logoUrl: savedLogoUrl !== null ? savedLogoUrl : profile.get('logoUrl'),
+          signatureUrl: savedSignatureUrl !== null ? savedSignatureUrl : profile.get('signatureUrl'),
           booksBeginDate: booksBeginDate || profile.get('booksBeginDate')
         });
       } else {
@@ -133,8 +173,8 @@ companyRouter.post('/', async (req: Request, res: Response) => {
           businessType,
           businessCategory,
           pincode,
-          logoUrl,
-          signatureUrl,
+          logoUrl: savedLogoUrl,
+          signatureUrl: savedSignatureUrl,
           booksBeginDate
         });
       }
@@ -142,7 +182,14 @@ companyRouter.post('/', async (req: Request, res: Response) => {
       return res.status(200).json({ success: true, message: 'Company profile saved to PostgreSQL via Sequelize', data: profile });
     }
 
-    return res.status(200).json({ success: true, data: req.body });
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...req.body,
+        logoUrl: savedLogoUrl,
+        signatureUrl: savedSignatureUrl
+      }
+    });
   } catch (err: any) {
     console.error('Error saving company profile:', err);
     return res.status(500).json({ success: false, error: err.message });

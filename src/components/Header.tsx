@@ -119,9 +119,13 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
             className="flex items-center gap-2.5 px-2.5 py-1 rounded-xl hover:bg-slate-100/90 transition cursor-pointer text-left border border-transparent hover:border-slate-200"
           >
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-600 to-rose-700 text-white font-extrabold flex items-center justify-center text-sm shadow-sm">
-              {business.name ? business.name.charAt(0).toUpperCase() : 'V'}
-            </div>
+            {business.logoUrl ? (
+              <img src={business.logoUrl.startsWith('/uploads/') ? `http://localhost:5000${business.logoUrl}` : business.logoUrl} alt="Logo" className="w-8 h-8 rounded-lg object-cover border border-slate-200 shadow-xs shrink-0" />
+            ) : (
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-600 to-rose-700 text-white font-extrabold flex items-center justify-center text-sm shadow-sm shrink-0">
+                {business.name ? business.name.charAt(0).toUpperCase() : 'V'}
+              </div>
+            )}
             <div>
               <div className="flex items-center gap-1 font-bold text-slate-900 text-sm">
                 <span className="max-w-[180px] truncate">{business.name}</span>
@@ -145,6 +149,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="max-h-60 overflow-y-auto py-1">
                 {safeCompanies.map((c, idx) => {
                   const isSelected = (c.tenantId || 'default-tenant') === (currentTenantId || 'default-tenant') || c.name === business.name;
+                  const cLogoUrl = c.logoUrl ? (c.logoUrl.startsWith('/uploads/') ? `http://localhost:5000${c.logoUrl}` : c.logoUrl) : null;
                   return (
                     <button
                       key={c.tenantId || idx}
@@ -159,11 +164,15 @@ export const Header: React.FC<HeaderProps> = ({
                       }`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <div className={`w-7 h-7 rounded-lg text-xs font-bold flex items-center justify-center shrink-0 ${
-                          isSelected ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700'
-                        }`}>
-                          {c.name ? c.name.charAt(0).toUpperCase() : 'S'}
-                        </div>
+                        {cLogoUrl ? (
+                          <img src={cLogoUrl} alt="" className="w-7 h-7 rounded-lg object-cover shrink-0 border border-slate-200" />
+                        ) : (
+                          <div className={`w-7 h-7 rounded-lg text-xs font-bold flex items-center justify-center shrink-0 ${
+                            isSelected ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700'
+                          }`}>
+                            {c.name ? c.name.charAt(0).toUpperCase() : 'S'}
+                          </div>
+                        )}
                         <div className="min-w-0">
                           <div className={`text-xs truncate ${isSelected ? 'text-blue-900 font-bold' : 'text-slate-800 font-semibold'}`}>
                             {c.name}

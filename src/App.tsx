@@ -93,9 +93,21 @@ export function App() {
             state: 'Punjab, Pakistan',
             tagline: 'Quality Products at Everyday Low Prices',
             email: c.email || '',
-            businessType: c.businessType || 'Retail'
+            businessType: c.businessType || 'Retail',
+            logoUrl: c.logoUrl || null,
+            signatureUrl: c.signatureUrl || null
           }));
           setCompanies(mappedCompanies);
+
+          // Save/Sync into Dexie Local IndexedDB
+          for (const c of mappedCompanies) {
+            const existing = await db.companyProfiles.where('tenantId').equals(c.tenantId).first();
+            if (existing) {
+              await db.companyProfiles.update(existing.id!, c);
+            } else {
+              await db.companyProfiles.add(c);
+            }
+          }
 
           // Find active company profile
           const activeCompany = mappedCompanies.find((c: any) => c.tenantId === currentTenantId) || mappedCompanies[0];
@@ -111,10 +123,19 @@ export function App() {
               gstin: serverCompany.gstin || 'NTN: 7654321-0',
               state: 'Punjab, Pakistan',
               tagline: 'Quality Products at Everyday Low Prices',
-              email: serverCompany.email || ''
+              email: serverCompany.email || '',
+              logoUrl: serverCompany.logoUrl || null,
+              signatureUrl: serverCompany.signatureUrl || null
             };
             setBusinessDetails(comp);
             setCompanies([comp]);
+
+            const existing = await db.companyProfiles.where('tenantId').equals(comp.tenantId).first();
+            if (existing) {
+              await db.companyProfiles.update(existing.id!, comp);
+            } else {
+              await db.companyProfiles.add(comp);
+            }
           }
         }
 
@@ -174,7 +195,27 @@ export function App() {
           }
         }
       } catch (err) {
-        console.warn('Backend server offline or unreachable. Operating in local mode.', err);
+        console.warn('Backend server offline or unreachable. Operating in Dexie local offline mode.', err);
+        // Fallback to reading company profiles from Dexie IndexedDB
+        const dexieProfiles = await db.companyProfiles.toArray();
+        if (dexieProfiles && dexieProfiles.length > 0) {
+          const mappedDexie = dexieProfiles.map(c => ({
+            tenantId: c.tenantId,
+            name: c.name,
+            phone: c.phone || '+92 300 xxxxxxx',
+            address: c.address || '',
+            gstin: c.gstin || 'NTN: 7654321-0',
+            state: 'Punjab, Pakistan',
+            tagline: 'Quality Products at Everyday Low Prices',
+            email: c.email || '',
+            businessType: c.businessType || 'Retail',
+            logoUrl: c.logoUrl || null,
+            signatureUrl: c.signatureUrl || null
+          }));
+          setCompanies(mappedDexie);
+          const activeDexieComp = mappedDexie.find(c => c.tenantId === currentTenantId) || mappedDexie[0];
+          setBusinessDetails(activeDexieComp);
+        }
       }
 
       setIsDbLoaded(true);
@@ -231,7 +272,9 @@ export function App() {
           gstin: serverComp.gstin || 'NTN: 7654321-0',
           state: 'Punjab, Pakistan',
           tagline: 'Quality Products at Everyday Low Prices',
-          email: serverComp.email || ''
+          email: serverComp.email || '',
+          logoUrl: serverComp.logoUrl || null,
+          signatureUrl: serverComp.signatureUrl || null
         };
         setBusinessDetails(comp);
         localStorage.setItem('vyapar_business_details', JSON.stringify(comp));
@@ -348,12 +391,33 @@ export function App() {
           {activeTab === 'company' && (
             <EditProfileScreen
               business={businessDetails}
-              onUpdateBusiness={(updated) => {
-                setBusinessDetails(prev => {
-                  const next = { ...prev, ...updated };
-                  localStorage.setItem('vyapar_business_details', JSON.stringify(next));
-                  return next;
+              onUpdateBusiness={async (updated) => {
+                const targetTenantId = updated.tenantId || currentTenantId;
+                const fullProfile = { ...businessDetails, ...updated, tenantId: targetTenantId };
+
+                setBusinessDetails(fullProfile);
+                localStorage.setItem('vyapar_business_details', JSON.stringify(fullProfile));
+
+                setCompanies(prevCompanies => {
+                  const exists = prevCompanies.some(c => (c.tenantId || 'default-tenant') === targetTenantId);
+                  if (exists) {
+                    return prevCompanies.map(c => 
+                      (c.tenantId || 'default-tenant') === targetTenantId ? { ...c, ...updated, tenantId: targetTenantId } : c
+                    );
+                  }
+                  return [...prevCompanies, fullProfile];
                 });
+
+                try {
+                  const existing = await db.companyProfiles.where('tenantId').equals(targetTenantId).first();
+                  if (existing) {
+                    await db.companyProfiles.update(existing.id!, fullProfile);
+                  } else {
+                    await db.companyProfiles.add(fullProfile);
+                  }
+                } catch (err) {
+                  console.warn('Error saving profile to Dexie local DB:', err);
+                }
               }}
               onCancel={() => setActiveTab('home')}
             />

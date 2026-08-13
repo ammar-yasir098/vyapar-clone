@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { Item, Party, Invoice, SyncJournal, BusinessDetails, ItemBatch, LedgerAccount, JournalEntry } from '../types';
+import { Item, Party, Invoice, SyncJournal, BusinessDetails, ItemBatch, LedgerAccount, JournalEntry, CompanyProfileEntity } from '../types';
 
 export class VyaparDatabase extends Dexie {
   items!: Table<Item, number>;
@@ -9,18 +9,20 @@ export class VyaparDatabase extends Dexie {
   itemBatches!: Table<ItemBatch, number>;
   ledgerAccounts!: Table<LedgerAccount, number>;
   journalEntries!: Table<JournalEntry, number>;
+  companyProfiles!: Table<CompanyProfileEntity, number>;
 
   constructor() {
     super('VyaparOfflineDB');
     
-    this.version(2).stores({
+    this.version(3).stores({
       items: '++id, skuCode, barcode, name, currentStock, tenantId',
       parties: '++id, name, phone, type, tenantId',
       invoices: '++id, invoiceNumber, invoiceDate, paymentStatus, partyId, syncStatus, tenantId',
       syncJournal: '++id, versionId, clientSequence, entityType, timestamp, synced',
       itemBatches: '++id, itemId, batchNumber, expiryDate',
       ledgerAccounts: '++id, accountCode, accountName, accountType, tenantId',
-      journalEntries: '++id, entryNumber, referenceId, transactionDate, tenantId'
+      journalEntries: '++id, entryNumber, referenceId, transactionDate, tenantId',
+      companyProfiles: '++id, &tenantId, name'
     });
   }
 }

@@ -172,4 +172,23 @@ export interface BusinessDetails {
   businessType?: string;
   businessCategory?: string;
   pincode?: string;
+  logoUrl?: string | null;
+  signatureUrl?: string | null;
+}
+
+export interface CompanyProfileEntity {
+  id?: number;
+  tenantId: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  gstin?: string;
+  businessType?: string;
+  businessCategory?: string;
+  pincode?: string;
+  logoUrl?: string | null;
+  signatureUrl?: string | null;
+  booksBeginDate?: string;
+  updatedAt?: string;
 }
