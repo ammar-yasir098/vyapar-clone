@@ -257,7 +257,7 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
               className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-md transition cursor-pointer"
             >
               <Plus className="w-4 h-4 stroke-[3]" />
-              <span>+ Record Payment-In</span>
+              <span>Record Payment-In</span>
             </button>
           </div>
         </div>
