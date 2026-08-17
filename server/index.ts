@@ -12,6 +12,7 @@ import { purchasesRouter } from './routes/purchases.js';
 import { companyRouter } from './routes/company.js';
 import { estimatesRouter } from './routes/estimates.js';
 import { paymentsRouter } from './routes/payments.js';
+import { purchaseOrdersRouter } from './routes/purchaseOrders.js';
 
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -43,6 +44,7 @@ app.use('/api/v1/ledger', ledgerRouter);
 app.use('/api/v1/purchases', purchasesRouter);
 app.use('/api/v1/estimates', estimatesRouter);
 app.use('/api/v1/payments', paymentsRouter);
+app.use('/api/v1/purchase-orders', purchaseOrdersRouter);
 
 // Root Status
 app.get('/', (req: Request, res: Response) => {

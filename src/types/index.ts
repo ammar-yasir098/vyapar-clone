@@ -254,3 +254,36 @@ export interface ItemRestock {
   source: 'PURCHASE_BILL' | 'MANUAL_ADJUSTMENT';
   createdAt: string;
 }
+
+export type POStatus = 'PENDING' | 'CONVERTED' | 'CANCELLED';
+
+export interface PurchaseOrderItem {
+  id?: number;
+  itemId?: number;
+  itemName: string;
+  unitType?: string;
+  quantity: number;
+  purchasePrice: number;
+  totalAmount: number;
+}
+
+export interface PurchaseOrder {
+  id?: number;
+  poId: string;
+  tenantId: string;
+  poNumber: string;
+  poDate: string;
+  supplierId?: number;
+  supplierName: string;
+  supplierPhone?: string;
+  supplierGstin?: string;
+  items: PurchaseOrderItem[];
+  subtotal: number;
+  taxTotal: number;
+  grandTotal: number;
+  status: POStatus;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+

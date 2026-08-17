@@ -22,22 +22,26 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
   const [isSaleOpen, setIsSaleOpen] = useState(true);
+  const [isPurchaseOpen, setIsPurchaseOpen] = useState(true);
 
-  // Automatically expand Sale group if active tab is under Sale
+  // Automatically expand Sale or Purchase groups based on active tab
   useEffect(() => {
     if (activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices') {
       setIsSaleOpen(true);
     }
+    if (activeTab === 'purchase' || activeTab === 'purchase-orders' || activeTab === 'create-po') {
+      setIsPurchaseOpen(true);
+    }
   }, [activeTab]);
 
   const isSaleActive = activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices';
+  const isPurchaseActive = activeTab === 'purchase' || activeTab === 'purchase-orders' || activeTab === 'create-po';
 
   const menuGroups = [
     { id: 'home', label: 'Home', icon: Home },
     { id: 'parties', label: 'Parties', icon: Users },
     { id: 'inventory', label: 'Items', icon: Package },
-    // Sale is rendered separately as an expandable menu
-    { id: 'purchase', label: 'Purchase & Expense', icon: ShoppingBag },
+    // Sale and Purchase & Expense are rendered separately as expandable menus
     { id: 'ledger', label: 'Cash & Bank', icon: BookOpen },
     { id: 'gst', label: 'GST & E-Way Bills', icon: ShieldCheck },
     { id: 'reports', label: 'Reports', icon: BarChart3 },
@@ -160,7 +164,64 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           )}
         </div>
 
-        {/* Render Remaining Menu Items (Purchase, Cash & Bank, GST, Reports, Printer) */}
+        {/* EXPANDABLE PURCHASE & EXPENSE MENU */}
+        <div className="pt-0.5 pb-0.5">
+          <button
+            type="button"
+            onClick={() => setIsPurchaseOpen(!isPurchaseOpen)}
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              isPurchaseActive
+                ? 'bg-[#232342] text-white shadow-sm border-l-4 border-blue-500'
+                : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <ShoppingBag className={`w-4 h-4 ${isPurchaseActive ? 'text-blue-400' : 'text-slate-400'}`} />
+              <span>Purchase & Expense</span>
+            </div>
+            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${isPurchaseOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {/* Sub-menu items under Purchase & Expense */}
+          {isPurchaseOpen && (
+            <div className="mt-1 mb-1 pl-3 pr-1 py-1 space-y-1 bg-[#121223]/60 rounded-lg border-l-2 border-slate-700/60 ml-3">
+              {/* Purchase Order Sub-option */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('purchase-orders')}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  activeTab === 'purchase-orders' || activeTab === 'create-po'
+                    ? 'bg-blue-600 text-white font-bold shadow-xs'
+                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'purchase-orders' || activeTab === 'create-po' ? 'bg-white' : 'bg-blue-400'}`}></div>
+                  <span>Purchase Order (PO)</span>
+                </div>
+                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono font-bold">Draft</span>
+              </button>
+
+              {/* Purchase Bills / Inward Sub-option */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('purchase')}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  activeTab === 'purchase'
+                    ? 'bg-blue-600 text-white font-bold shadow-xs'
+                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'purchase' ? 'bg-white' : 'bg-indigo-400'}`}></div>
+                  <span>Purchase Bills</span>
+                </div>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Render Remaining Menu Items (Cash & Bank, GST, Reports, Printer) */}
         {menuGroups.slice(3).map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;

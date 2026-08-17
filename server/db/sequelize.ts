@@ -357,6 +357,72 @@ PaymentIn.init(
   { sequelize, modelName: 'PaymentIn', tableName: 'payment_in', timestamps: false }
 );
 
+// 10. PurchaseOrder & PurchaseOrderItem Models
+export class PurchaseOrder extends Model {
+  declare id: number;
+  declare poId: string;
+  declare tenantId: string;
+  declare poNumber: string;
+  declare poDate: string;
+  declare supplierId: number;
+  declare supplierName: string;
+  declare supplierPhone: string;
+  declare supplierGstin: string;
+  declare subtotal: number;
+  declare taxTotal: number;
+  declare grandTotal: number;
+  declare status: string;
+  declare notes: string;
+}
+
+PurchaseOrder.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    poId: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'po_id' },
+    tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
+    poNumber: { type: DataTypes.STRING, allowNull: false, field: 'po_number' },
+    poDate: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW, field: 'po_date' },
+    supplierId: { type: DataTypes.INTEGER, allowNull: true, field: 'supplier_id' },
+    supplierName: { type: DataTypes.STRING, allowNull: false, field: 'supplier_name' },
+    supplierPhone: { type: DataTypes.STRING, allowNull: true, field: 'supplier_phone' },
+    supplierGstin: { type: DataTypes.STRING, allowNull: true, field: 'supplier_gstin' },
+    subtotal: { type: DataTypes.FLOAT, defaultValue: 0.0 },
+    taxTotal: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'tax_total' },
+    grandTotal: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'grand_total' },
+    status: { type: DataTypes.STRING, defaultValue: 'PENDING' },
+    notes: { type: DataTypes.TEXT, allowNull: true }
+  },
+  { sequelize, modelName: 'PurchaseOrder', tableName: 'purchase_orders', timestamps: false }
+);
+
+export class PurchaseOrderItem extends Model {
+  declare id: number;
+  declare purchaseOrderId: number;
+  declare itemId: number;
+  declare itemName: string;
+  declare unitType: string;
+  declare quantity: number;
+  declare purchasePrice: number;
+  declare totalAmount: number;
+}
+
+PurchaseOrderItem.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    purchaseOrderId: { type: DataTypes.INTEGER, allowNull: false, field: 'purchase_order_id' },
+    itemId: { type: DataTypes.INTEGER, allowNull: true, field: 'item_id' },
+    itemName: { type: DataTypes.STRING, allowNull: false, field: 'item_name' },
+    unitType: { type: DataTypes.STRING, defaultValue: 'PCS', field: 'unit_type' },
+    quantity: { type: DataTypes.FLOAT, defaultValue: 1.0 },
+    purchasePrice: { type: DataTypes.FLOAT, allowNull: false, field: 'purchase_price' },
+    totalAmount: { type: DataTypes.FLOAT, allowNull: false, field: 'total_amount' }
+  },
+  { sequelize, modelName: 'PurchaseOrderItem', tableName: 'purchase_order_items', timestamps: false }
+);
+
+PurchaseOrder.hasMany(PurchaseOrderItem, { foreignKey: 'purchaseOrderId', as: 'items', onDelete: 'CASCADE' });
+PurchaseOrderItem.belongsTo(PurchaseOrder, { foreignKey: 'purchaseOrderId' });
+
 /**
  * Seeds standard Chart of Accounts in PostgreSQL if empty
  */

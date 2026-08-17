@@ -273,3 +273,54 @@ export async function createServerPaymentIn(paymentData: any) {
     return { success: false, error: err.message };
   }
 }
+
+// PURCHASE ORDERS
+export async function fetchServerPurchaseOrders(tenantId?: string) {
+  try {
+    const url = tenantId ? `${API_BASE_URL}/purchase-orders?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/purchase-orders`;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data || [];
+  } catch (err) {
+    return [];
+  }
+}
+
+export async function createServerPurchaseOrder(poData: any) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/purchase-orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(poData)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function updateServerPOStatus(id: number | string, status: string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/purchase-orders/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function deleteServerPurchaseOrder(id: number | string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/purchase-orders/${id}`, {
+      method: 'DELETE'
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
