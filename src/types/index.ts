@@ -151,7 +151,7 @@ export interface SyncJournal {
   id?: number;
   versionId: string;
   clientSequence: number;
-  entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'JOURNAL' | 'ESTIMATE' | 'PAYMENT_IN';
+  entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'JOURNAL' | 'ESTIMATE' | 'PAYMENT_IN' | 'PURCHASE_ORDER' | 'PURCHASE_BILL' | 'PAYMENT_OUT' | 'EXPENSE' | 'PURCHASE_RETURN';
   entityId: string;
   mutationType: 'INSERT' | 'UPDATE' | 'DELETE';
   payload: string; // JSON string

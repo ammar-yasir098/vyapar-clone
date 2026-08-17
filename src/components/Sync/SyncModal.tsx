@@ -18,7 +18,15 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
     isSyncing: false
   });
   const [pendingQueue, setPendingQueue] = useState<SyncJournal[]>([]);
-  const [dbStats, setDbStats] = useState({ items: 0, parties: 0, invoices: 0 });
+  const [dbStats, setDbStats] = useState({ 
+    items: 0, 
+    parties: 0, 
+    invoices: 0, 
+    purchaseOrders: 0, 
+    purchaseBills: 0, 
+    expenses: 0, 
+    purchaseReturns: 0 
+  });
   const [serverHealth, setServerHealth] = useState<{ status: string; version?: number } | null>(null);
 
   const refreshModalData = async () => {
@@ -26,11 +34,24 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
     const unsynced = await db.syncJournal.filter(r => !r.synced).toArray();
     setPendingQueue(unsynced);
 
-    // 2. Fetch local storage counts
+    // 2. Fetch local storage counts for all tables
     const itemsCount = await db.items.count();
     const partiesCount = await db.parties.count();
     const invoicesCount = await db.invoices.count();
-    setDbStats({ items: itemsCount, parties: partiesCount, invoices: invoicesCount });
+    const poCount = await db.purchaseOrders.count();
+    const billCount = await db.purchaseBills.count();
+    const expenseCount = await db.expenses.count();
+    const returnCount = await db.purchaseReturns.count();
+
+    setDbStats({ 
+      items: itemsCount, 
+      parties: partiesCount, 
+      invoices: invoicesCount, 
+      purchaseOrders: poCount, 
+      purchaseBills: billCount, 
+      expenses: expenseCount, 
+      purchaseReturns: returnCount 
+    });
 
     // 3. Ping PostgreSQL cloud server status
     try {
@@ -68,8 +89,8 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
 
   const handleResetAllData = async () => {
     showConfirm({
-      title: 'Reset All Local & Cloud Data',
-      message: 'Are you sure you want to delete ALL data in both local IndexedDB and PostgreSQL database to start 100% fresh?',
+      title: 'Reset All Store Data (Excluding Company Profile)',
+      message: 'Are you sure you want to delete ALL store products, parties, invoices, orders, bills, and expenses in local and cloud DB? Your Company Profile will be preserved.',
       type: 'danger',
       confirmText: 'Yes, Reset All Data',
       onConfirm: async () => {
@@ -127,18 +148,22 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
                   Zero Latency
                 </span>
               </div>
-              <div className="grid grid-cols-3 gap-2 font-mono text-center pt-1 text-xs">
-                <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                  <div className="text-[10px] text-slate-500 font-sans">Products</div>
+              <div className="grid grid-cols-4 gap-1.5 font-mono text-center pt-1 text-xs">
+                <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                  <div className="text-[9px] text-slate-500 font-sans">Products</div>
                   <div className="font-bold text-slate-900">{dbStats.items}</div>
                 </div>
-                <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                  <div className="text-[10px] text-slate-500 font-sans">Parties</div>
+                <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                  <div className="text-[9px] text-slate-500 font-sans">Parties</div>
                   <div className="font-bold text-slate-900">{dbStats.parties}</div>
                 </div>
-                <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                  <div className="text-[10px] text-slate-500 font-sans">Invoices</div>
+                <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                  <div className="text-[9px] text-slate-500 font-sans">Invoices</div>
                   <div className="font-bold text-blue-600">{dbStats.invoices}</div>
+                </div>
+                <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                  <div className="text-[9px] text-slate-500 font-sans">Purchases</div>
+                  <div className="font-bold text-emerald-600">{dbStats.purchaseBills + dbStats.purchaseOrders}</div>
                 </div>
               </div>
             </div>

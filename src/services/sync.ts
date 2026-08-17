@@ -40,8 +40,11 @@ class ClientSyncManager {
   /**
    * Logs a local mutation to the sync journal queue.
    */
+  /**
+   * Logs a local mutation to the sync journal queue.
+   */
   public async logMutation(
-    entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'JOURNAL' | 'ESTIMATE',
+    entityType: SyncJournal['entityType'],
     entityId: string,
     mutationType: 'INSERT' | 'UPDATE' | 'DELETE',
     payload: any
@@ -76,7 +79,7 @@ class ClientSyncManager {
     try {
       let unsynced = await db.syncJournal.filter(record => !record.synced).toArray();
 
-      // If sync journal is empty, auto-queue all current local items, parties, and invoices
+      // If sync journal is empty, auto-queue all current local records for cloud sync
       if (unsynced.length === 0) {
         const localItems = await db.items.toArray();
         const localParties = await db.parties.toArray();
@@ -153,6 +156,102 @@ class ClientSyncManager {
               entityId: String(est.id || est.estimateId),
               mutationType: 'INSERT',
               payload: JSON.stringify(est),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          }
+        }
+
+        const localPaymentsIn = await db.paymentIn.toArray();
+        for (const payIn of localPaymentsIn) {
+          if (payIn.id || payIn.receiptNumber) {
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-payin-${payIn.id || payIn.receiptNumber}`,
+              clientSequence: Date.now(),
+              entityType: 'PAYMENT_IN',
+              entityId: String(payIn.id || payIn.receiptNumber),
+              mutationType: 'INSERT',
+              payload: JSON.stringify(payIn),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          }
+        }
+
+        const localPOs = await db.purchaseOrders.toArray();
+        for (const po of localPOs) {
+          if (po.id || po.poId) {
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-po-${po.id || po.poId}`,
+              clientSequence: Date.now(),
+              entityType: 'PURCHASE_ORDER',
+              entityId: String(po.id || po.poId),
+              mutationType: 'INSERT',
+              payload: JSON.stringify(po),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          }
+        }
+
+        const localBills = await db.purchaseBills.toArray();
+        for (const bill of localBills) {
+          if (bill.id || bill.billId) {
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-bill-${bill.id || bill.billId}`,
+              clientSequence: Date.now(),
+              entityType: 'PURCHASE_BILL',
+              entityId: String(bill.id || bill.billId),
+              mutationType: 'INSERT',
+              payload: JSON.stringify(bill),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          }
+        }
+
+        const localPaymentsOut = await db.paymentOut.toArray();
+        for (const payOut of localPaymentsOut) {
+          if (payOut.id || payOut.receiptNumber) {
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-payout-${payOut.id || payOut.receiptNumber}`,
+              clientSequence: Date.now(),
+              entityType: 'PAYMENT_OUT',
+              entityId: String(payOut.id || payOut.receiptNumber),
+              mutationType: 'INSERT',
+              payload: JSON.stringify(payOut),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          }
+        }
+
+        const localExpenses = await db.expenses.toArray();
+        for (const exp of localExpenses) {
+          if (exp.id || exp.expenseNumber) {
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-exp-${exp.id || exp.expenseNumber}`,
+              clientSequence: Date.now(),
+              entityType: 'EXPENSE',
+              entityId: String(exp.id || exp.expenseNumber),
+              mutationType: 'INSERT',
+              payload: JSON.stringify(exp),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          }
+        }
+
+        const localReturns = await db.purchaseReturns.toArray();
+        for (const ret of localReturns) {
+          if (ret.id || ret.returnId) {
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-ret-${ret.id || ret.returnId}`,
+              clientSequence: Date.now(),
+              entityType: 'PURCHASE_RETURN',
+              entityId: String(ret.id || ret.returnId),
+              mutationType: 'INSERT',
+              payload: JSON.stringify(ret),
               timestamp: new Date().toISOString(),
               synced: false
             });
