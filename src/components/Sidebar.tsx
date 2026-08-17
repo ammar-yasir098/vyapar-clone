@@ -109,7 +109,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                   <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'pos' ? 'bg-white' : 'bg-red-400'}`}></div>
                   <span>POS</span>
                 </div>
-                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 font-mono font-bold">Counter</span>
               </button>
 
               {/* Payment-In Sub-option */}
@@ -126,7 +125,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                   <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'payment-in' ? 'bg-white' : 'bg-emerald-400'}`}></div>
                   <span>Payment-In</span>
                 </div>
-                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold">Recv</span>
               </button>
 
               {/* Estimate / Quotation Sub-option */}
@@ -199,7 +197,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                   <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'purchase-orders' || activeTab === 'create-po' ? 'bg-white' : 'bg-blue-400'}`}></div>
                   <span>Purchase Order</span>
                 </div>
-                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono font-bold">Draft</span>
               </button>
 
               {/* Purchase Bills / Inward Sub-option */}
@@ -232,7 +229,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                   <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'payment-out' ? 'bg-white' : 'bg-rose-400'}`}></div>
                   <span>Payment-Out</span>
                 </div>
-                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 font-mono font-bold">Pay</span>
               </button>
 
               {/* Expenses Sub-option */}
@@ -249,7 +245,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                   <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'expenses' ? 'bg-white' : 'bg-amber-400'}`}></div>
                   <span>Expenses</span>
                 </div>
-                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono font-bold">Expense</span>
               </button>
 
               {/* Purchase Return / Dr. Note Sub-option */}
@@ -266,7 +261,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                   <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'purchase-returns' || activeTab === 'create-purchase-return' ? 'bg-white' : 'bg-red-400'}`}></div>
                   <span>Purchase Return</span>
                 </div>
-                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 font-mono font-bold">Return</span>
               </button>
             </div>
           )}
