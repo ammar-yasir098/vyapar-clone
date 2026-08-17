@@ -319,4 +319,19 @@ export interface PurchaseBill {
   updatedAt?: string;
 }
 
+export interface PaymentOut {
+  id?: number;
+  receiptNumber: string;
+  tenantId: string;
+  partyId?: number;
+  partyName: string;
+  partyPhone?: string;
+  paymentDate: string;
+  paymentMethod: 'CASH' | 'DIGITAL / APP' | 'CARD' | 'CHEQUE';
+  amount: number;
+  notes?: string;
+  createdAt?: string;
+}
+
+
 

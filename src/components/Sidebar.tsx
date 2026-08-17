@@ -29,13 +29,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     if (activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices') {
       setIsSaleOpen(true);
     }
-    if (activeTab === 'purchase' || activeTab === 'purchase-orders' || activeTab === 'create-po') {
+    if (activeTab === 'purchase' || activeTab === 'purchase-orders' || activeTab === 'create-po' || activeTab === 'payment-out') {
       setIsPurchaseOpen(true);
     }
   }, [activeTab]);
 
   const isSaleActive = activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices';
-  const isPurchaseActive = activeTab === 'purchase' || activeTab === 'purchase-orders' || activeTab === 'create-po';
+  const isPurchaseActive = activeTab === 'purchase' || activeTab === 'purchase-orders' || activeTab === 'create-po' || activeTab === 'payment-out';
 
   const menuGroups = [
     { id: 'home', label: 'Home', icon: Home },
@@ -216,6 +216,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                   <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'purchase' ? 'bg-white' : 'bg-indigo-400'}`}></div>
                   <span>Purchase Bills</span>
                 </div>
+              </button>
+
+              {/* Payment-Out Sub-option */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('payment-out')}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  activeTab === 'payment-out'
+                    ? 'bg-blue-600 text-white font-bold shadow-xs'
+                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'payment-out' ? 'bg-white' : 'bg-rose-400'}`}></div>
+                  <span>Payment-Out</span>
+                </div>
+                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 font-mono font-bold">Pay</span>
               </button>
             </div>
           )}

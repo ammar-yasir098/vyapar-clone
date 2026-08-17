@@ -22,6 +22,7 @@ import { PaymentInScreen } from './components/PaymentIn/PaymentInScreen';
 import { PurchaseOrderListScreen } from './components/Purchase/PurchaseOrderListScreen';
 import { CreatePurchaseOrderScreen } from './components/Purchase/CreatePurchaseOrderScreen';
 import { PurchaseBillListScreen } from './components/Purchase/PurchaseBillListScreen';
+import { PaymentOutScreen } from './components/PaymentOut/PaymentOutScreen';
 import { Invoice, BusinessDetails, Party } from './types';
 import { triggerThermalPrint } from './services/printer';
 import { 
@@ -36,7 +37,8 @@ import {
   fetchServerEstimates,
   fetchServerPaymentsIn,
   fetchServerPurchaseOrders,
-  fetchServerPurchaseBills
+  fetchServerPurchaseBills,
+  fetchServerPaymentsOut
 } from './services/api';
 import { syncLedgerAccountBalances } from './services/ledger';
 
@@ -65,6 +67,7 @@ export function App() {
   const [businessDetails, setBusinessDetails] = useState<BusinessDetails>(getInitialBusiness());
   const [companies, setCompanies] = useState<BusinessDetails[]>([]);
   const [partyForPaymentIn, setPartyForPaymentIn] = useState<Party | null>(null);
+  const [partyForPaymentOut, setPartyForPaymentOut] = useState<Party | null>(null);
   const [currentTenantId, setCurrentTenantId] = useState<string>(localStorage.getItem('vyapar_current_tenant') || 'default-tenant');
 
   const setActiveTab = (tab: string) => {
@@ -196,6 +199,7 @@ export function App() {
         const serverPaymentsIn = await fetchServerPaymentsIn(currentTenantId);
         const serverPOs = await fetchServerPurchaseOrders(currentTenantId);
         const serverPBills = await fetchServerPurchaseBills(currentTenantId);
+        const serverPaymentsOut = await fetchServerPaymentsOut(currentTenantId);
 
         if (serverItems && serverItems.length > 0) {
           for (const sItem of serverItems) {
@@ -301,6 +305,15 @@ export function App() {
             }
           }
         }
+
+        if (serverPaymentsOut && serverPaymentsOut.length > 0) {
+          for (const sPay of serverPaymentsOut) {
+            const existing = await db.paymentOut.where('receiptNumber').equals(sPay.receiptNumber).first();
+            if (!existing) {
+              await db.paymentOut.add({ ...sPay, tenantId: sPay.tenantId || currentTenantId });
+            }
+          }
+        }
       } catch (err) {
         console.warn('Backend server offline or unreachable. Operating in Dexie local offline mode.', err);
         // Fallback to reading company profiles from Dexie IndexedDB or localStorage
@@ -370,6 +383,7 @@ export function App() {
   const allPaymentsIn = useLiveQuery(() => db.paymentIn.reverse().toArray(), []) || [];
   const allPurchaseOrders = useLiveQuery(() => db.purchaseOrders.reverse().toArray(), []) || [];
   const allPurchaseBills = useLiveQuery(() => db.purchaseBills.reverse().toArray(), []) || [];
+  const allPaymentsOut = useLiveQuery(() => db.paymentOut.reverse().toArray(), []) || [];
 
   const items = allItems.filter(item => (item.tenantId || 'default-tenant') === currentTenantId);
   const parties = allParties.filter(party => (party.tenantId || 'default-tenant') === currentTenantId);
@@ -380,6 +394,7 @@ export function App() {
   const paymentsIn = allPaymentsIn.filter(p => (p.tenantId || 'default-tenant') === currentTenantId);
   const purchaseOrders = allPurchaseOrders.filter(po => (po.tenantId || 'default-tenant') === currentTenantId);
   const purchaseBills = allPurchaseBills.filter(pb => (pb.tenantId || 'default-tenant') === currentTenantId);
+  const paymentsOut = allPaymentsOut.filter(po => (po.tenantId || 'default-tenant') === currentTenantId);
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');
@@ -501,6 +516,22 @@ export function App() {
                 setPartyForPaymentIn(party);
                 setActiveTab('payment-in');
               }}
+              onNavigateToPaymentOut={(party) => {
+                setPartyForPaymentOut(party);
+                setActiveTab('payment-out');
+              }}
+            />
+          )}
+
+          {activeTab === 'payment-out' && (
+            <PaymentOutScreen
+              payments={paymentsOut}
+              parties={parties}
+              purchaseBills={purchaseBills}
+              business={businessDetails}
+              onPaymentRecorded={() => {}}
+              selectedPartyFromParties={partyForPaymentOut}
+              onClearSelectedParty={() => setPartyForPaymentOut(null)}
             />
           )}
 

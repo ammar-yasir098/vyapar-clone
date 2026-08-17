@@ -301,6 +301,43 @@ export async function createServerPaymentIn(paymentData: any) {
   }
 }
 
+// PAYMENTS OUT
+export async function fetchServerPaymentsOut(tenantId?: string) {
+  try {
+    const url = tenantId ? `${API_BASE_URL}/payments/out?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/payments/out`;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data || [];
+  } catch (err) {
+    return [];
+  }
+}
+
+export async function createServerPaymentOut(paymentData: any) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/payments/out`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(paymentData)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function deleteServerPaymentOut(id: number | string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/payments/out/${id}`, {
+      method: 'DELETE'
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 // PURCHASE ORDERS
 export async function fetchServerPurchaseOrders(tenantId?: string) {
   try {

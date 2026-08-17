@@ -25,9 +25,10 @@ interface PartiesScreenProps {
   business?: BusinessDetails;
   onPartyUpdated: () => void;
   onNavigateToPaymentIn?: (party: Party) => void;
+  onNavigateToPaymentOut?: (party: Party) => void;
 }
 
-export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices = [], business, onPartyUpdated, onNavigateToPaymentIn }) => {
+export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices = [], business, onPartyUpdated, onNavigateToPaymentIn, onNavigateToPaymentOut }) => {
   const { showToast, showConfirm } = useToast();
   const [search, setSearch] = useState('');
   const [filterTab, setFilterTab] = useState<'ALL' | 'CUSTOMER' | 'SUPPLIER'>('ALL');
@@ -411,13 +412,19 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
                     </td>
                     <td className="text-center">
                       <div className="flex items-center justify-center gap-1.5">
-                        {party.type === 'SUPPLIER' && (
+                        {(party.type === 'SUPPLIER' || party.type === 'BOTH') && (
                           <button
-                            onClick={() => setSelectedPartyForPayment(party)}
-                            className="btn-vyapar-outline text-[11px] font-bold py-1 px-2 cursor-pointer"
-                            title="Record Supplier Payment"
+                            onClick={() => {
+                              if (onNavigateToPaymentOut) {
+                                onNavigateToPaymentOut(party);
+                              } else {
+                                setSelectedPartyForPayment(party);
+                              }
+                            }}
+                            className="px-2 py-1 rounded-lg text-rose-700 bg-rose-50 hover:bg-rose-100 font-bold text-[11px] transition cursor-pointer border border-rose-200"
+                            title="Record Payment-Out to Supplier"
                           >
-                            Pay Cash
+                            Payment-Out
                           </button>
                         )}
 

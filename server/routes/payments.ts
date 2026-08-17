@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { PaymentIn, Party, isDbConnected } from '../db/sequelize.js';
+import { PaymentIn, PaymentOut, Party, isDbConnected } from '../db/sequelize.js';
 
 export const paymentsRouter = Router();
 
@@ -53,7 +53,7 @@ paymentsRouter.post('/in', async (req: Request, res: Response) => {
         notes
       });
 
-      // Optionally update party balance in PostgreSQL
+      // Update party balance in PostgreSQL
       if (partyId) {
         const party = await Party.findByPk(partyId);
         if (party) {
@@ -93,3 +93,95 @@ paymentsRouter.delete('/in/:id', async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// GET /api/v1/payments/out - Fetch all Payment-Out vouchers for tenant
+paymentsRouter.get('/out', async (req: Request, res: Response) => {
+  try {
+    const { tenantId = 'default-tenant' } = req.query;
+
+    if (isDbConnected()) {
+      const payments = await PaymentOut.findAll({
+        where: { tenantId: String(tenantId) },
+        order: [['id', 'DESC']]
+      });
+      return res.json({ success: true, data: payments });
+    }
+
+    return res.json({ success: true, data: [] });
+  } catch (err: any) {
+    console.error('Error fetching Payment-Out vouchers:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/v1/payments/out - Create new Payment-Out voucher
+paymentsRouter.post('/out', async (req: Request, res: Response) => {
+  try {
+    const {
+      tenantId = 'default-tenant',
+      receiptNumber,
+      partyId,
+      partyName,
+      partyPhone,
+      paymentDate,
+      paymentMethod = 'CASH',
+      amount = 0,
+      notes = ''
+    } = req.body;
+
+    if (isDbConnected()) {
+      const recNum = receiptNumber || `PAYOUT-${Date.now()}`;
+
+      const newPayment = await PaymentOut.create({
+        receiptNumber: recNum,
+        tenantId,
+        partyId: partyId || null,
+        partyName: partyName || 'Supplier',
+        partyPhone: partyPhone || '',
+        paymentDate: paymentDate || new Date().toISOString().split('T')[0],
+        paymentMethod,
+        amount,
+        notes
+      });
+
+      // Reduce supplier payable balance in PostgreSQL
+      if (partyId) {
+        const party = await Party.findByPk(partyId);
+        if (party) {
+          const curBal = Number(party.get('currentBalance')) || 0;
+          const newBal = Math.max(0, curBal - Number(amount));
+          await party.update({ currentBalance: newBal });
+        }
+      }
+
+      return res.status(201).json({
+        success: true,
+        message: 'Payment-Out recorded in PostgreSQL',
+        data: newPayment
+      });
+    }
+
+    return res.status(201).json({ success: true, data: req.body });
+  } catch (err: any) {
+    console.error('Error creating Payment-Out:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/v1/payments/out/:id - Delete Payment-Out voucher
+paymentsRouter.delete('/out/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    if (isDbConnected()) {
+      await PaymentOut.destroy({ where: { id } });
+      return res.json({ success: true, message: 'Payment-Out voucher deleted' });
+    }
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting Payment-Out:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
