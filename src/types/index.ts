@@ -333,5 +333,18 @@ export interface PaymentOut {
   createdAt?: string;
 }
 
+export interface Expense {
+  id?: number;
+  expenseNumber: string;
+  tenantId: string;
+  categoryName: string;
+  expenseDate: string;
+  paymentMode: 'CASH' | 'DIGITAL / APP' | 'CARD' | 'CHEQUE';
+  amount: number;
+  notes?: string;
+  createdAt?: string;
+}
+
+
 
 

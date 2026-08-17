@@ -13,6 +13,7 @@ import { companyRouter } from './routes/company.js';
 import { estimatesRouter } from './routes/estimates.js';
 import { paymentsRouter } from './routes/payments.js';
 import { purchaseOrdersRouter } from './routes/purchaseOrders.js';
+import { expensesRouter } from './routes/expenses.js';
 
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -45,6 +46,7 @@ app.use('/api/v1/purchases', purchasesRouter);
 app.use('/api/v1/estimates', estimatesRouter);
 app.use('/api/v1/payments', paymentsRouter);
 app.use('/api/v1/purchase-orders', purchaseOrdersRouter);
+app.use('/api/v1/expenses', expensesRouter);
 
 // Root Status
 app.get('/', (req: Request, res: Response) => {

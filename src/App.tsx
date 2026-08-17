@@ -23,6 +23,7 @@ import { PurchaseOrderListScreen } from './components/Purchase/PurchaseOrderList
 import { CreatePurchaseOrderScreen } from './components/Purchase/CreatePurchaseOrderScreen';
 import { PurchaseBillListScreen } from './components/Purchase/PurchaseBillListScreen';
 import { PaymentOutScreen } from './components/PaymentOut/PaymentOutScreen';
+import { ExpenseScreen } from './components/Expense/ExpenseScreen';
 import { Invoice, BusinessDetails, Party } from './types';
 import { triggerThermalPrint } from './services/printer';
 import { 
@@ -38,7 +39,8 @@ import {
   fetchServerPaymentsIn,
   fetchServerPurchaseOrders,
   fetchServerPurchaseBills,
-  fetchServerPaymentsOut
+  fetchServerPaymentsOut,
+  fetchServerExpenses
 } from './services/api';
 import { syncLedgerAccountBalances } from './services/ledger';
 
@@ -200,6 +202,7 @@ export function App() {
         const serverPOs = await fetchServerPurchaseOrders(currentTenantId);
         const serverPBills = await fetchServerPurchaseBills(currentTenantId);
         const serverPaymentsOut = await fetchServerPaymentsOut(currentTenantId);
+        const serverExpenses = await fetchServerExpenses(currentTenantId);
 
         if (serverItems && serverItems.length > 0) {
           for (const sItem of serverItems) {
@@ -314,6 +317,15 @@ export function App() {
             }
           }
         }
+
+        if (serverExpenses && serverExpenses.length > 0) {
+          for (const sExp of serverExpenses) {
+            const existing = await db.expenses.where('expenseNumber').equals(sExp.expenseNumber).first();
+            if (!existing) {
+              await db.expenses.add({ ...sExp, tenantId: sExp.tenantId || currentTenantId });
+            }
+          }
+        }
       } catch (err) {
         console.warn('Backend server offline or unreachable. Operating in Dexie local offline mode.', err);
         // Fallback to reading company profiles from Dexie IndexedDB or localStorage
@@ -384,6 +396,7 @@ export function App() {
   const allPurchaseOrders = useLiveQuery(() => db.purchaseOrders.reverse().toArray(), []) || [];
   const allPurchaseBills = useLiveQuery(() => db.purchaseBills.reverse().toArray(), []) || [];
   const allPaymentsOut = useLiveQuery(() => db.paymentOut.reverse().toArray(), []) || [];
+  const allExpenses = useLiveQuery(() => db.expenses.reverse().toArray(), []) || [];
 
   const items = allItems.filter(item => (item.tenantId || 'default-tenant') === currentTenantId);
   const parties = allParties.filter(party => (party.tenantId || 'default-tenant') === currentTenantId);
@@ -395,6 +408,7 @@ export function App() {
   const purchaseOrders = allPurchaseOrders.filter(po => (po.tenantId || 'default-tenant') === currentTenantId);
   const purchaseBills = allPurchaseBills.filter(pb => (pb.tenantId || 'default-tenant') === currentTenantId);
   const paymentsOut = allPaymentsOut.filter(po => (po.tenantId || 'default-tenant') === currentTenantId);
+  const expenses = allExpenses.filter(e => (e.tenantId || 'default-tenant') === currentTenantId);
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');
@@ -532,6 +546,14 @@ export function App() {
               onPaymentRecorded={() => {}}
               selectedPartyFromParties={partyForPaymentOut}
               onClearSelectedParty={() => setPartyForPaymentOut(null)}
+            />
+          )}
+
+          {activeTab === 'expenses' && (
+            <ExpenseScreen
+              expenses={expenses}
+              business={businessDetails}
+              onExpenseRecorded={() => {}}
             />
           )}
 

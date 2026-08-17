@@ -338,6 +338,43 @@ export async function deleteServerPaymentOut(id: number | string) {
   }
 }
 
+// EXPENSES
+export async function fetchServerExpenses(tenantId?: string) {
+  try {
+    const url = tenantId ? `${API_BASE_URL}/expenses?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/expenses`;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data || [];
+  } catch (err) {
+    return [];
+  }
+}
+
+export async function createServerExpense(expenseData: any) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/expenses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(expenseData)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function deleteServerExpense(id: number | string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/expenses/${id}`, {
+      method: 'DELETE'
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 // PURCHASE ORDERS
 export async function fetchServerPurchaseOrders(tenantId?: string) {
   try {

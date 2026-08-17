@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { Item, Party, Invoice, SyncJournal, BusinessDetails, ItemBatch, LedgerAccount, JournalEntry, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock, PurchaseOrder, PurchaseBill, PaymentOut } from '../types';
+import { Item, Party, Invoice, SyncJournal, BusinessDetails, ItemBatch, LedgerAccount, JournalEntry, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock, PurchaseOrder, PurchaseBill, PaymentOut, Expense } from '../types';
 
 export class VyaparDatabase extends Dexie {
   items!: Table<Item, number>;
@@ -16,11 +16,12 @@ export class VyaparDatabase extends Dexie {
   purchaseOrders!: Table<PurchaseOrder, number>;
   purchaseBills!: Table<PurchaseBill, number>;
   paymentOut!: Table<PaymentOut, number>;
+  expenses!: Table<Expense, number>;
 
   constructor() {
     super('VyaparOfflineDB');
     
-    this.version(10).stores({
+    this.version(11).stores({
       items: '++id, skuCode, barcode, name, currentStock, tenantId',
       parties: '++id, name, phone, type, tenantId',
       invoices: '++id, invoiceId, invoiceNumber, invoiceDate, paymentStatus, partyId, syncStatus, tenantId',
@@ -34,7 +35,8 @@ export class VyaparDatabase extends Dexie {
       itemRestocks: '++id, itemId, supplierId, restockDate, tenantId',
       purchaseOrders: '++id, poId, poNumber, poDate, supplierId, status, tenantId',
       purchaseBills: '++id, billId, billNumber, billDate, supplierId, tenantId',
-      paymentOut: '++id, receiptNumber, partyId, paymentDate, tenantId'
+      paymentOut: '++id, receiptNumber, partyId, paymentDate, tenantId',
+      expenses: '++id, expenseNumber, categoryName, expenseDate, tenantId'
     });
   }
 }
@@ -148,6 +150,7 @@ export async function clearAllDatabaseData() {
   await db.purchaseOrders.clear();
   await db.purchaseBills.clear();
   await db.paymentOut.clear();
+  await db.expenses.clear();
   
   // Reset account balances to 0 in local Dexie IndexedDB
   const accounts = await db.ledgerAccounts.toArray();

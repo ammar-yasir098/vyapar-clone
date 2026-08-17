@@ -386,6 +386,31 @@ PaymentOut.init(
   { sequelize, modelName: 'PaymentOut', tableName: 'payment_out', timestamps: false }
 );
 
+// 9c. Expense Model
+export class Expense extends Model {
+  declare id: number;
+  declare expenseNumber: string;
+  declare tenantId: string;
+  declare categoryName: string;
+  declare expenseDate: string;
+  declare paymentMode: string;
+  declare amount: number;
+  declare notes: string;
+}
+Expense.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    expenseNumber: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'expense_number' },
+    tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
+    categoryName: { type: DataTypes.STRING, allowNull: false, defaultValue: 'Miscellaneous', field: 'category_name' },
+    expenseDate: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW, field: 'expense_date' },
+    paymentMode: { type: DataTypes.STRING, defaultValue: 'CASH', field: 'payment_mode' },
+    amount: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 0.0 },
+    notes: { type: DataTypes.TEXT, allowNull: true }
+  },
+  { sequelize, modelName: 'Expense', tableName: 'expenses', timestamps: false }
+);
+
 // 10. PurchaseOrder & PurchaseOrderItem Models
 export class PurchaseOrder extends Model {
   declare id: number;
