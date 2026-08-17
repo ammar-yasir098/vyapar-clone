@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { Op } from 'sequelize';
 import { Party, JournalEntry, Invoice, LedgerAccount, isDbConnected } from '../db/sequelize.js';
 
 export const partiesRouter = Router();
@@ -8,11 +9,18 @@ partiesRouter.get('/', async (req: Request, res: Response) => {
   try {
     const { tenantId = 'default-tenant' } = req.query;
     if (isDbConnected()) {
-      const whereClause = { tenantId: String(tenantId) };
+      const tId = String(tenantId);
+      const whereClause = {
+        [Op.or]: [
+          { tenantId: tId },
+          { tenantId: 'default-tenant' },
+          { tenantId: null as any }
+        ]
+      };
       let parties = await Party.findAll({ where: whereClause, order: [['name', 'ASC']] });
       if (parties.length === 0) {
         const defaultWalkIn = await Party.create({
-          tenantId: String(tenantId),
+          tenantId: tId,
           name: 'Walk-in Retail Customer',
           phone: '03009999999',
           type: 'CUSTOMER',
@@ -21,6 +29,12 @@ partiesRouter.get('/', async (req: Request, res: Response) => {
           currentBalance: 0
         });
         parties = [defaultWalkIn];
+      } else if (tId !== 'default-tenant') {
+        for (const party of parties) {
+          if (!party.get('tenantId') || party.get('tenantId') === 'default-tenant') {
+            await party.update({ tenantId: tId }).catch(() => {});
+          }
+        }
       }
       return res.json({ success: true, count: parties.length, data: parties });
     }

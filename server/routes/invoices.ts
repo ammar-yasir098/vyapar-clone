@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { Op } from 'sequelize';
 import { Invoice, InvoiceItem, Item, Party, JournalEntry, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const invoicesRouter = Router();
@@ -8,12 +9,28 @@ invoicesRouter.get('/', async (req: Request, res: Response) => {
   try {
     const { tenantId } = req.query;
     if (isDbConnected()) {
-      const whereClause = tenantId ? { tenantId: String(tenantId) } : {};
+      const tId = tenantId ? String(tenantId) : 'default-tenant';
+      const whereClause = {
+        [Op.or]: [
+          { tenantId: tId },
+          { tenantId: 'default-tenant' },
+          { tenantId: null as any }
+        ]
+      };
       const invoices = await Invoice.findAll({
         where: whereClause,
         include: [{ model: InvoiceItem, as: 'items' }],
         order: [['id', 'DESC']]
       });
+
+      if (tId !== 'default-tenant' && invoices.length > 0) {
+        for (const inv of invoices) {
+          if (!inv.get('tenantId') || inv.get('tenantId') === 'default-tenant') {
+            await inv.update({ tenantId: tId }).catch(() => {});
+          }
+        }
+      }
+
       return res.json({ success: true, count: invoices.length, data: invoices });
     }
     return res.json({ success: true, count: 0, data: [] });

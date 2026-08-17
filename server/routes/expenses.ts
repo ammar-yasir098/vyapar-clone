@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { Op } from 'sequelize';
 import { Expense, JournalEntry, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const expensesRouter = Router();
@@ -9,10 +10,27 @@ expensesRouter.get('/', async (req: Request, res: Response) => {
     const { tenantId = 'default-tenant' } = req.query;
 
     if (isDbConnected()) {
+      const tId = String(tenantId);
+      const whereClause = {
+        [Op.or]: [
+          { tenantId: tId },
+          { tenantId: 'default-tenant' },
+          { tenantId: null as any }
+        ]
+      };
       const expensesList = await Expense.findAll({
-        where: { tenantId: String(tenantId) },
+        where: whereClause,
         order: [['id', 'DESC']]
       });
+
+      if (tId !== 'default-tenant' && expensesList.length > 0) {
+        for (const exp of expensesList) {
+          if (!exp.get('tenantId') || exp.get('tenantId') === 'default-tenant') {
+            await exp.update({ tenantId: tId }).catch(() => {});
+          }
+        }
+      }
+
       return res.json({ success: true, data: expensesList });
     }
 

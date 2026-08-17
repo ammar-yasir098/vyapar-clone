@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { Op } from 'sequelize';
 import { Item, Party, JournalEntry, PurchaseReturn, PurchaseReturnItem, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const purchaseReturnsRouter = Router();
@@ -9,11 +10,28 @@ purchaseReturnsRouter.get('/', async (req: Request, res: Response) => {
     const { tenantId = 'default-tenant' } = req.query;
 
     if (isDbConnected()) {
+      const tId = String(tenantId);
+      const whereClause = {
+        [Op.or]: [
+          { tenantId: tId },
+          { tenantId: 'default-tenant' },
+          { tenantId: null as any }
+        ]
+      };
       const returns = await PurchaseReturn.findAll({
-        where: { tenantId: String(tenantId) },
+        where: whereClause,
         include: [{ model: PurchaseReturnItem, as: 'items' }],
         order: [['id', 'DESC']]
       });
+
+      if (tId !== 'default-tenant' && returns.length > 0) {
+        for (const ret of returns) {
+          if (!ret.get('tenantId') || ret.get('tenantId') === 'default-tenant') {
+            await ret.update({ tenantId: tId }).catch(() => {});
+          }
+        }
+      }
+
       return res.json({ success: true, data: returns });
     }
 

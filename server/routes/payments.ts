@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { Op } from 'sequelize';
 import { PaymentIn, PaymentOut, Party, isDbConnected } from '../db/sequelize.js';
 
 export const paymentsRouter = Router();
@@ -9,10 +10,27 @@ paymentsRouter.get('/in', async (req: Request, res: Response) => {
     const { tenantId = 'default-tenant' } = req.query;
 
     if (isDbConnected()) {
+      const tId = String(tenantId);
+      const whereClause = {
+        [Op.or]: [
+          { tenantId: tId },
+          { tenantId: 'default-tenant' },
+          { tenantId: null as any }
+        ]
+      };
       const payments = await PaymentIn.findAll({
-        where: { tenantId: String(tenantId) },
+        where: whereClause,
         order: [['id', 'DESC']]
       });
+
+      if (tId !== 'default-tenant' && payments.length > 0) {
+        for (const p of payments) {
+          if (!p.get('tenantId') || p.get('tenantId') === 'default-tenant') {
+            await p.update({ tenantId: tId }).catch(() => {});
+          }
+        }
+      }
+
       return res.json({ success: true, data: payments });
     }
 
@@ -100,10 +118,27 @@ paymentsRouter.get('/out', async (req: Request, res: Response) => {
     const { tenantId = 'default-tenant' } = req.query;
 
     if (isDbConnected()) {
+      const tId = String(tenantId);
+      const whereClause = {
+        [Op.or]: [
+          { tenantId: tId },
+          { tenantId: 'default-tenant' },
+          { tenantId: null as any }
+        ]
+      };
       const payments = await PaymentOut.findAll({
-        where: { tenantId: String(tenantId) },
+        where: whereClause,
         order: [['id', 'DESC']]
       });
+
+      if (tId !== 'default-tenant' && payments.length > 0) {
+        for (const p of payments) {
+          if (!p.get('tenantId') || p.get('tenantId') === 'default-tenant') {
+            await p.update({ tenantId: tId }).catch(() => {});
+          }
+        }
+      }
+
       return res.json({ success: true, data: payments });
     }
 

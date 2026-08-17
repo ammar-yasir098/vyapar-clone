@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { Op } from 'sequelize';
 import { Estimate, EstimateItem, isDbConnected } from '../db/sequelize.js';
 
 export const estimatesRouter = Router();
@@ -9,11 +10,28 @@ estimatesRouter.get('/', async (req: Request, res: Response) => {
     const { tenantId = 'default-tenant' } = req.query;
 
     if (isDbConnected()) {
+      const tId = String(tenantId);
+      const whereClause = {
+        [Op.or]: [
+          { tenantId: tId },
+          { tenantId: 'default-tenant' },
+          { tenantId: null as any }
+        ]
+      };
       const estimates = await Estimate.findAll({
-        where: { tenantId: String(tenantId) },
+        where: whereClause,
         include: [{ model: EstimateItem, as: 'items' }],
         order: [['id', 'DESC']]
       });
+
+      if (tId !== 'default-tenant' && estimates.length > 0) {
+        for (const est of estimates) {
+          if (!est.get('tenantId') || est.get('tenantId') === 'default-tenant') {
+            await est.update({ tenantId: tId }).catch(() => {});
+          }
+        }
+      }
+
       return res.json({ success: true, data: estimates });
     }
 

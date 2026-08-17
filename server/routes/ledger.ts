@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { Op } from 'sequelize';
 import { LedgerAccount, JournalEntry, isDbConnected, seedServerLedgerAccounts } from '../db/sequelize.js';
 
 export const ledgerRouter = Router();
@@ -8,10 +9,24 @@ ledgerRouter.get('/accounts', async (req: Request, res: Response) => {
   try {
     const { tenantId = 'default-tenant' } = req.query;
     if (isDbConnected()) {
-      let accounts = await LedgerAccount.findAll({ where: { tenantId: String(tenantId) }, order: [['accountCode', 'ASC']] });
+      const tId = String(tenantId);
+      const whereClause = {
+        [Op.or]: [
+          { tenantId: tId },
+          { tenantId: 'default-tenant' },
+          { tenantId: null as any }
+        ]
+      };
+      let accounts = await LedgerAccount.findAll({ where: whereClause, order: [['accountCode', 'ASC']] });
       if (accounts.length === 0) {
-        await seedServerLedgerAccounts(String(tenantId));
-        accounts = await LedgerAccount.findAll({ where: { tenantId: String(tenantId) }, order: [['accountCode', 'ASC']] });
+        await seedServerLedgerAccounts(tId);
+        accounts = await LedgerAccount.findAll({ where: { tenantId: tId }, order: [['accountCode', 'ASC']] });
+      } else if (tId !== 'default-tenant') {
+        for (const acc of accounts) {
+          if (!acc.get('tenantId') || acc.get('tenantId') === 'default-tenant') {
+            await acc.update({ tenantId: tId }).catch(() => {});
+          }
+        }
       }
       return res.json({ success: true, count: accounts.length, data: accounts });
     }
@@ -26,7 +41,22 @@ ledgerRouter.get('/journals', async (req: Request, res: Response) => {
   try {
     const { tenantId = 'default-tenant' } = req.query;
     if (isDbConnected()) {
-      const journals = await JournalEntry.findAll({ where: { tenantId: String(tenantId) }, order: [['id', 'DESC']] });
+      const tId = String(tenantId);
+      const whereClause = {
+        [Op.or]: [
+          { tenantId: tId },
+          { tenantId: 'default-tenant' },
+          { tenantId: null as any }
+        ]
+      };
+      const journals = await JournalEntry.findAll({ where: whereClause, order: [['id', 'DESC']] });
+      if (tId !== 'default-tenant' && journals.length > 0) {
+        for (const je of journals) {
+          if (!je.get('tenantId') || je.get('tenantId') === 'default-tenant') {
+            await je.update({ tenantId: tId }).catch(() => {});
+          }
+        }
+      }
       return res.json({ success: true, count: journals.length, data: journals });
     }
     return res.json({ success: true, count: 0, data: [] });

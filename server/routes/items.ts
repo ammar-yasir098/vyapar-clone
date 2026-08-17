@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { Op } from 'sequelize';
 import { Item, InvoiceItem, isDbConnected } from '../db/sequelize.js';
 
 export const itemsRouter = Router();
@@ -8,8 +9,25 @@ itemsRouter.get('/', async (req: Request, res: Response) => {
   try {
     const { tenantId } = req.query;
     if (isDbConnected()) {
-      const whereClause = tenantId ? { tenantId: String(tenantId) } : {};
+      const tId = tenantId ? String(tenantId) : 'default-tenant';
+      const whereClause = {
+        [Op.or]: [
+          { tenantId: tId },
+          { tenantId: 'default-tenant' },
+          { tenantId: null as any }
+        ]
+      };
       const items = await Item.findAll({ where: whereClause, order: [['name', 'ASC']] });
+
+      // Auto-migrate any default-tenant items to active store tenantId
+      if (tId !== 'default-tenant' && items.length > 0) {
+        for (const item of items) {
+          if (!item.get('tenantId') || item.get('tenantId') === 'default-tenant') {
+            await item.update({ tenantId: tId }).catch(() => {});
+          }
+        }
+      }
+
       return res.json({ success: true, count: items.length, data: items });
     }
     return res.json({ success: true, count: 0, data: [] });

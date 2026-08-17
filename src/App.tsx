@@ -441,6 +441,34 @@ export function App() {
           for (const ret of orphanedSaleReturns) {
             if (ret.id) await db.saleReturns.update(ret.id, { tenantId: activeTenantId });
           }
+          const orphanedPOs = await db.purchaseOrders.filter(po => !po.tenantId || po.tenantId === 'default-tenant').toArray();
+          for (const po of orphanedPOs) {
+            if (po.id) await db.purchaseOrders.update(po.id, { tenantId: activeTenantId });
+          }
+          const orphanedPBills = await db.purchaseBills.filter(pb => !pb.tenantId || pb.tenantId === 'default-tenant').toArray();
+          for (const pb of orphanedPBills) {
+            if (pb.id) await db.purchaseBills.update(pb.id, { tenantId: activeTenantId });
+          }
+          const orphanedPReturns = await db.purchaseReturns.filter(pr => !pr.tenantId || pr.tenantId === 'default-tenant').toArray();
+          for (const pr of orphanedPReturns) {
+            if (pr.id) await db.purchaseReturns.update(pr.id, { tenantId: activeTenantId });
+          }
+          const orphanedExpenses = await db.expenses.filter(e => !e.tenantId || e.tenantId === 'default-tenant').toArray();
+          for (const e of orphanedExpenses) {
+            if (e.id) await db.expenses.update(e.id, { tenantId: activeTenantId });
+          }
+          const orphanedPayIn = await db.paymentIn.filter(p => !p.tenantId || p.tenantId === 'default-tenant').toArray();
+          for (const p of orphanedPayIn) {
+            if (p.id) await db.paymentIn.update(p.id, { tenantId: activeTenantId });
+          }
+          const orphanedPayOut = await db.paymentOut.filter(p => !p.tenantId || p.tenantId === 'default-tenant').toArray();
+          for (const p of orphanedPayOut) {
+            if (p.id) await db.paymentOut.update(p.id, { tenantId: activeTenantId });
+          }
+          const orphanedEstimates = await db.estimates.filter(e => !e.tenantId || e.tenantId === 'default-tenant').toArray();
+          for (const e of orphanedEstimates) {
+            if (e.id) await db.estimates.update(e.id, { tenantId: activeTenantId });
+          }
         }
 
         // Auto-deduplicate duplicate party entries in Dexie IndexedDB
@@ -528,19 +556,19 @@ export function App() {
   const allPurchaseReturns = useLiveQuery(() => db.purchaseReturns.reverse().toArray(), []) || [];
   const allSaleReturns = useLiveQuery(() => db.saleReturns.reverse().toArray(), []) || [];
 
-  const items = allItems.filter(item => (item.tenantId || 'default-tenant') === currentTenantId);
-  const parties = allParties.filter(party => (party.tenantId || 'default-tenant') === currentTenantId);
-  const invoices = allInvoices.filter(inv => (inv.tenantId || 'default-tenant') === currentTenantId);
-  const accounts = allAccounts.filter(acc => (acc.tenantId || 'default-tenant') === currentTenantId);
-  const journalEntries = allJournalEntries.filter(je => (je.tenantId || 'default-tenant') === currentTenantId);
-  const estimates = allEstimates.filter(est => (est.tenantId || 'default-tenant') === currentTenantId);
-  const paymentsIn = allPaymentsIn.filter(p => (p.tenantId || 'default-tenant') === currentTenantId);
-  const purchaseOrders = allPurchaseOrders.filter(po => (po.tenantId || 'default-tenant') === currentTenantId);
-  const purchaseBills = allPurchaseBills.filter(pb => (pb.tenantId || 'default-tenant') === currentTenantId);
-  const paymentsOut = allPaymentsOut.filter(po => (po.tenantId || 'default-tenant') === currentTenantId);
-  const expenses = allExpenses.filter(e => (e.tenantId || 'default-tenant') === currentTenantId);
-  const purchaseReturns = allPurchaseReturns.filter(pr => (pr.tenantId || 'default-tenant') === currentTenantId);
-  const saleReturns = allSaleReturns.filter(sr => (sr.tenantId || 'default-tenant') === currentTenantId);
+  const items = allItems.filter(item => !item.tenantId || item.tenantId === 'default-tenant' || item.tenantId === currentTenantId);
+  const parties = allParties.filter(party => !party.tenantId || party.tenantId === 'default-tenant' || party.tenantId === currentTenantId);
+  const invoices = allInvoices.filter(inv => !inv.tenantId || inv.tenantId === 'default-tenant' || inv.tenantId === currentTenantId);
+  const accounts = allAccounts.filter(acc => !acc.tenantId || acc.tenantId === 'default-tenant' || acc.tenantId === currentTenantId);
+  const journalEntries = allJournalEntries.filter(je => !je.tenantId || je.tenantId === 'default-tenant' || je.tenantId === currentTenantId);
+  const estimates = allEstimates.filter(est => !est.tenantId || est.tenantId === 'default-tenant' || est.tenantId === currentTenantId);
+  const paymentsIn = allPaymentsIn.filter(p => !p.tenantId || p.tenantId === 'default-tenant' || p.tenantId === currentTenantId);
+  const purchaseOrders = allPurchaseOrders.filter(po => !po.tenantId || po.tenantId === 'default-tenant' || po.tenantId === currentTenantId);
+  const purchaseBills = allPurchaseBills.filter(pb => !pb.tenantId || pb.tenantId === 'default-tenant' || pb.tenantId === currentTenantId);
+  const paymentsOut = allPaymentsOut.filter(po => !po.tenantId || po.tenantId === 'default-tenant' || po.tenantId === currentTenantId);
+  const expenses = allExpenses.filter(e => !e.tenantId || e.tenantId === 'default-tenant' || e.tenantId === currentTenantId);
+  const purchaseReturns = allPurchaseReturns.filter(pr => !pr.tenantId || pr.tenantId === 'default-tenant' || pr.tenantId === currentTenantId);
+  const saleReturns = allSaleReturns.filter(sr => !sr.tenantId || sr.tenantId === 'default-tenant' || sr.tenantId === currentTenantId);
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');
