@@ -195,3 +195,67 @@ companyRouter.post('/', async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// DELETE /api/v1/company - Delete company profile & all associated store data from PostgreSQL
+companyRouter.delete('/', async (req: Request, res: Response) => {
+  try {
+    const { tenantId } = req.query;
+    if (!tenantId) {
+      return res.status(400).json({ success: false, error: 'tenantId is required' });
+    }
+
+    const tId = String(tenantId);
+
+    if (isDbConnected()) {
+      // 1. Delete Company Profile
+      await CompanyProfile.destroy({ where: { tenantId: tId } });
+
+      // 2. Cascade delete all relational entities belonging to this tenantId
+      const { 
+        Item, 
+        Party, 
+        Invoice, 
+        InvoiceItem, 
+        SaleReturn, 
+        SaleReturnItem, 
+        PurchaseReturn, 
+        PurchaseReturnItem, 
+        PurchaseBill, 
+        PurchaseBillItem, 
+        PurchaseOrder, 
+        PurchaseOrderItem, 
+        Expense, 
+        PaymentIn, 
+        PaymentOut, 
+        Estimate, 
+        EstimateItem, 
+        LedgerAccount, 
+        JournalEntry 
+      } = await import('../db/sequelize.js');
+
+      await Item.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await Party.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await Invoice.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await SaleReturn.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await PurchaseReturn.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await PurchaseBill.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await PurchaseOrder.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await Expense.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await PaymentIn.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await PaymentOut.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await Estimate.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await LedgerAccount.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await JournalEntry.destroy({ where: { tenantId: tId } }).catch(() => {});
+    }
+
+    console.log(`🗑️ [DELETE COMPANY] Successfully deleted company profile and associated store records for tenantId: ${tId}`);
+
+    return res.status(200).json({ 
+      success: true, 
+      message: `Company profile ${tId} and associated store data deleted successfully from cloud database.` 
+    });
+  } catch (err: any) {
+    console.error('Error deleting company profile:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});

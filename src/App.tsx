@@ -46,11 +46,15 @@ import {
   fetchServerPaymentsOut,
   fetchServerExpenses,
   fetchServerPurchaseReturns,
-  fetchServerSaleReturns
+  fetchServerSaleReturns,
+  deleteServerCompanyProfile
 } from './services/api';
 import { syncLedgerAccountBalances } from './services/ledger';
+import { useToast } from './components/Common/ToastContext';
 
 export function App() {
+  const { showToast, showConfirm } = useToast();
+
   // Read activeTab initial state from hash or localStorage so refresh remembers current screen
   const getInitialTab = () => {
     const hash = window.location.hash.replace('#', '');
@@ -438,6 +442,18 @@ export function App() {
             if (ret.id) await db.saleReturns.update(ret.id, { tenantId: activeTenantId });
           }
         }
+
+        // Auto-deduplicate duplicate party entries in Dexie IndexedDB
+        const allLocalParties = await db.parties.toArray();
+        const seenPartyKeys = new Set<string>();
+        for (const p of allLocalParties) {
+          const key = `${p.tenantId || 'default-tenant'}_${(p.name || '').trim().toLowerCase()}`;
+          if (seenPartyKeys.has(key)) {
+            if (p.id) await db.parties.delete(p.id);
+          } else {
+            seenPartyKeys.add(key);
+          }
+        }
       } catch (err) {
         console.warn('Backend server offline or unreachable. Operating in Dexie local offline mode.', err);
         // Fallback to reading company profiles from Dexie IndexedDB or localStorage
@@ -584,6 +600,72 @@ export function App() {
     handleSelectCompany(newTenantId);
   };
 
+  const handleDeleteCompany = (tenantIdToDelete: string, storeName: string) => {
+    showConfirm({
+      title: `Delete Store Profile "${storeName}"?`,
+      message: `Are you sure you want to permanently delete "${storeName}"? This will erase all items, customer ledgers, invoices, and returns belonging to this store from both local storage and cloud database.`,
+      type: 'danger',
+      confirmText: 'Delete Store',
+      onConfirm: async () => {
+        try {
+          // 1. Call Backend API to delete from PostgreSQL Cloud DB
+          await deleteServerCompanyProfile(tenantIdToDelete);
+
+          // 2. Cascade delete from local Dexie IndexedDB
+          await db.companyProfiles.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.items.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.parties.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.invoices.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.saleReturns.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.purchaseReturns.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.purchaseBills.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.purchaseOrders.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.expenses.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.paymentIn.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.paymentOut.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.estimates.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.ledgerAccounts.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.journalEntries.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+
+          // 3. Update React state
+          const remainingCompanies = companies.filter(c => (c.tenantId || 'default-tenant') !== tenantIdToDelete);
+          setCompanies(remainingCompanies);
+
+          if (remainingCompanies.length > 0) {
+            const nextActive = remainingCompanies[0];
+            const nextTenantId = nextActive.tenantId || 'default-tenant';
+            setCurrentTenantId(nextTenantId);
+            setBusinessDetails(nextActive);
+            localStorage.setItem('vyapar_current_tenant', nextTenantId);
+            localStorage.setItem('vyapar_business_details', JSON.stringify(nextActive));
+          } else {
+            const defaultComp: BusinessDetails = {
+              tenantId: 'default-tenant',
+              name: 'SuperMarket Retail & Traders',
+              phone: '+92 300 xxxxxxx',
+              email: 'contact@supermarket.com',
+              address: 'Shop #12, Commercial Market, Main Boulevard, Gulberg, Lahore',
+              gstin: 'NTN: 7654321-0',
+              state: 'Punjab, Pakistan',
+              tagline: 'Quality Products at Everyday Low Prices',
+              businessType: 'Retail',
+              businessCategory: 'Supermarket & FMCG'
+            };
+            setCompanies([defaultComp]);
+            setBusinessDetails(defaultComp);
+            setCurrentTenantId('default-tenant');
+            localStorage.setItem('vyapar_current_tenant', 'default-tenant');
+            localStorage.setItem('vyapar_business_details', JSON.stringify(defaultComp));
+          }
+
+          showToast(`Store profile "${storeName}" deleted successfully from local and cloud databases.`, 'success');
+        } catch (err: any) {
+          showToast(`Failed to delete company profile: ${err.message}`, 'error');
+        }
+      }
+    });
+  };
+
   if (!isDbLoaded) {
     return (
       <div className="h-screen w-screen bg-[#f3f4f6] text-slate-800 flex flex-col items-center justify-center gap-3 select-none">
@@ -608,6 +690,7 @@ export function App() {
         onOpenSyncModal={() => setIsSyncModalOpen(true)}
         onSelectCompany={handleSelectCompany}
         onCreateCompany={handleCreateCompany}
+        onDeleteCompany={handleDeleteCompany}
       />
 
       {/* Main Body */}
@@ -830,6 +913,7 @@ export function App() {
                 }
               }}
               onCancel={() => setActiveTab('home')}
+              onDeleteCompany={handleDeleteCompany}
             />
           )}
         </main>

@@ -49,6 +49,17 @@ export async function saveServerCompanyProfile(companyData: any) {
   }
 }
 
+export async function deleteServerCompanyProfile(tenantId: string) {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/company?tenantId=${encodeURIComponent(tenantId)}`, {
+      method: 'DELETE'
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 // ITEMS
 export async function fetchServerItems(tenantId?: string) {
   try {

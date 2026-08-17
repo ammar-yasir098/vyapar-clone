@@ -59,7 +59,11 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
     address: ''
   });
 
-  const filteredParties = parties.filter(p => {
+  const uniqueParties = parties.filter((p, index, self) =>
+    index === self.findIndex(t => (t.name || '').trim().toLowerCase() === (p.name || '').trim().toLowerCase())
+  );
+
+  const filteredParties = uniqueParties.filter(p => {
     const matchesTab =
       filterTab === 'ALL' ||
       p.type === filterTab ||
@@ -71,9 +75,7 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
     return matchesTab && matchesSearch;
   });
 
-  const displayParties = filteredParties.filter((p, index, self) =>
-    index === self.findIndex(t => (t.name || '').toLowerCase() === (p.name || '').toLowerCase())
-  );
+  const displayParties = filteredParties;
 
   const handleCreateParty = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -294,21 +296,21 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
             className={`px-3 py-1.5 rounded-lg text-xs font-extrabold cursor-pointer transition ${filterTab === 'ALL' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
               }`}
           >
-            All Parties ({parties.length})
+            All Parties ({uniqueParties.length})
           </button>
           <button
             onClick={() => setFilterTab('CUSTOMER')}
             className={`px-3 py-1.5 rounded-lg text-xs font-extrabold cursor-pointer transition ${filterTab === 'CUSTOMER' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
               }`}
           >
-            Customers ({parties.filter(p => p.type === 'CUSTOMER' || p.type === 'BOTH').length})
+            Customers ({uniqueParties.filter(p => p.type === 'CUSTOMER' || p.type === 'BOTH').length})
           </button>
           <button
             onClick={() => setFilterTab('SUPPLIER')}
             className={`px-3 py-1.5 rounded-lg text-xs font-extrabold cursor-pointer transition ${filterTab === 'SUPPLIER' ? 'bg-purple-600 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
               }`}
           >
-            Suppliers ({parties.filter(p => p.type === 'SUPPLIER' || p.type === 'BOTH').length})
+            Suppliers ({uniqueParties.filter(p => p.type === 'SUPPLIER' || p.type === 'BOTH').length})
           </button>
         </div>
 

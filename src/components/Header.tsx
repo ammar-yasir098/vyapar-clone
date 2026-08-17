@@ -10,7 +10,8 @@ import {
   Building2,
   Check,
   Store,
-  X
+  X,
+  Trash2
 } from 'lucide-react';
 import { BusinessDetails } from '../types';
 import { syncManager, SyncStatus } from '../services/sync';
@@ -27,6 +28,7 @@ interface HeaderProps {
   onOpenSyncModal: () => void;
   onSelectCompany?: (tenantId: string) => void;
   onCreateCompany?: (newCompany: Partial<BusinessDetails>) => void;
+  onDeleteCompany?: (tenantId: string, companyName: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -40,7 +42,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCommandPalette,
   onOpenSyncModal,
   onSelectCompany,
-  onCreateCompany
+  onCreateCompany,
+  onDeleteCompany
 }) => {
   const [time, setTime] = useState<string>('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -157,7 +160,7 @@ export const Header: React.FC<HeaderProps> = ({
                   const isSelected = (c.tenantId || 'default-tenant') === (currentTenantId || 'default-tenant') || c.name === business.name;
                   const cLogoUrl = c.logoUrl ? (c.logoUrl.startsWith('/uploads/') ? `http://localhost:5000${c.logoUrl}` : c.logoUrl) : null;
                   return (
-                    <button
+                    <div
                       key={c.tenantId || idx}
                       onClick={() => {
                         if (onSelectCompany && c.tenantId) {
@@ -189,12 +192,30 @@ export const Header: React.FC<HeaderProps> = ({
                         </div>
                       </div>
 
-                      {isSelected && (
-                        <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 ml-2">
-                          <Check className="w-3 h-3 stroke-[3]" />
-                        </div>
-                      )}
-                    </button>
+                      <div className="flex items-center gap-1 shrink-0 ml-2">
+                        {isSelected && (
+                          <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0">
+                            <Check className="w-3 h-3 stroke-[3]" />
+                          </div>
+                        )}
+                        {onDeleteCompany && safeCompanies.length > 1 && (
+                          <button
+                            type="button"
+                            title={`Delete Store "${c.name}"`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsDropdownOpen(false);
+                              if (c.tenantId) {
+                                onDeleteCompany(c.tenantId, c.name);
+                              }
+                            }}
+                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   );
                 })}
               </div>

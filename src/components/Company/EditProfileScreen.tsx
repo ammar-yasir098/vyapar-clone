@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Pencil, Upload, Calendar, Building, Phone, Mail, MapPin, CheckCircle2 } from 'lucide-react';
+import { Pencil, Upload, Calendar, Building, Phone, Mail, MapPin, CheckCircle2, Trash2 } from 'lucide-react';
 import { BusinessDetails } from '../../types';
 import { fetchServerCompanyProfile, saveServerCompanyProfile } from '../../services/api';
 import { db } from '../../db';
@@ -9,12 +9,14 @@ interface EditProfileScreenProps {
   business: BusinessDetails;
   onUpdateBusiness: (updated: Partial<BusinessDetails>) => void;
   onCancel: () => void;
+  onDeleteCompany?: (tenantId: string, companyName: string) => void;
 }
 
 export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
   business,
   onUpdateBusiness,
-  onCancel
+  onCancel,
+  onDeleteCompany
 }) => {
   const { showToast } = useToast();
   const activeTenantId = business.tenantId || 'default-tenant';
@@ -391,6 +393,29 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
           </div>
         </form>
       </div>
+
+      {/* Danger Zone: Delete Store */}
+      {onDeleteCompany && (
+        <div className="max-w-6xl mx-auto w-full bg-red-50/70 border border-red-200/80 rounded-2xl p-5 mt-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div>
+            <h3 className="font-extrabold text-red-900 text-sm flex items-center gap-1.5">
+              <Trash2 className="w-4 h-4 text-red-600" />
+              <span>Delete Store Profile</span>
+            </h3>
+            <p className="text-xs text-red-700/80 mt-1 max-w-2xl font-medium leading-relaxed">
+              Permanently delete this company profile ({business.name}) and all associated catalog items, customer ledgers, invoices, and returns from both local offline storage and cloud PostgreSQL database.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onDeleteCompany(business.tenantId || 'default-tenant', business.name || 'Store')}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer shrink-0"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Delete Store</span>
+          </button>
+        </div>
+      )}
 
       {/* Bottom Action Footer */}
       <div className="max-w-6xl mx-auto w-full flex items-center justify-end gap-3 pt-6 border-t border-slate-200 mt-6">
