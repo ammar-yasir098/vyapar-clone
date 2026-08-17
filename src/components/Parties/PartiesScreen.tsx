@@ -412,22 +412,6 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
                     </td>
                     <td className="text-center">
                       <div className="flex items-center justify-center gap-1.5">
-                        {(party.type === 'SUPPLIER' || party.type === 'BOTH') && (
-                          <button
-                            onClick={() => {
-                              if (onNavigateToPaymentOut) {
-                                onNavigateToPaymentOut(party);
-                              } else {
-                                setSelectedPartyForPayment(party);
-                              }
-                            }}
-                            className="px-2 py-1 rounded-lg text-rose-700 bg-rose-50 hover:bg-rose-100 font-bold text-[11px] transition cursor-pointer border border-rose-200"
-                            title="Record Payment-Out to Supplier"
-                          >
-                            Payment-Out
-                          </button>
-                        )}
-
                         <button
                           onClick={() => setSelectedPartyForStatement(party)}
                           className="p-1 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition cursor-pointer"
