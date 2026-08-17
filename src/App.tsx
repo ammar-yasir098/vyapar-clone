@@ -30,12 +30,12 @@ import { SaleReturnListScreen } from './components/SaleReturn/SaleReturnListScre
 import { CreateSaleReturnScreen } from './components/SaleReturn/CreateSaleReturnScreen';
 import { Invoice, BusinessDetails, Party } from './types';
 import { triggerThermalPrint } from './services/printer';
-import { 
-  fetchServerItems, 
-  fetchServerParties, 
-  fetchServerInvoices, 
-  fetchServerCompanyProfile, 
-  fetchServerAllCompanies, 
+import {
+  fetchServerItems,
+  fetchServerParties,
+  fetchServerInvoices,
+  fetchServerCompanyProfile,
+  fetchServerAllCompanies,
   saveServerCompanyProfile,
   fetchServerLedgerAccounts,
   fetchServerJournalEntries,
@@ -61,7 +61,7 @@ export function App() {
   const getInitialBusiness = (): BusinessDetails => {
     const saved = localStorage.getItem('vyapar_business_details');
     if (saved) {
-      try { return JSON.parse(saved); } catch {}
+      try { return JSON.parse(saved); } catch { }
     }
     return DEFAULT_BUSINESS;
   };
@@ -123,6 +123,8 @@ export function App() {
         if (activeComp) setBusinessDetails(activeComp);
       }
 
+      let activeTenantId = currentTenantId;
+
       try {
         // Fetch all company profiles (Multi-Store / Multi-Branch)
         const allCompanies = await fetchServerAllCompanies();
@@ -154,27 +156,35 @@ export function App() {
 
           // Find active company profile & auto-cache logo for 100% offline display
           const activeCompany = mappedCompanies.find((c: any) => c.tenantId === currentTenantId) || mappedCompanies[0];
-          if (activeCompany && activeCompany.logoUrl && activeCompany.logoUrl.startsWith('/uploads/')) {
-            try {
-              const fullUrl = `http://localhost:5000${activeCompany.logoUrl}`;
-              fetch(fullUrl).then(res => res.blob()).then(blob => {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                  const base64 = reader.result as string;
-                  if (base64 && base64.startsWith('data:image/')) {
-                    localStorage.setItem('vyapar_offline_logo', base64);
-                  }
-                };
-                reader.readAsDataURL(blob);
-              }).catch(() => {});
-            } catch {}
+          if (activeCompany) {
+            activeTenantId = activeCompany.tenantId || currentTenantId;
+            if (activeTenantId !== currentTenantId) {
+              setCurrentTenantId(activeTenantId);
+              localStorage.setItem('vyapar_current_tenant', activeTenantId);
+            }
+            if (activeCompany.logoUrl && activeCompany.logoUrl.startsWith('/uploads/')) {
+              try {
+                const fullUrl = `http://localhost:5000${activeCompany.logoUrl}`;
+                fetch(fullUrl).then(res => res.blob()).then(blob => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => {
+                    const base64 = reader.result as string;
+                    if (base64 && base64.startsWith('data:image/')) {
+                      localStorage.setItem('vyapar_offline_logo', base64);
+                    }
+                  };
+                  reader.readAsDataURL(blob);
+                }).catch(() => { });
+              } catch { }
+            }
+            setBusinessDetails(activeCompany);
           }
-          setBusinessDetails(activeCompany);
         } else {
           const serverCompany = await fetchServerCompanyProfile(currentTenantId);
           if (serverCompany && serverCompany.name) {
+            activeTenantId = serverCompany.tenantId || currentTenantId;
             const comp = {
-              tenantId: serverCompany.tenantId || currentTenantId,
+              tenantId: activeTenantId,
               name: serverCompany.name,
               phone: serverCompany.phone || '+92 300 xxxxxxx',
               address: serverCompany.address || '',
@@ -197,26 +207,29 @@ export function App() {
           }
         }
 
-        // Fetch live catalog, parties, and invoices for current tenant from PostgreSQL API
-        const serverItems = await fetchServerItems(currentTenantId);
-        const serverParties = await fetchServerParties(currentTenantId);
-        const serverInvoices = await fetchServerInvoices(currentTenantId);
-        const serverAccounts = await fetchServerLedgerAccounts(currentTenantId);
-        const serverJournals = await fetchServerJournalEntries(currentTenantId);
-        const serverEstimates = await fetchServerEstimates(currentTenantId);
-        const serverPaymentsIn = await fetchServerPaymentsIn(currentTenantId);
-        const serverPOs = await fetchServerPurchaseOrders(currentTenantId);
-        const serverPBills = await fetchServerPurchaseBills(currentTenantId);
-        const serverPaymentsOut = await fetchServerPaymentsOut(currentTenantId);
-        const serverExpenses = await fetchServerExpenses(currentTenantId);
-        const serverReturns = await fetchServerPurchaseReturns(currentTenantId);
-        const serverSaleReturns = await fetchServerSaleReturns(currentTenantId);
+        // Fetch live catalog, parties, and invoices for activeTenantId from PostgreSQL API
+        const serverItems = await fetchServerItems(activeTenantId);
+        const serverParties = await fetchServerParties(activeTenantId);
+        const serverInvoices = await fetchServerInvoices(activeTenantId);
+        const serverAccounts = await fetchServerLedgerAccounts(activeTenantId);
+        const serverJournals = await fetchServerJournalEntries(activeTenantId);
+        const serverEstimates = await fetchServerEstimates(activeTenantId);
+        const serverPaymentsIn = await fetchServerPaymentsIn(activeTenantId);
+        const serverPOs = await fetchServerPurchaseOrders(activeTenantId);
+        const serverPBills = await fetchServerPurchaseBills(activeTenantId);
+        const serverPaymentsOut = await fetchServerPaymentsOut(activeTenantId);
+        const serverExpenses = await fetchServerExpenses(activeTenantId);
+        const serverReturns = await fetchServerPurchaseReturns(activeTenantId);
+        const serverSaleReturns = await fetchServerSaleReturns(activeTenantId);
 
         if (serverItems && serverItems.length > 0) {
           for (const sItem of serverItems) {
             const existing = await db.items.where('name').equalsIgnoreCase(sItem.name).first();
-            if (!existing) {
-              await db.items.add({ ...sItem, tenantId: sItem.tenantId || currentTenantId });
+            const itemData = { ...sItem, tenantId: sItem.tenantId || activeTenantId };
+            if (existing && existing.id) {
+              await db.items.update(existing.id, itemData);
+            } else {
+              await db.items.add(itemData);
             }
           }
         }
@@ -224,8 +237,11 @@ export function App() {
         if (serverParties && serverParties.length > 0) {
           for (const sParty of serverParties) {
             const existing = await db.parties.where('name').equalsIgnoreCase(sParty.name).first();
-            if (!existing) {
-              await db.parties.add({ ...sParty, tenantId: sParty.tenantId || currentTenantId });
+            const partyData = { ...sParty, tenantId: sParty.tenantId || activeTenantId };
+            if (existing && existing.id) {
+              await db.parties.update(existing.id, partyData);
+            } else {
+              await db.parties.add(partyData);
             }
           }
         }
@@ -240,13 +256,17 @@ export function App() {
               .filter(i => (invId && i.invoiceId === invId) || (invNum && i.invoiceNumber === invNum))
               .first();
 
-            if (!existing) {
-              await db.invoices.add({
-                ...rawInv,
-                invoiceId: invId || `inv-${Date.now()}-${Math.random()}`,
-                invoiceNumber: invNum || `INV-${Date.now()}`,
-                tenantId: rawInv.tenantId || rawInv.tenant_id || currentTenantId
-              });
+            const invData = {
+              ...rawInv,
+              invoiceId: invId || `inv-${Date.now()}-${Math.random()}`,
+              invoiceNumber: invNum || `INV-${Date.now()}`,
+              tenantId: rawInv.tenantId || rawInv.tenant_id || activeTenantId
+            };
+
+            if (existing && existing.id) {
+              await db.invoices.update(existing.id, invData);
+            } else {
+              await db.invoices.add(invData);
             }
           }
         }
@@ -254,10 +274,13 @@ export function App() {
         if (serverAccounts && serverAccounts.length > 0) {
           for (const sAcc of serverAccounts) {
             const existing = await db.ledgerAccounts
-              .filter(a => (a.tenantId || 'default-tenant') === currentTenantId && a.accountCode === sAcc.accountCode)
+              .filter(a => a.accountCode === sAcc.accountCode)
               .first();
-            if (!existing) {
-              await db.ledgerAccounts.add({ ...sAcc, tenantId: sAcc.tenantId || currentTenantId });
+            const accData = { ...sAcc, tenantId: sAcc.tenantId || activeTenantId };
+            if (existing && existing.id) {
+              await db.ledgerAccounts.update(existing.id, accData);
+            } else {
+              await db.ledgerAccounts.add(accData);
             }
           }
         }
@@ -265,10 +288,13 @@ export function App() {
         if (serverJournals && serverJournals.length > 0) {
           for (const sJe of serverJournals) {
             const existing = await db.journalEntries
-              .filter(j => (j.tenantId || 'default-tenant') === currentTenantId && j.entryNumber === sJe.entryNumber)
+              .filter(j => j.entryNumber === sJe.entryNumber)
               .first();
-            if (!existing) {
-              await db.journalEntries.add({ ...sJe, tenantId: sJe.tenantId || currentTenantId });
+            const jeData = { ...sJe, tenantId: sJe.tenantId || activeTenantId };
+            if (existing && existing.id) {
+              await db.journalEntries.update(existing.id, jeData);
+            } else {
+              await db.journalEntries.add(jeData);
             }
           }
         }
@@ -276,8 +302,11 @@ export function App() {
         if (serverEstimates && serverEstimates.length > 0) {
           for (const sEst of serverEstimates) {
             const existing = await db.estimates.where('estimateId').equals(sEst.estimateId).first();
-            if (!existing) {
-              await db.estimates.add({ ...sEst, tenantId: sEst.tenantId || currentTenantId });
+            const estData = { ...sEst, tenantId: sEst.tenantId || activeTenantId };
+            if (existing && existing.id) {
+              await db.estimates.update(existing.id, estData);
+            } else {
+              await db.estimates.add(estData);
             }
           }
         }
@@ -285,8 +314,11 @@ export function App() {
         if (serverPaymentsIn && serverPaymentsIn.length > 0) {
           for (const sPay of serverPaymentsIn) {
             const existing = await db.paymentIn.where('receiptNumber').equals(sPay.receiptNumber).first();
-            if (!existing) {
-              await db.paymentIn.add({ ...sPay, tenantId: sPay.tenantId || currentTenantId });
+            const payData = { ...sPay, tenantId: sPay.tenantId || activeTenantId };
+            if (existing && existing.id) {
+              await db.paymentIn.update(existing.id, payData);
+            } else {
+              await db.paymentIn.add(payData);
             }
           }
         }
@@ -294,8 +326,11 @@ export function App() {
         if (serverPOs && serverPOs.length > 0) {
           for (const sPo of serverPOs) {
             const existing = await db.purchaseOrders.where('poId').equals(sPo.poId).first();
-            if (!existing) {
-              await db.purchaseOrders.add({ ...sPo, tenantId: sPo.tenantId || currentTenantId });
+            const poData = { ...sPo, tenantId: sPo.tenantId || activeTenantId };
+            if (existing && existing.id) {
+              await db.purchaseOrders.update(existing.id, poData);
+            } else {
+              await db.purchaseOrders.add(poData);
             }
           }
         }
@@ -306,13 +341,16 @@ export function App() {
             const bId = rawBill.billId || rawBill.bill_id;
             const bNum = rawBill.billNumber || rawBill.bill_number;
             const existing = await db.purchaseBills.filter(b => (bId && b.billId === bId) || (bNum && b.billNumber === bNum)).first();
-            if (!existing) {
-              await db.purchaseBills.add({
-                ...rawBill,
-                billId: bId || `pur-${Date.now()}`,
-                billNumber: bNum || `PUR-${Date.now()}`,
-                tenantId: rawBill.tenantId || rawBill.tenant_id || currentTenantId
-              });
+            const billData = {
+              ...rawBill,
+              billId: bId || `pur-${Date.now()}`,
+              billNumber: bNum || `PUR-${Date.now()}`,
+              tenantId: rawBill.tenantId || rawBill.tenant_id || activeTenantId
+            };
+            if (existing && existing.id) {
+              await db.purchaseBills.update(existing.id, billData);
+            } else {
+              await db.purchaseBills.add(billData);
             }
           }
         }
@@ -320,8 +358,11 @@ export function App() {
         if (serverPaymentsOut && serverPaymentsOut.length > 0) {
           for (const sPay of serverPaymentsOut) {
             const existing = await db.paymentOut.where('receiptNumber').equals(sPay.receiptNumber).first();
-            if (!existing) {
-              await db.paymentOut.add({ ...sPay, tenantId: sPay.tenantId || currentTenantId });
+            const payData = { ...sPay, tenantId: sPay.tenantId || activeTenantId };
+            if (existing && existing.id) {
+              await db.paymentOut.update(existing.id, payData);
+            } else {
+              await db.paymentOut.add(payData);
             }
           }
         }
@@ -329,8 +370,11 @@ export function App() {
         if (serverExpenses && serverExpenses.length > 0) {
           for (const sExp of serverExpenses) {
             const existing = await db.expenses.where('expenseNumber').equals(sExp.expenseNumber).first();
-            if (!existing) {
-              await db.expenses.add({ ...sExp, tenantId: sExp.tenantId || currentTenantId });
+            const expData = { ...sExp, tenantId: sExp.tenantId || activeTenantId };
+            if (existing && existing.id) {
+              await db.expenses.update(existing.id, expData);
+            } else {
+              await db.expenses.add(expData);
             }
           }
         }
@@ -341,13 +385,16 @@ export function App() {
             const rId = rawRet.returnId || rawRet.return_id;
             const dnNum = rawRet.debitNoteNumber || rawRet.debit_note_number;
             const existing = await db.purchaseReturns.filter(r => (rId && r.returnId === rId) || (dnNum && r.debitNoteNumber === dnNum)).first();
-            if (!existing) {
-              await db.purchaseReturns.add({
-                ...rawRet,
-                returnId: rId || `dn-${Date.now()}`,
-                debitNoteNumber: dnNum || `DN-${Date.now()}`,
-                tenantId: rawRet.tenantId || rawRet.tenant_id || currentTenantId
-              });
+            const retData = {
+              ...rawRet,
+              returnId: rId || `dn-${Date.now()}`,
+              debitNoteNumber: dnNum || `DN-${Date.now()}`,
+              tenantId: rawRet.tenantId || rawRet.tenant_id || activeTenantId
+            };
+            if (existing && existing.id) {
+              await db.purchaseReturns.update(existing.id, retData);
+            } else {
+              await db.purchaseReturns.add(retData);
             }
           }
         }
@@ -358,14 +405,37 @@ export function App() {
             const rId = rawRet.returnId || rawRet.return_id;
             const crNum = rawRet.creditNoteNumber || rawRet.credit_note_number;
             const existing = await db.saleReturns.filter(r => (rId && r.returnId === rId) || (crNum && r.creditNoteNumber === crNum)).first();
-            if (!existing) {
-              await db.saleReturns.add({
-                ...rawRet,
-                returnId: rId || `cr-${Date.now()}`,
-                creditNoteNumber: crNum || `CR-${Date.now()}`,
-                tenantId: rawRet.tenantId || rawRet.tenant_id || currentTenantId
-              });
+            const retData = {
+              ...rawRet,
+              returnId: rId || `cr-${Date.now()}`,
+              creditNoteNumber: crNum || `CR-${Date.now()}`,
+              tenantId: rawRet.tenantId || rawRet.tenant_id || activeTenantId
+            };
+            if (existing && existing.id) {
+              await db.saleReturns.update(existing.id, retData);
+            } else {
+              await db.saleReturns.add(retData);
             }
+          }
+        }
+
+        // Auto-migrate orphaned default-tenant records in local Dexie IndexedDB to active store tenantId
+        if (activeTenantId && activeTenantId !== 'default-tenant') {
+          const orphanedParties = await db.parties.filter(p => !p.tenantId || p.tenantId === 'default-tenant').toArray();
+          for (const p of orphanedParties) {
+            if (p.id) await db.parties.update(p.id, { tenantId: activeTenantId });
+          }
+          const orphanedItems = await db.items.filter(i => !i.tenantId || i.tenantId === 'default-tenant').toArray();
+          for (const i of orphanedItems) {
+            if (i.id) await db.items.update(i.id, { tenantId: activeTenantId });
+          }
+          const orphanedInvoices = await db.invoices.filter(i => !i.tenantId || i.tenantId === 'default-tenant').toArray();
+          for (const inv of orphanedInvoices) {
+            if (inv.id) await db.invoices.update(inv.id, { tenantId: activeTenantId });
+          }
+          const orphanedSaleReturns = await db.saleReturns.filter(r => !r.tenantId || r.tenantId === 'default-tenant').toArray();
+          for (const ret of orphanedSaleReturns) {
+            if (ret.id) await db.saleReturns.update(ret.id, { tenantId: activeTenantId });
           }
         }
       } catch (err) {
@@ -454,7 +524,7 @@ export function App() {
   const paymentsOut = allPaymentsOut.filter(po => (po.tenantId || 'default-tenant') === currentTenantId);
   const expenses = allExpenses.filter(e => (e.tenantId || 'default-tenant') === currentTenantId);
   const purchaseReturns = allPurchaseReturns.filter(pr => (pr.tenantId || 'default-tenant') === currentTenantId);
-  const saleReturns = allSaleReturns.filter(sr => !sr.tenantId || sr.tenantId === 'default-tenant' || sr.tenantId === currentTenantId);
+  const saleReturns = allSaleReturns.filter(sr => (sr.tenantId || 'default-tenant') === currentTenantId);
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');
@@ -563,7 +633,7 @@ export function App() {
           )}
 
           {activeTab === 'inventory' && (
-            <InventoryScreen items={items} parties={parties} business={businessDetails} onItemUpdated={() => {}} />
+            <InventoryScreen items={items} parties={parties} business={businessDetails} onItemUpdated={() => { }} />
           )}
 
           {activeTab === 'parties' && (
@@ -571,7 +641,7 @@ export function App() {
               parties={parties}
               invoices={invoices}
               business={businessDetails}
-              onPartyUpdated={() => {}}
+              onPartyUpdated={() => { }}
               onNavigateToPaymentIn={(party) => {
                 setPartyForPaymentIn(party);
                 setActiveTab('payment-in');
@@ -589,7 +659,7 @@ export function App() {
               parties={parties}
               purchaseBills={purchaseBills}
               business={businessDetails}
-              onPaymentRecorded={() => {}}
+              onPaymentRecorded={() => { }}
               selectedPartyFromParties={partyForPaymentOut}
               onClearSelectedParty={() => setPartyForPaymentOut(null)}
             />
@@ -599,7 +669,7 @@ export function App() {
             <ExpenseScreen
               expenses={expenses}
               business={businessDetails}
-              onExpenseRecorded={() => {}}
+              onExpenseRecorded={() => { }}
             />
           )}
 
@@ -608,7 +678,7 @@ export function App() {
               purchaseReturns={purchaseReturns}
               business={businessDetails}
               onCreateReturn={() => setActiveTab('create-purchase-return')}
-              onReturnUpdated={() => {}}
+              onReturnUpdated={() => { }}
             />
           )}
 
@@ -627,7 +697,7 @@ export function App() {
               saleReturns={saleReturns}
               business={businessDetails}
               onCreateReturn={() => setActiveTab('create-sale-return')}
-              onReturnUpdated={() => {}}
+              onReturnUpdated={() => { }}
             />
           )}
 
@@ -646,7 +716,7 @@ export function App() {
               purchaseBills={purchaseBills}
               business={businessDetails}
               onCreateBill={() => setActiveTab('create-purchase-bill')}
-              onBillUpdated={() => {}}
+              onBillUpdated={() => { }}
             />
           )}
 
@@ -666,7 +736,7 @@ export function App() {
               parties={parties}
               items={items}
               onCreatePO={() => setActiveTab('create-po')}
-              onPOUpdated={() => {}}
+              onPOUpdated={() => { }}
               onNavigateToPurchaseBill={() => setActiveTab('purchase')}
             />
           )}
@@ -695,7 +765,7 @@ export function App() {
               parties={parties}
               invoices={invoices}
               business={businessDetails}
-              onPaymentRecorded={() => {}}
+              onPaymentRecorded={() => { }}
               selectedPartyFromParties={partyForPaymentIn}
               onClearSelectedParty={() => setPartyForPaymentIn(null)}
             />
@@ -706,7 +776,7 @@ export function App() {
               estimates={estimates}
               business={businessDetails}
               onCreateEstimate={() => setActiveTab('create-estimate')}
-              onEstimateUpdated={() => {}}
+              onEstimateUpdated={() => { }}
             />
           )}
 
@@ -741,7 +811,7 @@ export function App() {
                 setCompanies(prevCompanies => {
                   const exists = prevCompanies.some(c => (c.tenantId || 'default-tenant') === targetTenantId);
                   if (exists) {
-                    return prevCompanies.map(c => 
+                    return prevCompanies.map(c =>
                       (c.tenantId || 'default-tenant') === targetTenantId ? { ...c, ...updated, tenantId: targetTenantId } : c
                     );
                   }
