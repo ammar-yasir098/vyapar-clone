@@ -21,6 +21,7 @@ import { CreateEstimateScreen } from './components/Estimate/CreateEstimateScreen
 import { PaymentInScreen } from './components/PaymentIn/PaymentInScreen';
 import { PurchaseOrderListScreen } from './components/Purchase/PurchaseOrderListScreen';
 import { CreatePurchaseOrderScreen } from './components/Purchase/CreatePurchaseOrderScreen';
+import { PurchaseBillListScreen } from './components/Purchase/PurchaseBillListScreen';
 import { Invoice, BusinessDetails, Party } from './types';
 import { triggerThermalPrint } from './services/printer';
 import { 
@@ -34,7 +35,8 @@ import {
   fetchServerJournalEntries,
   fetchServerEstimates,
   fetchServerPaymentsIn,
-  fetchServerPurchaseOrders
+  fetchServerPurchaseOrders,
+  fetchServerPurchaseBills
 } from './services/api';
 import { syncLedgerAccountBalances } from './services/ledger';
 
@@ -193,6 +195,7 @@ export function App() {
         const serverEstimates = await fetchServerEstimates(currentTenantId);
         const serverPaymentsIn = await fetchServerPaymentsIn(currentTenantId);
         const serverPOs = await fetchServerPurchaseOrders(currentTenantId);
+        const serverPBills = await fetchServerPurchaseBills(currentTenantId);
 
         if (serverItems && serverItems.length > 0) {
           for (const sItem of serverItems) {
@@ -281,6 +284,23 @@ export function App() {
             }
           }
         }
+
+        if (serverPBills && serverPBills.length > 0) {
+          for (const sBill of serverPBills) {
+            const rawBill = sBill.dataValues || sBill;
+            const bId = rawBill.billId || rawBill.bill_id;
+            const bNum = rawBill.billNumber || rawBill.bill_number;
+            const existing = await db.purchaseBills.filter(b => (bId && b.billId === bId) || (bNum && b.billNumber === bNum)).first();
+            if (!existing) {
+              await db.purchaseBills.add({
+                ...rawBill,
+                billId: bId || `pur-${Date.now()}`,
+                billNumber: bNum || `PUR-${Date.now()}`,
+                tenantId: rawBill.tenantId || rawBill.tenant_id || currentTenantId
+              });
+            }
+          }
+        }
       } catch (err) {
         console.warn('Backend server offline or unreachable. Operating in Dexie local offline mode.', err);
         // Fallback to reading company profiles from Dexie IndexedDB or localStorage
@@ -349,6 +369,7 @@ export function App() {
   const allEstimates = useLiveQuery(() => db.estimates.reverse().toArray(), []) || [];
   const allPaymentsIn = useLiveQuery(() => db.paymentIn.reverse().toArray(), []) || [];
   const allPurchaseOrders = useLiveQuery(() => db.purchaseOrders.reverse().toArray(), []) || [];
+  const allPurchaseBills = useLiveQuery(() => db.purchaseBills.reverse().toArray(), []) || [];
 
   const items = allItems.filter(item => (item.tenantId || 'default-tenant') === currentTenantId);
   const parties = allParties.filter(party => (party.tenantId || 'default-tenant') === currentTenantId);
@@ -358,6 +379,7 @@ export function App() {
   const estimates = allEstimates.filter(est => (est.tenantId || 'default-tenant') === currentTenantId);
   const paymentsIn = allPaymentsIn.filter(p => (p.tenantId || 'default-tenant') === currentTenantId);
   const purchaseOrders = allPurchaseOrders.filter(po => (po.tenantId || 'default-tenant') === currentTenantId);
+  const purchaseBills = allPurchaseBills.filter(pb => (pb.tenantId || 'default-tenant') === currentTenantId);
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');
@@ -483,11 +505,20 @@ export function App() {
           )}
 
           {activeTab === 'purchase' && (
+            <PurchaseBillListScreen
+              purchaseBills={purchaseBills}
+              business={businessDetails}
+              onCreateBill={() => setActiveTab('create-purchase-bill')}
+              onBillUpdated={() => {}}
+            />
+          )}
+
+          {activeTab === 'create-purchase-bill' && (
             <PurchaseScreen
               items={items}
               parties={parties}
               business={businessDetails}
-              onPurchaseCreated={() => {}}
+              onPurchaseCreated={() => setActiveTab('purchase')}
             />
           )}
 

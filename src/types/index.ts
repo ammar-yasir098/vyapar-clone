@@ -287,3 +287,36 @@ export interface PurchaseOrder {
   updatedAt?: string;
 }
 
+export interface PurchaseBillItem {
+  id?: number;
+  itemId?: number;
+  itemName: string;
+  hsnSacCode?: string;
+  unitType?: string;
+  quantity: number;
+  unitPrice: number;
+  purchasePrice: number;
+  taxAmount?: number;
+  totalAmount: number;
+}
+
+export interface PurchaseBill {
+  id?: number;
+  billId: string;
+  tenantId: string;
+  billNumber: string;
+  billDate: string;
+  supplierId?: number;
+  supplierName: string;
+  supplierPhone?: string;
+  supplierGstin?: string;
+  items: PurchaseBillItem[];
+  subtotal: number;
+  taxTotal: number;
+  grandTotal: number;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+

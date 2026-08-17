@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ShoppingCart, Plus, Trash2, CheckCircle2, User, FileText, ArrowUpRight } from 'lucide-react';
-import { Item, Party, InvoiceItem, PaymentMethod, BusinessDetails } from '../../types';
+import { Item, Party, InvoiceItem, PaymentMethod, BusinessDetails, PurchaseBill } from '../../types';
 import { db } from '../../db';
 import { createServerPurchase } from '../../services/api';
 import { syncManager } from '../../services/sync';
@@ -122,7 +122,38 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       return;
     }
 
+    const currentTenantId = business?.tenantId || 'default-tenant';
     const totalAmount = totalBillAmount;
+
+    // 0. Save persistent PurchaseBill record in Dexie IndexedDB
+    const billId = `pur-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const newPurchaseBill: PurchaseBill = {
+      billId,
+      tenantId: currentTenantId,
+      billNumber,
+      billDate,
+      supplierId: selectedSupplier?.id,
+      supplierName: selectedSupplier?.name || 'Supplier',
+      supplierPhone: selectedSupplier?.phone || '',
+      supplierGstin: selectedSupplier?.gstin || '',
+      items: purchaseItems.map(i => ({
+        itemId: i.itemId,
+        itemName: i.itemName,
+        hsnSacCode: i.hsnSacCode,
+        unitType: i.unitType,
+        quantity: i.quantity,
+        unitPrice: i.unitPrice,
+        purchasePrice: i.purchasePrice,
+        taxAmount: i.taxAmount,
+        totalAmount: i.totalAmount
+      })),
+      subtotal: totalAmount,
+      taxTotal: 0,
+      grandTotal: totalAmount,
+      createdAt: new Date().toISOString()
+    };
+
+    await db.purchaseBills.add(newPurchaseBill);
 
     // 1. Stock Inward: Increase Item stock levels in Dexie DB & log Restock record
     for (const pItem of purchaseItems) {
@@ -139,7 +170,7 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       await db.itemRestocks.add({
         itemId: pItem.itemId,
         itemName: pItem.itemName,
-        tenantId: business?.tenantId || 'default-tenant',
+        tenantId: currentTenantId,
         supplierId: selectedSupplier?.id,
         supplierName: selectedSupplier?.name || 'Supplier Restock',
         supplierPhone: selectedSupplier?.phone || '',
@@ -164,7 +195,6 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
     }
 
     // 3. Post Double-Entry Journal Entry & Update Ledger Accounts
-    const currentTenantId = business?.tenantId || 'default-tenant';
     const accounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === currentTenantId).toArray();
     const invAcc = accounts.find(a => a.accountCode === '1040') || accounts[0];
     const apAcc = accounts.find(a => a.accountCode === '2010') || accounts[0];

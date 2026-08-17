@@ -12,7 +12,7 @@ import {
   ArrowRightLeft,
   FileCheck
 } from 'lucide-react';
-import { PurchaseOrder, BusinessDetails, Party, Item } from '../../types';
+import { PurchaseOrder, BusinessDetails, Party, Item, PurchaseBill } from '../../types';
 import { db } from '../../db';
 import { updateServerPOStatus, deleteServerPurchaseOrder, createServerPurchase } from '../../services/api';
 import { syncManager } from '../../services/sync';
@@ -110,6 +110,34 @@ export const PurchaseOrderListScreen: React.FC<PurchaseOrderListScreenProps> = (
           taxAmount: 0,
           totalAmount: item.totalAmount
         }));
+
+        // 0. Create persistent PurchaseBill record in Dexie IndexedDB
+        const billId = `pur-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const newPurchaseBill: PurchaseBill = {
+          billId,
+          tenantId: currentTenantId,
+          billNumber,
+          billDate,
+          supplierId: supplier.id,
+          supplierName: supplier.name,
+          supplierPhone: supplier.phone || '',
+          items: convertedItems.map(i => ({
+            itemId: i.itemId,
+            itemName: i.itemName,
+            unitType: i.unitType,
+            quantity: i.quantity,
+            unitPrice: i.unitPrice,
+            purchasePrice: i.purchasePrice,
+            totalAmount: i.totalAmount
+          })),
+          subtotal: po.grandTotal,
+          taxTotal: 0,
+          grandTotal: po.grandTotal,
+          notes: `Converted from PO ${po.poNumber}`,
+          createdAt: new Date().toISOString()
+        };
+
+        await db.purchaseBills.add(newPurchaseBill);
 
         // 1. Stock Inward: Increase Item stock levels in Dexie DB & log Restock record
         for (const pItem of convertedItems) {

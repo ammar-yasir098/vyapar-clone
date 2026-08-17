@@ -184,12 +184,39 @@ export async function createServerInvoice(invoiceData: any) {
 }
 
 // PURCHASES
-export async function createServerPurchase(purchaseData: any) {
+export async function fetchServerPurchaseBills(tenantId?: string) {
+  try {
+    const url = tenantId ? `${API_BASE_URL}/purchases?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/purchases`;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data || [];
+  } catch (err) {
+    return [];
+  }
+}
+
+export async function createServerPurchaseBill(purchaseData: any) {
   try {
     const res = await fetch(`${API_BASE_URL}/purchases`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(purchaseData)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function createServerPurchase(purchaseData: any) {
+  return createServerPurchaseBill(purchaseData);
+}
+
+export async function deleteServerPurchaseBill(id: number | string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/purchases/${id}`, {
+      method: 'DELETE'
     });
     return await res.json();
   } catch (err: any) {

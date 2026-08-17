@@ -423,6 +423,76 @@ PurchaseOrderItem.init(
 PurchaseOrder.hasMany(PurchaseOrderItem, { foreignKey: 'purchaseOrderId', as: 'items', onDelete: 'CASCADE' });
 PurchaseOrderItem.belongsTo(PurchaseOrder, { foreignKey: 'purchaseOrderId' });
 
+// 11. PurchaseBill & PurchaseBillItem Models
+export class PurchaseBill extends Model {
+  declare id: number;
+  declare billId: string;
+  declare tenantId: string;
+  declare billNumber: string;
+  declare billDate: string;
+  declare supplierId: number;
+  declare supplierName: string;
+  declare supplierPhone: string;
+  declare supplierGstin: string;
+  declare subtotal: number;
+  declare taxTotal: number;
+  declare grandTotal: number;
+  declare notes: string;
+}
+
+PurchaseBill.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    billId: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'bill_id' },
+    tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
+    billNumber: { type: DataTypes.STRING, allowNull: false, field: 'bill_number' },
+    billDate: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW, field: 'bill_date' },
+    supplierId: { type: DataTypes.INTEGER, allowNull: true, field: 'supplier_id' },
+    supplierName: { type: DataTypes.STRING, allowNull: false, field: 'supplier_name' },
+    supplierPhone: { type: DataTypes.STRING, allowNull: true, field: 'supplier_phone' },
+    supplierGstin: { type: DataTypes.STRING, allowNull: true, field: 'supplier_gstin' },
+    subtotal: { type: DataTypes.FLOAT, defaultValue: 0.0 },
+    taxTotal: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'tax_total' },
+    grandTotal: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'grand_total' },
+    notes: { type: DataTypes.TEXT, allowNull: true }
+  },
+  { sequelize, modelName: 'PurchaseBill', tableName: 'purchase_bills', timestamps: false }
+);
+
+export class PurchaseBillItem extends Model {
+  declare id: number;
+  declare purchaseBillId: number;
+  declare itemId: number;
+  declare itemName: string;
+  declare hsnSacCode: string;
+  declare unitType: string;
+  declare quantity: number;
+  declare unitPrice: number;
+  declare purchasePrice: number;
+  declare taxAmount: number;
+  declare totalAmount: number;
+}
+
+PurchaseBillItem.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    purchaseBillId: { type: DataTypes.INTEGER, allowNull: false, field: 'purchase_bill_id' },
+    itemId: { type: DataTypes.INTEGER, allowNull: true, field: 'item_id' },
+    itemName: { type: DataTypes.STRING, allowNull: false, field: 'item_name' },
+    hsnSacCode: { type: DataTypes.STRING, allowNull: true, field: 'hsn_sac_code' },
+    unitType: { type: DataTypes.STRING, defaultValue: 'PCS', field: 'unit_type' },
+    quantity: { type: DataTypes.FLOAT, defaultValue: 1.0 },
+    unitPrice: { type: DataTypes.FLOAT, allowNull: false, field: 'unit_price' },
+    purchasePrice: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'purchase_price' },
+    taxAmount: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'tax_amount' },
+    totalAmount: { type: DataTypes.FLOAT, allowNull: false, field: 'total_amount' }
+  },
+  { sequelize, modelName: 'PurchaseBillItem', tableName: 'purchase_bill_items', timestamps: false }
+);
+
+PurchaseBill.hasMany(PurchaseBillItem, { foreignKey: 'purchaseBillId', as: 'items', onDelete: 'CASCADE' });
+PurchaseBillItem.belongsTo(PurchaseBill, { foreignKey: 'purchaseBillId' });
+
 /**
  * Seeds standard Chart of Accounts in PostgreSQL if empty
  */
