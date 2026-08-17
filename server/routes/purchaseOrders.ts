@@ -103,7 +103,7 @@ purchaseOrdersRouter.patch('/:id/status', async (req: Request, res: Response) =>
     const { status } = req.body;
 
     if (isDbConnected()) {
-      const po = await PurchaseOrder.findByPk(id);
+      const po = await PurchaseOrder.findByPk(id as string);
       if (!po) {
         return res.status(404).json({ success: false, error: 'Purchase Order not found' });
       }
