@@ -197,7 +197,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
               >
                 <div className="flex items-center gap-2.5">
                   <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'purchase-orders' || activeTab === 'create-po' ? 'bg-white' : 'bg-blue-400'}`}></div>
-                  <span>Purchase Order (PO)</span>
+                  <span>Purchase Order</span>
                 </div>
                 <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono font-bold">Draft</span>
               </button>

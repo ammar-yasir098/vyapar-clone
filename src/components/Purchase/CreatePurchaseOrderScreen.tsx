@@ -151,7 +151,7 @@ export const CreatePurchaseOrderScreen: React.FC<CreatePurchaseOrderScreenProps>
           <div>
             <h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
               <ShoppingBag className="w-5 h-5 text-blue-600" />
-              <span>Create Purchase Order (PO)</span>
+              <span>Create Purchase Order</span>
             </h2>
             <p className="text-xs text-slate-500 font-semibold">Demand note for suppliers — Does NOT affect item stock or ledger accounts until converted into a bill</p>
           </div>

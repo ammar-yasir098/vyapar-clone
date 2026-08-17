@@ -255,7 +255,7 @@ export const PurchaseOrderListScreen: React.FC<PurchaseOrderListScreenProps> = (
               className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-md transition cursor-pointer"
             >
               <Plus className="w-4 h-4 stroke-[3]" />
-              <span>Create Purchase Order (PO)</span>
+              <span>Create Purchase Order</span>
             </button>
           </div>
         </div>
@@ -329,7 +329,7 @@ export const PurchaseOrderListScreen: React.FC<PurchaseOrderListScreenProps> = (
                 onClick={onCreatePO}
                 className="mt-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm cursor-pointer"
               >
-                Create Purchase Order (PO)
+                Create Purchase Order
               </button>
             </div>
           ) : (
