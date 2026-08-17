@@ -547,6 +547,68 @@ PurchaseBillItem.init(
 PurchaseBill.hasMany(PurchaseBillItem, { foreignKey: 'purchaseBillId', as: 'items', onDelete: 'CASCADE' });
 PurchaseBillItem.belongsTo(PurchaseBill, { foreignKey: 'purchaseBillId' });
 
+// 12. PurchaseReturn & PurchaseReturnItem Models
+export class PurchaseReturn extends Model {
+  declare id: number;
+  declare returnId: string;
+  declare tenantId: string;
+  declare debitNoteNumber: string;
+  declare returnDate: string;
+  declare purchaseBillNumber: string;
+  declare supplierId: number;
+  declare supplierName: string;
+  declare supplierPhone: string;
+  declare subtotal: number;
+  declare grandTotal: number;
+  declare notes: string;
+}
+
+PurchaseReturn.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    returnId: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'return_id' },
+    tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
+    debitNoteNumber: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'debit_note_number' },
+    returnDate: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW, field: 'return_date' },
+    purchaseBillNumber: { type: DataTypes.STRING, allowNull: true, field: 'purchase_bill_number' },
+    supplierId: { type: DataTypes.INTEGER, allowNull: true, field: 'supplier_id' },
+    supplierName: { type: DataTypes.STRING, allowNull: false, field: 'supplier_name' },
+    supplierPhone: { type: DataTypes.STRING, allowNull: true, field: 'supplier_phone' },
+    subtotal: { type: DataTypes.FLOAT, defaultValue: 0.0 },
+    grandTotal: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'grand_total' },
+    notes: { type: DataTypes.TEXT, allowNull: true }
+  },
+  { sequelize, modelName: 'PurchaseReturn', tableName: 'purchase_returns', timestamps: true }
+);
+
+export class PurchaseReturnItem extends Model {
+  declare id: number;
+  declare purchaseReturnId: number;
+  declare itemId: number;
+  declare itemName: string;
+  declare unitType: string;
+  declare returnQuantity: number;
+  declare unitPrice: number;
+  declare totalAmount: number;
+}
+
+PurchaseReturnItem.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    purchaseReturnId: { type: DataTypes.INTEGER, allowNull: false, field: 'purchase_return_id' },
+    itemId: { type: DataTypes.INTEGER, allowNull: true, field: 'item_id' },
+    itemName: { type: DataTypes.STRING, allowNull: false, field: 'item_name' },
+    unitType: { type: DataTypes.STRING, defaultValue: 'PCS', field: 'unit_type' },
+    returnQuantity: { type: DataTypes.FLOAT, defaultValue: 1.0, field: 'return_quantity' },
+    unitPrice: { type: DataTypes.FLOAT, allowNull: false, field: 'unit_price' },
+    totalAmount: { type: DataTypes.FLOAT, allowNull: false, field: 'total_amount' }
+  },
+  { sequelize, modelName: 'PurchaseReturnItem', tableName: 'purchase_return_items', timestamps: false }
+);
+
+PurchaseReturn.hasMany(PurchaseReturnItem, { foreignKey: 'purchaseReturnId', as: 'items', onDelete: 'CASCADE' });
+PurchaseReturnItem.belongsTo(PurchaseReturn, { foreignKey: 'purchaseReturnId' });
+
 /**
  * Seeds standard Chart of Accounts in PostgreSQL if empty
  */

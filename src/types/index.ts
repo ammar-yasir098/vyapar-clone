@@ -345,6 +345,35 @@ export interface Expense {
   createdAt?: string;
 }
 
+export interface PurchaseReturnItem {
+  id?: number;
+  itemId?: number;
+  itemName: string;
+  unitType?: string;
+  returnQuantity: number;
+  unitPrice: number;
+  totalAmount: number;
+}
+
+export interface PurchaseReturn {
+  id?: number;
+  returnId: string;
+  tenantId: string;
+  debitNoteNumber: string;
+  returnDate: string;
+  purchaseBillNumber?: string;
+  supplierId?: number;
+  supplierName: string;
+  supplierPhone?: string;
+  items: PurchaseReturnItem[];
+  subtotal: number;
+  grandTotal: number;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+
 
 
 

@@ -425,3 +425,40 @@ export async function deleteServerPurchaseOrder(id: number | string) {
   }
 }
 
+// PURCHASE RETURNS (DEBIT NOTES)
+export async function fetchServerPurchaseReturns(tenantId?: string) {
+  try {
+    const url = tenantId ? `${API_BASE_URL}/purchase-returns?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/purchase-returns`;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data || [];
+  } catch (err) {
+    return [];
+  }
+}
+
+export async function createServerPurchaseReturn(returnData: any) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/purchase-returns`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(returnData)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function deleteServerPurchaseReturn(id: number | string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/purchase-returns/${id}`, {
+      method: 'DELETE'
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
