@@ -26,7 +26,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
 
   // Automatically expand Sale or Purchase groups based on active tab
   useEffect(() => {
-    if (activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices') {
+    if (activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices' || activeTab === 'sale-returns' || activeTab === 'create-sale-return') {
       setIsSaleOpen(true);
     }
     if (activeTab === 'purchase' || activeTab === 'purchase-orders' || activeTab === 'create-po' || activeTab === 'payment-out' || activeTab === 'expenses' || activeTab === 'purchase-returns' || activeTab === 'create-purchase-return') {
@@ -34,7 +34,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     }
   }, [activeTab]);
 
-  const isSaleActive = activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices';
+  const isSaleActive = activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices' || activeTab === 'sale-returns' || activeTab === 'create-sale-return';
   const isPurchaseActive = activeTab === 'purchase' || activeTab === 'purchase-orders' || activeTab === 'create-po' || activeTab === 'payment-out' || activeTab === 'expenses' || activeTab === 'purchase-returns' || activeTab === 'create-purchase-return';
 
   const menuGroups = [
@@ -156,6 +156,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
                 <div className="flex items-center gap-2.5">
                   <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'invoices' ? 'bg-white' : 'bg-slate-400'}`}></div>
                   <span>Sale Invoices</span>
+                </div>
+              </button>
+
+              {/* Sale Return / Credit Note Sub-option */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('sale-returns')}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  activeTab === 'sale-returns' || activeTab === 'create-sale-return'
+                    ? 'bg-red-600 text-white font-bold shadow-xs'
+                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'sale-returns' || activeTab === 'create-sale-return' ? 'bg-white' : 'bg-emerald-400'}`}></div>
+                  <span>Sale Return</span>
                 </div>
               </button>
             </div>

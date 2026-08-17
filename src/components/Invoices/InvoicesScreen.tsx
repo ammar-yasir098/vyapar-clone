@@ -63,64 +63,71 @@ export const InvoicesScreen: React.FC<InvoicesScreenProps> = ({ invoices = [], b
                 <th>Payment Method</th>
                 <th>Status</th>
                 <th className="text-right">Grand Total (Rs)</th>
+                <th className="text-right">Net Due (Rs)</th>
                 <th className="text-center">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredInvoices.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-16 text-slate-400 text-xs">
+                  <td colSpan={8} className="text-center py-16 text-slate-400 text-xs">
                     No sales invoices found.
                   </td>
                 </tr>
               ) : (
-                filteredInvoices.map(inv => (
-                  <tr key={inv.id || inv.invoiceNumber}>
-                    <td className="font-mono font-extrabold text-xs text-blue-600">
-                      {inv.invoiceNumber || 'INV-UNKNOWN'}
-                    </td>
-                    <td className="font-mono text-xs text-slate-500">{inv.invoiceDate || '-'}</td>
-                    <td className="font-bold text-slate-800 text-xs">{inv.partyName || 'Walk-in Customer'}</td>
-                    <td>
-                      <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
-                        {inv.paymentMethod || 'CASH'}
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                          inv.paymentStatus === 'PAID'
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : inv.paymentStatus === 'PARTIAL'
-                            ? 'bg-amber-50 text-amber-700 border-amber-200'
-                            : 'bg-rose-50 text-rose-700 border-rose-200'
-                        }`}
-                      >
-                        {inv.paymentStatus || 'UNPAID'}
-                      </span>
-                    </td>
-                    <td className="font-mono font-black text-xs text-emerald-600 text-right">
-                      Rs {Number(inv.grandTotal || 0).toFixed(2)}
-                    </td>
-                    <td className="text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <button
-                          onClick={() => triggerThermalPrint(inv, business, '80mm')}
-                          className="btn-vyapar-outline py-1 px-2.5 text-[11px] font-bold cursor-pointer"
+                filteredInvoices.map(inv => {
+                  const dueAmt = inv.dueAmount !== undefined ? inv.dueAmount : (inv.paymentStatus === 'PAID' ? 0 : inv.grandTotal);
+                  return (
+                    <tr key={inv.id || inv.invoiceNumber}>
+                      <td className="font-mono font-extrabold text-xs text-blue-600">
+                        {inv.invoiceNumber || 'INV-UNKNOWN'}
+                      </td>
+                      <td className="font-mono text-xs text-slate-500">{inv.invoiceDate || '-'}</td>
+                      <td className="font-bold text-slate-800 text-xs">{inv.partyName || 'Walk-in Customer'}</td>
+                      <td>
+                        <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
+                          {inv.paymentMethod || 'CASH'}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                            inv.paymentStatus === 'PAID'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : inv.paymentStatus === 'PARTIAL'
+                              ? 'bg-amber-50 text-amber-700 border-amber-200'
+                              : 'bg-rose-50 text-rose-700 border-rose-200'
+                          }`}
                         >
-                          <Printer className="w-3.5 h-3.5 inline mr-1" />
-                          <span>Thermal Slip</span>
-                        </button>
-                        <button
-                          onClick={() => setSelectedInvoice(inv)}
-                          className="text-xs text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer"
-                        >
-                          View Details
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                          {inv.paymentStatus || 'UNPAID'}
+                        </span>
+                      </td>
+                      <td className="font-mono font-bold text-xs text-slate-800 text-right">
+                        Rs {Number(inv.grandTotal || 0).toFixed(2)}
+                      </td>
+                      <td className="font-mono font-black text-xs text-right text-rose-600">
+                        Rs {Number(dueAmt).toFixed(2)}
+                      </td>
+                      <td className="text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => triggerThermalPrint(inv, business, '80mm')}
+                            className="btn-vyapar-outline py-1 px-2.5 text-[11px] font-bold cursor-pointer"
+                          >
+                            <Printer className="w-3.5 h-3.5 inline mr-1" />
+                            <span>Thermal Slip</span>
+                          </button>
+                          <button
+                            onClick={() => setSelectedInvoice(inv)}
+                            className="text-xs text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer"
+                          >
+                            View Details
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -178,8 +185,11 @@ export const InvoicesScreen: React.FC<InvoicesScreenProps> = ({ invoices = [], b
               <div className="bg-slate-100 p-3 rounded-xl space-y-1 font-mono text-xs text-right text-slate-700">
                 <div>Subtotal: Rs {Number(selectedInvoice.subtotal || 0).toFixed(2)}</div>
                 <div>Tax Total: Rs {Number(selectedInvoice.taxTotal || 0).toFixed(2)}</div>
-                <div className="text-sm font-black text-emerald-600 pt-1 border-t border-slate-200">
+                <div className="text-sm font-black text-slate-900 pt-1 border-t border-slate-200">
                   Grand Total: Rs {Number(selectedInvoice.grandTotal || 0).toFixed(2)}
+                </div>
+                <div className="text-sm font-black text-rose-600 pt-0.5">
+                  Remaining Due: Rs {Number(selectedInvoice.dueAmount !== undefined ? selectedInvoice.dueAmount : (selectedInvoice.paymentStatus === 'PAID' ? 0 : selectedInvoice.grandTotal)).toFixed(2)}
                 </div>
               </div>
             </div>

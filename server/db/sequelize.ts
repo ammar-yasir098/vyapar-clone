@@ -609,6 +609,76 @@ PurchaseReturnItem.init(
 PurchaseReturn.hasMany(PurchaseReturnItem, { foreignKey: 'purchaseReturnId', as: 'items', onDelete: 'CASCADE' });
 PurchaseReturnItem.belongsTo(PurchaseReturn, { foreignKey: 'purchaseReturnId' });
 
+// 13. SaleReturn & SaleReturnItem Models (Credit Note / Cr. Note)
+export class SaleReturn extends Model {
+  declare id: number;
+  declare returnId: string;
+  declare tenantId: string;
+  declare creditNoteNumber: string;
+  declare returnDate: string;
+  declare invoiceNumber: string;
+  declare partyId: number;
+  declare partyName: string;
+  declare partyPhone: string;
+  declare subtotal: number;
+  declare taxTotal: number;
+  declare grandTotal: number;
+  declare refundAmount: number;
+  declare notes: string;
+}
+
+SaleReturn.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    returnId: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'return_id' },
+    tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
+    creditNoteNumber: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'credit_note_number' },
+    returnDate: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW, field: 'return_date' },
+    invoiceNumber: { type: DataTypes.STRING, allowNull: true, field: 'invoice_number' },
+    partyId: { type: DataTypes.INTEGER, allowNull: true, field: 'party_id' },
+    partyName: { type: DataTypes.STRING, allowNull: false, field: 'party_name' },
+    partyPhone: { type: DataTypes.STRING, allowNull: true, field: 'party_phone' },
+    subtotal: { type: DataTypes.FLOAT, defaultValue: 0.0 },
+    taxTotal: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'tax_total' },
+    grandTotal: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'grand_total' },
+    refundAmount: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'refund_amount' },
+    notes: { type: DataTypes.TEXT, allowNull: true }
+  },
+  { sequelize, modelName: 'SaleReturn', tableName: 'sale_returns', timestamps: true }
+);
+
+export class SaleReturnItem extends Model {
+  declare id: number;
+  declare saleReturnId: number;
+  declare itemId: number;
+  declare itemName: string;
+  declare hsnSacCode: string;
+  declare unitType: string;
+  declare returnQuantity: number;
+  declare unitPrice: number;
+  declare taxAmount: number;
+  declare totalAmount: number;
+}
+
+SaleReturnItem.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    saleReturnId: { type: DataTypes.INTEGER, allowNull: false, field: 'sale_return_id' },
+    itemId: { type: DataTypes.INTEGER, allowNull: true, field: 'item_id' },
+    itemName: { type: DataTypes.STRING, allowNull: false, field: 'item_name' },
+    hsnSacCode: { type: DataTypes.STRING, defaultValue: '1000', field: 'hsn_sac_code' },
+    unitType: { type: DataTypes.STRING, defaultValue: 'PCS', field: 'unit_type' },
+    returnQuantity: { type: DataTypes.FLOAT, defaultValue: 1.0, field: 'return_quantity' },
+    unitPrice: { type: DataTypes.FLOAT, allowNull: false, field: 'unit_price' },
+    taxAmount: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'tax_amount' },
+    totalAmount: { type: DataTypes.FLOAT, allowNull: false, field: 'total_amount' }
+  },
+  { sequelize, modelName: 'SaleReturnItem', tableName: 'sale_return_items', timestamps: false }
+);
+
+SaleReturn.hasMany(SaleReturnItem, { foreignKey: 'saleReturnId', as: 'items', onDelete: 'CASCADE' });
+SaleReturnItem.belongsTo(SaleReturn, { foreignKey: 'saleReturnId' });
+
 /**
  * Seeds standard Chart of Accounts in PostgreSQL if empty
  */

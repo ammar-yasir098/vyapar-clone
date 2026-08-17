@@ -462,3 +462,40 @@ export async function deleteServerPurchaseReturn(id: number | string) {
   }
 }
 
+// SALE RETURNS (CREDIT NOTES / CR. NOTES)
+export async function fetchServerSaleReturns(tenantId?: string) {
+  try {
+    const url = tenantId ? `${API_BASE_URL}/sale-returns?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/sale-returns`;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data || [];
+  } catch (err) {
+    return [];
+  }
+}
+
+export async function createServerSaleReturn(returnData: any) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/sale-returns`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(returnData)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function deleteServerSaleReturn(id: number | string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/sale-returns/${id}`, {
+      method: 'DELETE'
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+

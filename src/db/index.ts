@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { Item, Party, Invoice, SyncJournal, BusinessDetails, ItemBatch, LedgerAccount, JournalEntry, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock, PurchaseOrder, PurchaseBill, PaymentOut, Expense, PurchaseReturn } from '../types';
+import { Item, Party, Invoice, SyncJournal, BusinessDetails, ItemBatch, LedgerAccount, JournalEntry, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock, PurchaseOrder, PurchaseBill, PaymentOut, Expense, PurchaseReturn, SaleReturn } from '../types';
 
 export class VyaparDatabase extends Dexie {
   items!: Table<Item, number>;
@@ -18,11 +18,12 @@ export class VyaparDatabase extends Dexie {
   paymentOut!: Table<PaymentOut, number>;
   expenses!: Table<Expense, number>;
   purchaseReturns!: Table<PurchaseReturn, number>;
+  saleReturns!: Table<SaleReturn, number>;
 
   constructor() {
     super('VyaparOfflineDB');
     
-    this.version(12).stores({
+    this.version(13).stores({
       items: '++id, skuCode, barcode, name, currentStock, tenantId',
       parties: '++id, name, phone, type, tenantId',
       invoices: '++id, invoiceId, invoiceNumber, invoiceDate, paymentStatus, partyId, syncStatus, tenantId',
@@ -38,7 +39,8 @@ export class VyaparDatabase extends Dexie {
       purchaseBills: '++id, billId, billNumber, billDate, supplierId, tenantId',
       paymentOut: '++id, receiptNumber, partyId, paymentDate, tenantId',
       expenses: '++id, expenseNumber, categoryName, expenseDate, tenantId',
-      purchaseReturns: '++id, returnId, debitNoteNumber, returnDate, supplierId, tenantId'
+      purchaseReturns: '++id, returnId, debitNoteNumber, returnDate, supplierId, tenantId',
+      saleReturns: '++id, returnId, creditNoteNumber, returnDate, partyId, tenantId'
     });
   }
 }
@@ -154,6 +156,7 @@ export async function clearAllDatabaseData() {
   await db.paymentOut.clear();
   await db.expenses.clear();
   await db.purchaseReturns.clear();
+  await db.saleReturns.clear();
   
   // Reset account balances to 0 in local Dexie IndexedDB
   const accounts = await db.ledgerAccounts.toArray();

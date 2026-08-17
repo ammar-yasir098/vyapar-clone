@@ -258,6 +258,22 @@ class ClientSyncManager {
           }
         }
 
+        const localSaleReturns = await db.saleReturns.toArray();
+        for (const sret of localSaleReturns) {
+          if (sret.id || sret.returnId) {
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-saleret-${sret.id || sret.returnId}`,
+              clientSequence: Date.now(),
+              entityType: 'SALE_RETURN',
+              entityId: String(sret.id || sret.returnId),
+              mutationType: 'INSERT',
+              payload: JSON.stringify(sret),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          }
+        }
+
         // Re-fetch unsynced queue after auto-populating
         unsynced = await db.syncJournal.filter(record => !record.synced).toArray();
       }

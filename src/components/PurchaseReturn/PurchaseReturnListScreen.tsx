@@ -178,7 +178,6 @@ export const PurchaseReturnListScreen: React.FC<PurchaseReturnListScreenProps> =
                     <th className="py-3 px-4">Ref Bill #</th>
                     <th className="py-3 px-4">Items</th>
                     <th className="py-3 px-4 text-right">Return Amount</th>
-                    <th className="py-3 px-4 text-center">Ledger Impact</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -202,11 +201,6 @@ export const PurchaseReturnListScreen: React.FC<PurchaseReturnListScreenProps> =
                       </td>
                       <td className="py-3.5 px-4 text-right font-black text-red-600">
                         Rs. {(ret.grandTotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide bg-red-100 text-red-800">
-                          PAYABLE REDUCED
-                        </span>
                       </td>
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">

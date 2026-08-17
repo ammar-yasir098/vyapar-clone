@@ -25,7 +25,8 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
     purchaseOrders: 0, 
     purchaseBills: 0, 
     expenses: 0, 
-    purchaseReturns: 0 
+    purchaseReturns: 0,
+    saleReturns: 0 
   });
   const [serverHealth, setServerHealth] = useState<{ status: string; version?: number } | null>(null);
 
@@ -42,6 +43,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
     const billCount = await db.purchaseBills.count();
     const expenseCount = await db.expenses.count();
     const returnCount = await db.purchaseReturns.count();
+    const saleReturnCount = await db.saleReturns.count();
 
     setDbStats({ 
       items: itemsCount, 
@@ -50,7 +52,8 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
       purchaseOrders: poCount, 
       purchaseBills: billCount, 
       expenses: expenseCount, 
-      purchaseReturns: returnCount 
+      purchaseReturns: returnCount,
+      saleReturns: saleReturnCount
     });
 
     // 3. Ping PostgreSQL cloud server status

@@ -26,6 +26,8 @@ import { PaymentOutScreen } from './components/PaymentOut/PaymentOutScreen';
 import { ExpenseScreen } from './components/Expense/ExpenseScreen';
 import { PurchaseReturnListScreen } from './components/PurchaseReturn/PurchaseReturnListScreen';
 import { CreatePurchaseReturnScreen } from './components/PurchaseReturn/CreatePurchaseReturnScreen';
+import { SaleReturnListScreen } from './components/SaleReturn/SaleReturnListScreen';
+import { CreateSaleReturnScreen } from './components/SaleReturn/CreateSaleReturnScreen';
 import { Invoice, BusinessDetails, Party } from './types';
 import { triggerThermalPrint } from './services/printer';
 import { 
@@ -43,7 +45,8 @@ import {
   fetchServerPurchaseBills,
   fetchServerPaymentsOut,
   fetchServerExpenses,
-  fetchServerPurchaseReturns
+  fetchServerPurchaseReturns,
+  fetchServerSaleReturns
 } from './services/api';
 import { syncLedgerAccountBalances } from './services/ledger';
 
@@ -207,6 +210,7 @@ export function App() {
         const serverPaymentsOut = await fetchServerPaymentsOut(currentTenantId);
         const serverExpenses = await fetchServerExpenses(currentTenantId);
         const serverReturns = await fetchServerPurchaseReturns(currentTenantId);
+        const serverSaleReturns = await fetchServerSaleReturns(currentTenantId);
 
         if (serverItems && serverItems.length > 0) {
           for (const sItem of serverItems) {
@@ -347,6 +351,23 @@ export function App() {
             }
           }
         }
+
+        if (serverSaleReturns && serverSaleReturns.length > 0) {
+          for (const sRet of serverSaleReturns) {
+            const rawRet = sRet.dataValues || sRet;
+            const rId = rawRet.returnId || rawRet.return_id;
+            const crNum = rawRet.creditNoteNumber || rawRet.credit_note_number;
+            const existing = await db.saleReturns.filter(r => (rId && r.returnId === rId) || (crNum && r.creditNoteNumber === crNum)).first();
+            if (!existing) {
+              await db.saleReturns.add({
+                ...rawRet,
+                returnId: rId || `cr-${Date.now()}`,
+                creditNoteNumber: crNum || `CR-${Date.now()}`,
+                tenantId: rawRet.tenantId || rawRet.tenant_id || currentTenantId
+              });
+            }
+          }
+        }
       } catch (err) {
         console.warn('Backend server offline or unreachable. Operating in Dexie local offline mode.', err);
         // Fallback to reading company profiles from Dexie IndexedDB or localStorage
@@ -419,6 +440,7 @@ export function App() {
   const allPaymentsOut = useLiveQuery(() => db.paymentOut.reverse().toArray(), []) || [];
   const allExpenses = useLiveQuery(() => db.expenses.reverse().toArray(), []) || [];
   const allPurchaseReturns = useLiveQuery(() => db.purchaseReturns.reverse().toArray(), []) || [];
+  const allSaleReturns = useLiveQuery(() => db.saleReturns.reverse().toArray(), []) || [];
 
   const items = allItems.filter(item => (item.tenantId || 'default-tenant') === currentTenantId);
   const parties = allParties.filter(party => (party.tenantId || 'default-tenant') === currentTenantId);
@@ -432,6 +454,7 @@ export function App() {
   const paymentsOut = allPaymentsOut.filter(po => (po.tenantId || 'default-tenant') === currentTenantId);
   const expenses = allExpenses.filter(e => (e.tenantId || 'default-tenant') === currentTenantId);
   const purchaseReturns = allPurchaseReturns.filter(pr => (pr.tenantId || 'default-tenant') === currentTenantId);
+  const saleReturns = allSaleReturns.filter(sr => !sr.tenantId || sr.tenantId === 'default-tenant' || sr.tenantId === currentTenantId);
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');
@@ -596,6 +619,25 @@ export function App() {
               business={businessDetails}
               onReturnSaved={() => setActiveTab('purchase-returns')}
               onCancel={() => setActiveTab('purchase-returns')}
+            />
+          )}
+
+          {activeTab === 'sale-returns' && (
+            <SaleReturnListScreen
+              saleReturns={saleReturns}
+              business={businessDetails}
+              onCreateReturn={() => setActiveTab('create-sale-return')}
+              onReturnUpdated={() => {}}
+            />
+          )}
+
+          {activeTab === 'create-sale-return' && (
+            <CreateSaleReturnScreen
+              items={items}
+              parties={parties}
+              business={businessDetails}
+              onReturnCreated={() => setActiveTab('sale-returns')}
+              onCancel={() => setActiveTab('sale-returns')}
             />
           )}
 

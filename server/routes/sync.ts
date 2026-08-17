@@ -18,7 +18,9 @@ import {
   PaymentOut,
   Expense,
   PurchaseReturn,
-  PurchaseReturnItem
+  PurchaseReturnItem,
+  SaleReturn,
+  SaleReturnItem
 } from '../db/sequelize.js';
 
 export const syncRouter = Router();
@@ -31,7 +33,7 @@ syncRouter.post('/reset', async (req: Request, res: Response) => {
     if (isDbConnected()) {
       try {
         await sequelize.query(
-          'TRUNCATE TABLE invoice_items, invoices, items, parties, journal_entries, estimates, estimate_items, payment_in, purchase_order_items, purchase_orders, purchase_bill_items, purchase_bills, payment_out, expenses, purchase_return_items, purchase_returns RESTART IDENTITY CASCADE;'
+          'TRUNCATE TABLE invoice_items, invoices, items, parties, journal_entries, estimates, estimate_items, payment_in, purchase_order_items, purchase_orders, purchase_bill_items, purchase_bills, payment_out, expenses, purchase_return_items, purchase_returns, sale_return_items, sale_returns RESTART IDENTITY CASCADE;'
         );
       } catch (truncateErr) {
         console.warn('Truncate SQL warning, using Sequelize destroy fallback:', truncateErr);
@@ -51,6 +53,8 @@ syncRouter.post('/reset', async (req: Request, res: Response) => {
         await Expense.destroy({ where: {} }).catch(() => {});
         await PurchaseReturnItem.destroy({ where: {} }).catch(() => {});
         await PurchaseReturn.destroy({ where: {} }).catch(() => {});
+        await SaleReturnItem.destroy({ where: {} }).catch(() => {});
+        await SaleReturn.destroy({ where: {} }).catch(() => {});
       }
 
       await sequelize.query('UPDATE ledger_accounts SET balance = 0.0;').catch(() => {});
@@ -505,6 +509,53 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
                   quantity: item.quantity || 1,
                   unitPrice: item.unitPrice || item.purchasePrice || 0,
                   totalAmount: item.totalAmount || ((item.quantity || 1) * (item.unitPrice || 0))
+                });
+              }
+            }
+          }
+        } else if (entityType === 'SALE_RETURN') {
+          if (mutationType === 'DELETE' && payload.id) {
+            await SaleReturn.destroy({ where: { id: payload.id } });
+          } else if (payload.returnId || payload.creditNoteNumber) {
+            let existingReturn = payload.returnId ? await SaleReturn.findOne({ where: { returnId: payload.returnId } }) : null;
+            if (!existingReturn && payload.creditNoteNumber) {
+              existingReturn = await SaleReturn.findOne({ where: { creditNoteNumber: payload.creditNoteNumber } });
+            }
+            const retData = {
+              returnId: payload.returnId || `CR-${Date.now()}`,
+              tenantId: tenantId || 'default-tenant',
+              creditNoteNumber: payload.creditNoteNumber || `CR-${Math.floor(1000 + Math.random() * 9000)}`,
+              returnDate: payload.returnDate || new Date().toISOString().split('T')[0],
+              invoiceNumber: payload.invoiceNumber || '',
+              partyId: payload.partyId || null,
+              partyName: payload.partyName || 'Customer',
+              partyPhone: payload.partyPhone || '',
+              subtotal: payload.subtotal || 0,
+              taxTotal: payload.taxTotal || 0,
+              grandTotal: payload.grandTotal || 0,
+              refundAmount: payload.refundAmount || 0,
+              notes: payload.notes || ''
+            };
+            let targetReturn: any;
+            if (existingReturn) {
+              await existingReturn.update(retData);
+              targetReturn = existingReturn;
+              await SaleReturnItem.destroy({ where: { saleReturnId: existingReturn.get('id') as number } });
+            } else {
+              targetReturn = await SaleReturn.create(retData);
+            }
+            if (payload.items && Array.isArray(payload.items)) {
+              for (const item of payload.items) {
+                await SaleReturnItem.create({
+                  saleReturnId: targetReturn.id,
+                  itemId: item.itemId || item.id || null,
+                  itemName: item.itemName || item.name || 'Returned Item',
+                  hsnSacCode: item.hsnSacCode || '1000',
+                  unitType: item.unitType || 'PCS',
+                  returnQuantity: item.returnQuantity || item.quantity || 1,
+                  unitPrice: item.unitPrice || item.price || 0,
+                  taxAmount: item.taxAmount || 0,
+                  totalAmount: item.totalAmount || ((item.returnQuantity || item.quantity || 1) * (item.unitPrice || item.price || 0))
                 });
               }
             }

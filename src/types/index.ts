@@ -151,7 +151,7 @@ export interface SyncJournal {
   id?: number;
   versionId: string;
   clientSequence: number;
-  entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'JOURNAL' | 'ESTIMATE' | 'PAYMENT_IN' | 'PURCHASE_ORDER' | 'PURCHASE_BILL' | 'PAYMENT_OUT' | 'EXPENSE' | 'PURCHASE_RETURN';
+  entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'JOURNAL' | 'ESTIMATE' | 'PAYMENT_IN' | 'PURCHASE_ORDER' | 'PURCHASE_BILL' | 'PAYMENT_OUT' | 'EXPENSE' | 'PURCHASE_RETURN' | 'SALE_RETURN';
   entityId: string;
   mutationType: 'INSERT' | 'UPDATE' | 'DELETE';
   payload: string; // JSON string
@@ -368,6 +368,38 @@ export interface PurchaseReturn {
   items: PurchaseReturnItem[];
   subtotal: number;
   grandTotal: number;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SaleReturnItem {
+  id?: number;
+  itemId?: number;
+  itemName: string;
+  hsnSacCode?: string;
+  unitType?: string;
+  returnQuantity: number;
+  unitPrice: number;
+  taxAmount?: number;
+  totalAmount: number;
+}
+
+export interface SaleReturn {
+  id?: number;
+  returnId: string;
+  tenantId: string;
+  creditNoteNumber: string;
+  returnDate: string;
+  invoiceNumber?: string;
+  partyId?: number;
+  partyName: string;
+  partyPhone?: string;
+  items: SaleReturnItem[];
+  subtotal: number;
+  taxTotal?: number;
+  grandTotal: number;
+  refundAmount?: number;
   notes?: string;
   createdAt?: string;
   updatedAt?: string;
