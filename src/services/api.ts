@@ -1,6 +1,39 @@
 const API_BASE_URL = 'http://localhost:5000/api/v1';
 
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 8000): Promise<Response> {
+let cachedServerOnline: boolean | null = null;
+let lastCheckTime = 0;
+const CACHE_TTL_MS = 4000;
+
+export async function checkServerHealth(timeoutMs = 600): Promise<boolean> {
+  const now = Date.now();
+  if (cachedServerOnline !== null && now - lastCheckTime < CACHE_TTL_MS) {
+    return cachedServerOnline;
+  }
+
+  try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(`${API_BASE_URL}/sync/health`, { signal: controller.signal });
+    clearTimeout(id);
+    cachedServerOnline = res.ok;
+    lastCheckTime = now;
+    return cachedServerOnline;
+  } catch {
+    cachedServerOnline = false;
+    lastCheckTime = now;
+    return false;
+  }
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 2000): Promise<Response> {
+  const isHealthCheck = url.endsWith('/sync/health');
+  if (!isHealthCheck) {
+    const isOnline = await checkServerHealth(600);
+    if (!isOnline) {
+      throw new Error('Backend server offline');
+    }
+  }
+
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -75,7 +108,7 @@ export async function fetchServerItems(tenantId?: string) {
 
 export async function createServerItem(itemData: any) {
   try {
-    const res = await fetch(`${API_BASE_URL}/items`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/items`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(itemData)
@@ -88,7 +121,7 @@ export async function createServerItem(itemData: any) {
 
 export function updateServerItem(id: number, itemData: any) {
   try {
-    return fetch(`${API_BASE_URL}/items/${id}`, {
+    return fetchWithTimeout(`${API_BASE_URL}/items/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(itemData)
@@ -100,7 +133,7 @@ export function updateServerItem(id: number, itemData: any) {
 
 export async function adjustServerItemStock(id: number, delta: number) {
   try {
-    const res = await fetch(`${API_BASE_URL}/items/${id}/stock`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/items/${id}/stock`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ delta })
@@ -113,7 +146,7 @@ export async function adjustServerItemStock(id: number, delta: number) {
 
 export async function deleteServerItem(id: number) {
   try {
-    const res = await fetch(`${API_BASE_URL}/items/${id}`, { method: 'DELETE' });
+    const res = await fetchWithTimeout(`${API_BASE_URL}/items/${id}`, { method: 'DELETE' });
     return await res.json();
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -135,7 +168,7 @@ export async function fetchServerParties(tenantId?: string) {
 
 export async function createServerParty(partyData: any) {
   try {
-    const res = await fetch(`${API_BASE_URL}/parties`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/parties`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(partyData)
@@ -148,7 +181,7 @@ export async function createServerParty(partyData: any) {
 
 export async function recordServerPartyPayment(id: number, amount: number, remarks: string, partyType: string, partyName?: string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/parties/${id}/payment`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/parties/${id}/payment`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ amount, remarks, partyType, partyName })
@@ -161,7 +194,7 @@ export async function recordServerPartyPayment(id: number, amount: number, remar
 
 export async function deleteServerParty(id: number) {
   try {
-    const res = await fetch(`${API_BASE_URL}/parties/${id}`, { method: 'DELETE' });
+    const res = await fetchWithTimeout(`${API_BASE_URL}/parties/${id}`, { method: 'DELETE' });
     return await res.json();
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -183,7 +216,7 @@ export async function fetchServerInvoices(tenantId?: string) {
 
 export async function createServerInvoice(invoiceData: any) {
   try {
-    const res = await fetch(`${API_BASE_URL}/invoices`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/invoices`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(invoiceData)
@@ -209,7 +242,7 @@ export async function fetchServerPurchaseBills(tenantId?: string) {
 
 export async function createServerPurchaseBill(purchaseData: any) {
   try {
-    const res = await fetch(`${API_BASE_URL}/purchases`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/purchases`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(purchaseData)
@@ -226,7 +259,7 @@ export async function createServerPurchase(purchaseData: any) {
 
 export async function deleteServerPurchaseBill(id: number | string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/purchases/${id}`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/purchases/${id}`, {
       method: 'DELETE'
     });
     return await res.json();
@@ -239,7 +272,7 @@ export async function deleteServerPurchaseBill(id: number | string) {
 export async function fetchServerLedgerAccounts(tenantId?: string) {
   try {
     const url = tenantId ? `${API_BASE_URL}/ledger/accounts?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/ledger/accounts`;
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url);
     if (!res.ok) return [];
     const json = await res.json();
     return json.data || [];
@@ -251,7 +284,7 @@ export async function fetchServerLedgerAccounts(tenantId?: string) {
 export async function fetchServerJournalEntries(tenantId?: string) {
   try {
     const url = tenantId ? `${API_BASE_URL}/ledger/journals?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/ledger/journals`;
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url);
     if (!res.ok) return [];
     const json = await res.json();
     return json.data || [];
@@ -275,7 +308,7 @@ export async function fetchServerEstimates(tenantId?: string) {
 
 export async function saveServerEstimate(estimateData: any) {
   try {
-    const res = await fetch(`${API_BASE_URL}/estimates`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/estimates`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(estimateData)
@@ -301,7 +334,7 @@ export async function fetchServerPaymentsIn(tenantId?: string) {
 
 export async function createServerPaymentIn(paymentData: any) {
   try {
-    const res = await fetch(`${API_BASE_URL}/payments/in`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/payments/in`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(paymentData)
@@ -327,7 +360,7 @@ export async function fetchServerPaymentsOut(tenantId?: string) {
 
 export async function createServerPaymentOut(paymentData: any) {
   try {
-    const res = await fetch(`${API_BASE_URL}/payments/out`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/payments/out`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(paymentData)
@@ -340,7 +373,7 @@ export async function createServerPaymentOut(paymentData: any) {
 
 export async function deleteServerPaymentOut(id: number | string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/payments/out/${id}`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/payments/out/${id}`, {
       method: 'DELETE'
     });
     return await res.json();
@@ -364,7 +397,7 @@ export async function fetchServerExpenses(tenantId?: string) {
 
 export async function createServerExpense(expenseData: any) {
   try {
-    const res = await fetch(`${API_BASE_URL}/expenses`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/expenses`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(expenseData)
@@ -377,7 +410,7 @@ export async function createServerExpense(expenseData: any) {
 
 export async function deleteServerExpense(id: number | string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/expenses/${id}`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/expenses/${id}`, {
       method: 'DELETE'
     });
     return await res.json();
@@ -401,7 +434,7 @@ export async function fetchServerPurchaseOrders(tenantId?: string) {
 
 export async function createServerPurchaseOrder(poData: any) {
   try {
-    const res = await fetch(`${API_BASE_URL}/purchase-orders`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/purchase-orders`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(poData)
@@ -414,7 +447,7 @@ export async function createServerPurchaseOrder(poData: any) {
 
 export async function updateServerPOStatus(id: number | string, status: string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/purchase-orders/${id}/status`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/purchase-orders/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
@@ -427,7 +460,7 @@ export async function updateServerPOStatus(id: number | string, status: string) 
 
 export async function deleteServerPurchaseOrder(id: number | string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/purchase-orders/${id}`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/purchase-orders/${id}`, {
       method: 'DELETE'
     });
     return await res.json();
@@ -451,7 +484,7 @@ export async function fetchServerPurchaseReturns(tenantId?: string) {
 
 export async function createServerPurchaseReturn(returnData: any) {
   try {
-    const res = await fetch(`${API_BASE_URL}/purchase-returns`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/purchase-returns`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(returnData)
@@ -464,7 +497,7 @@ export async function createServerPurchaseReturn(returnData: any) {
 
 export async function deleteServerPurchaseReturn(id: number | string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/purchase-returns/${id}`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/purchase-returns/${id}`, {
       method: 'DELETE'
     });
     return await res.json();
@@ -488,7 +521,7 @@ export async function fetchServerSaleReturns(tenantId?: string) {
 
 export async function createServerSaleReturn(returnData: any) {
   try {
-    const res = await fetch(`${API_BASE_URL}/sale-returns`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/sale-returns`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(returnData)
@@ -501,7 +534,7 @@ export async function createServerSaleReturn(returnData: any) {
 
 export async function deleteServerSaleReturn(id: number | string) {
   try {
-    const res = await fetch(`${API_BASE_URL}/sale-returns/${id}`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/sale-returns/${id}`, {
       method: 'DELETE'
     });
     return await res.json();

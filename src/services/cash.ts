@@ -2,10 +2,16 @@ import { db } from '../db';
 import { CashAccount, CashTransaction, CashTransactionSource } from '../types';
 import { roundCurrency } from '../utils/edgeCaseHelpers';
 import { syncManager } from './sync';
+import { checkServerHealth } from './api';
 
 const API_BASE_URL = 'http://localhost:5000/api/v1/cash';
 
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 6000): Promise<Response> {
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 1500): Promise<Response> {
+  const isOnline = await checkServerHealth(600);
+  if (!isOnline) {
+    throw new Error('Backend server offline');
+  }
+
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -80,18 +86,6 @@ export async function deduplicateLocalCashTransactions() {
  */
 export async function fetchCashBalance(tenantId: string) {
   await deduplicateLocalCashTransactions();
-  try {
-    // Try server API first
-    const res = await fetchWithTimeout(`${API_BASE_URL}/balance?tenantId=${encodeURIComponent(tenantId)}`);
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && json.data) {
-        return json.data;
-      }
-    }
-  } catch {
-    // Offline fallback using Dexie IndexedDB
-  }
 
   const cashAcc = await getOrCreateLocalCashAccount(tenantId);
   const openingBalance = roundCurrency(cashAcc.openingBalance || 0);
@@ -112,7 +106,7 @@ export async function fetchCashBalance(tenantId: string) {
   const currentBalance = roundCurrency(openingBalance + totalIn - totalOut);
 
   return {
-    accountId: cashAcc.id,
+    accountId: Number(cashAcc.id || 0),
     name: cashAcc.name,
     openingBalance,
     totalIn,
@@ -122,30 +116,9 @@ export async function fetchCashBalance(tenantId: string) {
 }
 
 /**
- * Fetches transaction history with calculated running balances
+ * Fetches transaction history with calculated running balances strictly from local Dexie IndexedDB
  */
 export async function fetchCashTransactions(tenantId: string, filters: any = {}) {
-  try {
-    const query = new URLSearchParams({
-      tenantId,
-      type: filters.type || '',
-      source: filters.source || '',
-      search: filters.search || '',
-      page: String(filters.page || 1),
-      limit: String(filters.limit || 50)
-    });
-
-    const res = await fetchWithTimeout(`${API_BASE_URL}/transactions?${query.toString()}`);
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && json.data) {
-        return json.data;
-      }
-    }
-  } catch {
-    // Offline fallback using Dexie
-  }
-
   const cashAcc = await getOrCreateLocalCashAccount(tenantId);
   const openingBal = roundCurrency(cashAcc.openingBalance || 0);
 
@@ -241,26 +214,7 @@ export async function recordCashEntry(data: {
   // Queue mutation for Cloud Sync
   await syncManager.logMutation('CASH_TRANSACTION', String(txRecord.referenceId || txId), 'INSERT', txRecord);
 
-  // Try pushing to cloud backend server
-  try {
-    const res = await fetch(`${API_BASE_URL}/entry`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tenantId,
-        type: data.type,
-        amount: safeAmt,
-        source: data.source || 'MANUAL_ADJUSTMENT',
-        referenceId: txRecord.referenceId,
-        description: txRecord.description,
-        transactionDate: txRecord.transactionDate
-      })
-    });
-    const json = await res.json();
-    return json;
-  } catch {
-    return { success: true, data: txRecord };
-  }
+  return { success: true, data: txRecord };
 }
 
 /**
@@ -332,7 +286,7 @@ export async function adjustCashBalance(data: {
   const note = data.reason ? ` Note: ${data.reason}` : '';
   const desc = `Physical Cash Reconciliation: ${isGain ? 'Excess Cash Gain' : 'Cash Shortage Deficit'} of Rs ${adjAmt.toFixed(2)}.${note}`;
 
-  return recordCashEntry({
+  const res = await recordCashEntry({
     tenantId,
     cashAccountId: data.cashAccountId || balanceInfo.accountId,
     type: isGain ? 'IN' : 'OUT',
@@ -342,4 +296,11 @@ export async function adjustCashBalance(data: {
     description: desc,
     transactionDate: data.date
   });
+
+  return {
+    success: res.success,
+    message: res.success ? 'Physical cash count reconciled successfully' : undefined,
+    error: res.error,
+    data: res.data
+  };
 }

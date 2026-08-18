@@ -9,8 +9,32 @@
     "server": "tsx watch server/index.ts",
     "electron:dev": "electron .",
     "build": "tsc && vite build",
+    "build:exe": "npm run build && electron-builder --win",
     "lint": "tsc --noEmit",
     "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.vyapar.app",
+    "productName": "Vyapar POS Software",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "server/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "@types/pg": "^8.21.0",
@@ -39,6 +63,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "electron": "^43.3.0",
+    "electron-builder": "^26.15.3",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.12",
     "typescript": "^5.5.3",

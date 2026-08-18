@@ -33,6 +33,7 @@ import { CashInHandScreen } from './components/CashBank/CashInHandScreen';
 import { Invoice, BusinessDetails, Party } from './types';
 import { triggerThermalPrint } from './services/printer';
 import {
+  checkServerHealth,
   fetchServerItems,
   fetchServerParties,
   fetchServerInvoices,
@@ -133,6 +134,42 @@ export function App() {
             localStorage.setItem('vyapar_current_tenant', activeComp.tenantId);
           }
         }
+      } else {
+        const localSaved = getInitialBusiness();
+        const defaultTenant = localSaved.tenantId || currentTenantId || 'default-tenant';
+        const defaultProfile: BusinessDetails = {
+          ...localSaved,
+          tenantId: defaultTenant
+        };
+        setBusinessDetails(defaultProfile);
+        setCompanies([defaultProfile]);
+        if (!currentTenantId) {
+          setCurrentTenantId(defaultTenant);
+          localStorage.setItem('vyapar_current_tenant', defaultTenant);
+        }
+        try {
+          await db.companyProfiles.put({
+            tenantId: defaultTenant,
+            name: defaultProfile.name,
+            phone: defaultProfile.phone,
+            address: defaultProfile.address,
+            gstin: defaultProfile.gstin,
+            businessType: defaultProfile.businessType || 'Retail',
+            email: defaultProfile.email,
+            logoUrl: defaultProfile.logoUrl,
+            signatureUrl: defaultProfile.signatureUrl,
+            updatedAt: new Date().toISOString()
+          } as any);
+        } catch { }
+      }
+
+      setIsDbLoaded(true);
+
+      // 2. Fast health check: if backend server is offline, skip network calls to prevent UI delays
+      const isOnline = await checkServerHealth(1500);
+      if (!isOnline) {
+        console.warn('Backend server offline or unreachable. Operating in 100% local Dexie offline mode.');
+        return;
       }
 
       let activeTenantId = currentTenantId;
@@ -219,20 +256,36 @@ export function App() {
           }
         }
 
-        // Fetch live catalog, parties, and invoices for activeTenantId from PostgreSQL API
-        const serverItems = await fetchServerItems(activeTenantId);
-        const serverParties = await fetchServerParties(activeTenantId);
-        const serverInvoices = await fetchServerInvoices(activeTenantId);
-        const serverAccounts = await fetchServerLedgerAccounts(activeTenantId);
-        const serverJournals = await fetchServerJournalEntries(activeTenantId);
-        const serverEstimates = await fetchServerEstimates(activeTenantId);
-        const serverPaymentsIn = await fetchServerPaymentsIn(activeTenantId);
-        const serverPOs = await fetchServerPurchaseOrders(activeTenantId);
-        const serverPBills = await fetchServerPurchaseBills(activeTenantId);
-        const serverPaymentsOut = await fetchServerPaymentsOut(activeTenantId);
-        const serverExpenses = await fetchServerExpenses(activeTenantId);
-        const serverReturns = await fetchServerPurchaseReturns(activeTenantId);
-        const serverSaleReturns = await fetchServerSaleReturns(activeTenantId);
+        // Fetch live catalog, parties, and invoices for activeTenantId from PostgreSQL API concurrently
+        const [
+          serverItems,
+          serverParties,
+          serverInvoices,
+          serverAccounts,
+          serverJournals,
+          serverEstimates,
+          serverPaymentsIn,
+          serverPOs,
+          serverPBills,
+          serverPaymentsOut,
+          serverExpenses,
+          serverReturns,
+          serverSaleReturns
+        ] = await Promise.all([
+          fetchServerItems(activeTenantId),
+          fetchServerParties(activeTenantId),
+          fetchServerInvoices(activeTenantId),
+          fetchServerLedgerAccounts(activeTenantId),
+          fetchServerJournalEntries(activeTenantId),
+          fetchServerEstimates(activeTenantId),
+          fetchServerPaymentsIn(activeTenantId),
+          fetchServerPurchaseOrders(activeTenantId),
+          fetchServerPurchaseBills(activeTenantId),
+          fetchServerPaymentsOut(activeTenantId),
+          fetchServerExpenses(activeTenantId),
+          fetchServerPurchaseReturns(activeTenantId),
+          fetchServerSaleReturns(activeTenantId)
+        ]);
 
         if (serverItems && serverItems.length > 0) {
           for (const sItem of serverItems) {
@@ -491,47 +544,8 @@ export function App() {
           }
         }
       } catch (err) {
-        console.warn('Backend server offline or unreachable. Operating in Dexie local offline mode.', err);
-        // Fallback to reading company profiles from Dexie IndexedDB or localStorage
-        const dexieProfiles = await db.companyProfiles.toArray();
-        if (dexieProfiles && dexieProfiles.length > 0) {
-          const mappedDexie = dexieProfiles.map(c => ({
-            tenantId: c.tenantId || 'default-tenant',
-            name: c.name || 'My Store',
-            phone: c.phone || '+92 300 xxxxxxx',
-            address: c.address || '',
-            gstin: c.gstin || 'NTN: 7654321-0',
-            state: 'Punjab, Pakistan',
-            tagline: 'Quality Products at Everyday Low Prices',
-            email: c.email || '',
-            businessType: c.businessType || 'Retail',
-            logoUrl: c.logoUrl || null,
-            signatureUrl: c.signatureUrl || null
-          }));
-          setCompanies(mappedDexie);
-          const activeDexieComp = mappedDexie.find(c => (c.tenantId || 'default-tenant') === currentTenantId) || mappedDexie[0];
-          setBusinessDetails(activeDexieComp);
-        } else {
-          const localSaved = getInitialBusiness();
-          setBusinessDetails(localSaved);
-          setCompanies([localSaved]);
-          // Seed into local Dexie companyProfiles table
-          await db.companyProfiles.put({
-            tenantId: localSaved.tenantId || currentTenantId,
-            name: localSaved.name,
-            phone: localSaved.phone,
-            address: localSaved.address,
-            gstin: localSaved.gstin,
-            businessType: localSaved.businessType || 'Retail',
-            email: localSaved.email,
-            logoUrl: localSaved.logoUrl,
-            signatureUrl: localSaved.signatureUrl,
-            updatedAt: new Date().toISOString()
-          } as any);
-        }
+        console.warn('Error during cloud database sync:', err);
       }
-
-      setIsDbLoaded(true);
     }
 
     syncPostgresToClient();
@@ -644,6 +658,15 @@ export function App() {
       state: 'Punjab, Pakistan',
       tagline: 'Quality Products at Everyday Low Prices'
     };
+
+    try {
+      const existing = await db.companyProfiles.where('tenantId').equals(newTenantId).first();
+      if (existing && existing.id) {
+        await db.companyProfiles.update(existing.id, newCompObj as any);
+      } else {
+        await db.companyProfiles.add(newCompObj as any);
+      }
+    } catch {}
 
     setCompanies(prev => [...prev, newCompObj]);
     handleSelectCompany(newTenantId);
