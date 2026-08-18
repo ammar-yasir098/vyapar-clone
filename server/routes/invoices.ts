@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { Op } from 'sequelize';
-import { Invoice, InvoiceItem, Item, Party, JournalEntry, isDbConnected, sequelize } from '../db/sequelize.js';
+import { Invoice, InvoiceItem, Item, Party, JournalEntry, CashAccount, CashTransaction, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const invoicesRouter = Router();
 
@@ -202,6 +202,27 @@ invoicesRouter.post('/', async (req: Request, res: Response) => {
           },
           { transaction: t }
         );
+
+        // 6. Post Cash Inflow Entry if Cash Payment Received
+        if (paymentMethod === 'CASH' && safeReceivedAmount > 0) {
+          let cAccount = await CashAccount.findOne({ where: { tenantId }, transaction: t });
+          if (!cAccount) {
+            cAccount = await CashAccount.create({ tenantId, name: 'Main Cash Drawer', openingBalance: 0 }, { transaction: t });
+          }
+          await CashTransaction.create(
+            {
+              cashAccountId: (cAccount as any).id,
+              tenantId,
+              type: 'IN',
+              amount: safeReceivedAmount,
+              source: 'POS_SALE',
+              referenceId: invoiceNumber,
+              description: `Cash payment received for Sales Invoice ${invoiceNumber} (${partyName})`,
+              transactionDate: invoiceDate
+            },
+            { transaction: t }
+          );
+        }
 
         await t.commit();
 

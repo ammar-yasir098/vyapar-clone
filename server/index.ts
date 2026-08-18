@@ -16,6 +16,7 @@ import { purchaseOrdersRouter } from './routes/purchaseOrders.js';
 import { expensesRouter } from './routes/expenses.js';
 import { purchaseReturnsRouter } from './routes/purchaseReturns.js';
 import { saleReturnsRouter } from './routes/saleReturns.js';
+import { cashRouter } from './routes/cash.js';
 
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -51,6 +52,7 @@ app.use('/api/v1/purchase-orders', purchaseOrdersRouter);
 app.use('/api/v1/expenses', expensesRouter);
 app.use('/api/v1/purchase-returns', purchaseReturnsRouter);
 app.use('/api/v1/sale-returns', saleReturnsRouter);
+app.use('/api/v1/cash', cashRouter);
 
 // Root Status
 app.get('/', (req: Request, res: Response) => {

@@ -405,6 +405,42 @@ export interface SaleReturn {
   updatedAt?: string;
 }
 
+export type CashTransactionSource =
+  | 'POS_SALE'
+  | 'SALE_INVOICE'
+  | 'PAYMENT_IN'
+  | 'PURCHASE_BILL'
+  | 'PAYMENT_OUT'
+  | 'EXPENSE'
+  | 'BANK_DEPOSIT'
+  | 'BANK_WITHDRAWAL'
+  | 'SALE_RETURN_REFUND'
+  | 'PURCHASE_RETURN_REFUND'
+  | 'MANUAL_ADJUSTMENT';
+
+export interface CashAccount {
+  id?: number | string;
+  tenantId?: string;
+  name: string;
+  openingBalance: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CashTransaction {
+  id?: number | string;
+  cashAccountId?: number | string;
+  tenantId?: string;
+  type: 'IN' | 'OUT';
+  amount: number;
+  source: CashTransactionSource;
+  referenceId?: string;
+  description?: string;
+  transactionDate?: string;
+  createdAt?: string;
+  runningBalance?: number;
+}
+
 
 
 

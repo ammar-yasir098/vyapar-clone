@@ -706,6 +706,56 @@ export async function seedServerLedgerAccounts(tenantId: string = 'default-tenan
   }
 }
 
+// 21. CashAccount Model
+export class CashAccount extends Model {
+  declare id: number;
+  declare tenantId: string;
+  declare name: string;
+  declare openingBalance: number;
+  declare createdAt: Date;
+  declare updatedAt: Date;
+}
+CashAccount.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
+    name: { type: DataTypes.STRING, defaultValue: 'Main Cash Drawer' },
+    openingBalance: { type: DataTypes.DECIMAL(15, 2), defaultValue: 0.00, field: 'opening_balance' }
+  },
+  { sequelize, modelName: 'CashAccount', tableName: 'cash_accounts', timestamps: true }
+);
+
+// 22. CashTransaction Model
+export class CashTransaction extends Model {
+  declare id: number;
+  declare cashAccountId: number;
+  declare tenantId: string;
+  declare type: 'IN' | 'OUT';
+  declare amount: number;
+  declare source: string;
+  declare referenceId: string;
+  declare description: string;
+  declare transactionDate: string;
+  declare createdAt: Date;
+}
+CashTransaction.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    cashAccountId: { type: DataTypes.INTEGER, allowNull: false, field: 'cash_account_id' },
+    tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
+    type: { type: DataTypes.STRING(10), allowNull: false },
+    amount: { type: DataTypes.DECIMAL(15, 2), allowNull: false },
+    source: { type: DataTypes.STRING(50), allowNull: false },
+    referenceId: { type: DataTypes.STRING(100), allowNull: true, field: 'reference_id' },
+    description: { type: DataTypes.TEXT, allowNull: true },
+    transactionDate: { type: DataTypes.DATE, defaultValue: DataTypes.NOW, field: 'transaction_date' }
+  },
+  { sequelize, modelName: 'CashTransaction', tableName: 'cash_transactions', timestamps: true }
+);
+
+CashTransaction.belongsTo(CashAccount, { foreignKey: 'cashAccountId', as: 'cashAccount' });
+CashAccount.hasMany(CashTransaction, { foreignKey: 'cashAccountId', as: 'transactions' });
+
 /**
  * Bootstrap database creation and sync Sequelize ORM models
  */

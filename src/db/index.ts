@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { Item, Party, Invoice, SyncJournal, BusinessDetails, ItemBatch, LedgerAccount, JournalEntry, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock, PurchaseOrder, PurchaseBill, PaymentOut, Expense, PurchaseReturn, SaleReturn } from '../types';
+import { Item, Party, Invoice, SyncJournal, BusinessDetails, ItemBatch, LedgerAccount, JournalEntry, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock, PurchaseOrder, PurchaseBill, PaymentOut, Expense, PurchaseReturn, SaleReturn, CashAccount, CashTransaction } from '../types';
 
 export class VyaparDatabase extends Dexie {
   items!: Table<Item, number>;
@@ -19,11 +19,13 @@ export class VyaparDatabase extends Dexie {
   expenses!: Table<Expense, number>;
   purchaseReturns!: Table<PurchaseReturn, number>;
   saleReturns!: Table<SaleReturn, number>;
+  cashAccounts!: Table<CashAccount, number>;
+  cashTransactions!: Table<CashTransaction, number>;
 
   constructor() {
     super('VyaparOfflineDB');
     
-    this.version(13).stores({
+    this.version(14).stores({
       items: '++id, skuCode, barcode, name, currentStock, tenantId',
       parties: '++id, name, phone, type, tenantId',
       invoices: '++id, invoiceId, invoiceNumber, invoiceDate, paymentStatus, partyId, syncStatus, tenantId',
@@ -40,7 +42,9 @@ export class VyaparDatabase extends Dexie {
       paymentOut: '++id, receiptNumber, partyId, paymentDate, tenantId',
       expenses: '++id, expenseNumber, categoryName, expenseDate, tenantId',
       purchaseReturns: '++id, returnId, debitNoteNumber, returnDate, supplierId, tenantId',
-      saleReturns: '++id, returnId, creditNoteNumber, returnDate, partyId, tenantId'
+      saleReturns: '++id, returnId, creditNoteNumber, returnDate, partyId, tenantId',
+      cashAccounts: '++id, name, tenantId',
+      cashTransactions: '++id, cashAccountId, type, source, transactionDate, tenantId'
     });
   }
 }
