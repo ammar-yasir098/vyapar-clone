@@ -18,6 +18,7 @@ import { PaymentOut, Party, PurchaseBill, BusinessDetails } from '../../types';
 import { db } from '../../db';
 import { createServerPaymentOut, deleteServerPaymentOut } from '../../services/api';
 import { syncManager } from '../../services/sync';
+import { recordCashEntry } from '../../services/cash';
 import { useToast } from '../Common/ToastContext';
 
 interface PaymentOutScreenProps {
@@ -122,6 +123,19 @@ export const PaymentOutScreen: React.FC<PaymentOutScreenProps> = ({
 
       // 1. Add to local Dexie IndexedDB
       const payId = await db.paymentOut.add(newPayment);
+
+      // Record Cash Outflow if paymentMethod is CASH
+      if (paymentMethod === 'CASH' && amount > 0) {
+        await recordCashEntry({
+          tenantId: activeTenantId,
+          type: 'OUT',
+          amount,
+          source: 'PAYMENT_OUT',
+          referenceId: receiptNumber,
+          description: `Payment-Out paid to ${selectedParty.name}: ${notes || 'Cash Voucher'}`,
+          transactionDate: paymentDate
+        });
+      }
 
       // 2. Reduce Supplier Payable Balance in parties table (supplier.currentBalance -= amount)
       const currentBal = getPartyDueBalance(selectedParty);

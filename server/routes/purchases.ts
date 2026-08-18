@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { Op } from 'sequelize';
-import { Item, Party, JournalEntry, PurchaseBill, PurchaseBillItem, isDbConnected, sequelize } from '../db/sequelize.js';
+import { Item, Party, JournalEntry, PurchaseBill, PurchaseBillItem, CashAccount, CashTransaction, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const purchasesRouter = Router();
 
@@ -55,6 +55,8 @@ purchasesRouter.post('/', async (req: Request, res: Response) => {
       supplierGstin,
       notes = '',
       items = [],
+      paymentMethod = 'CASH',
+      paidAmount,
       tenantId = 'default-tenant'
     } = req.body;
 
@@ -134,7 +136,7 @@ purchasesRouter.post('/', async (req: Request, res: Response) => {
           }
         }
 
-        // 4. Insert Journal Entry in journal_entries table
+        // 5. Post Accounting Journal Entry
         await JournalEntry.create({
           tenantId,
           entryNumber: `JE-PUR-${Date.now().toString().slice(-4)}`,

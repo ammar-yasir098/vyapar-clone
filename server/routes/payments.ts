@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { Op } from 'sequelize';
-import { PaymentIn, PaymentOut, Party, isDbConnected } from '../db/sequelize.js';
+import { PaymentIn, PaymentOut, Party, CashAccount, CashTransaction, isDbConnected } from '../db/sequelize.js';
 
 export const paymentsRouter = Router();
 
@@ -79,6 +79,24 @@ paymentsRouter.post('/in', async (req: Request, res: Response) => {
           const newBal = Math.max(0, curBal - Number(amount));
           await party.update({ currentBalance: newBal });
         }
+      }
+
+      // Post Cash Inflow Entry if Payment-In is in CASH
+      if (paymentMethod === 'CASH' && Number(amount) > 0) {
+        let cAccount = await CashAccount.findOne({ where: { tenantId } });
+        if (!cAccount) {
+          cAccount = await CashAccount.create({ tenantId, name: 'Main Cash Drawer', openingBalance: 0 });
+        }
+        await CashTransaction.create({
+          cashAccountId: (cAccount as any).id,
+          tenantId,
+          type: 'IN',
+          amount: Number(amount),
+          source: 'PAYMENT_IN',
+          referenceId: recNum,
+          description: `Payment-In received from ${partyName || 'Customer'}: ${notes || 'Cash Receipt'}`,
+          transactionDate: paymentDate || new Date().toISOString()
+        });
       }
 
       return res.status(201).json({
@@ -187,6 +205,24 @@ paymentsRouter.post('/out', async (req: Request, res: Response) => {
           const newBal = Math.max(0, curBal - Number(amount));
           await party.update({ currentBalance: newBal });
         }
+      }
+
+      // Post Cash Outflow Entry if Payment-Out is in CASH
+      if (paymentMethod === 'CASH' && Number(amount) > 0) {
+        let cAccount = await CashAccount.findOne({ where: { tenantId } });
+        if (!cAccount) {
+          cAccount = await CashAccount.create({ tenantId, name: 'Main Cash Drawer', openingBalance: 0 });
+        }
+        await CashTransaction.create({
+          cashAccountId: (cAccount as any).id,
+          tenantId,
+          type: 'OUT',
+          amount: Number(amount),
+          source: 'PAYMENT_OUT',
+          referenceId: recNum,
+          description: `Payment-Out paid to ${partyName || 'Supplier'}: ${notes || 'Cash Voucher'}`,
+          transactionDate: paymentDate || new Date().toISOString()
+        });
       }
 
       return res.status(201).json({

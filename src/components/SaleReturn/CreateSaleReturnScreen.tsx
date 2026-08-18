@@ -13,6 +13,7 @@ import { Party, Item, SaleReturn, SaleReturnItem, BusinessDetails } from '../../
 import { db } from '../../db';
 import { createServerSaleReturn } from '../../services/api';
 import { syncManager } from '../../services/sync';
+import { recordCashEntry } from '../../services/cash';
 import { useToast } from '../Common/ToastContext';
 
 interface CreateSaleReturnScreenProps {
@@ -164,6 +165,19 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
 
       // 1. Save locally to Dexie IndexedDB
       await db.saleReturns.add(newReturn);
+
+      // Record Cash Outflow Refund if grandTotal > 0
+      if (grandTotal > 0) {
+        await recordCashEntry({
+          tenantId: activeTenant,
+          type: 'OUT',
+          amount: grandTotal,
+          source: 'SALE_RETURN_REFUND',
+          referenceId: creditNoteNumber,
+          description: `Cash refund for Sale Return ${creditNoteNumber} (${partyName})`,
+          transactionDate: returnDate
+        });
+      }
 
       // 2. Increase Item Stock Levels (item.currentStock += returnedQty)
       for (const item of validItems) {

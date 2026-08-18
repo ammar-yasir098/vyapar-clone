@@ -18,6 +18,7 @@ import { db } from '../../db';
 import { createServerPaymentIn, recordServerPartyPayment } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { postPaymentJournalEntry, syncLedgerAccountBalances } from '../../services/ledger';
+import { recordCashEntry } from '../../services/cash';
 import { useToast } from '../Common/ToastContext';
 
 interface PaymentInScreenProps {
@@ -127,6 +128,19 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
 
       // 1. Save to local Dexie IndexedDB (paymentIn table)
       await db.paymentIn.add(newPayment);
+
+      // Record Cash Inflow if paymentMethod is CASH
+      if (paymentMethod === 'CASH' && amount > 0) {
+        await recordCashEntry({
+          tenantId: activeTenantId,
+          type: 'IN',
+          amount,
+          source: 'PAYMENT_IN',
+          referenceId: receiptNum,
+          description: `Payment-In received from ${party.name}: ${notes || 'Cash Receipt'}`,
+          transactionDate: paymentDate
+        });
+      }
 
       // 2. Update Customer Balance in Dexie & Server
       if (party.id) {

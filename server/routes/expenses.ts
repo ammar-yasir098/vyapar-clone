@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { Op } from 'sequelize';
-import { Expense, JournalEntry, isDbConnected, sequelize } from '../db/sequelize.js';
+import { Expense, JournalEntry, CashAccount, CashTransaction, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const expensesRouter = Router();
 
@@ -83,6 +83,24 @@ expensesRouter.post('/', async (req: Request, res: Response) => {
           totalDebit: Number(amount),
           totalCredit: Number(amount)
         }, { transaction: t });
+
+        // Post Cash Outflow Entry if Expense is paid in CASH
+        if (paymentMode === 'CASH' && Number(amount) > 0) {
+          let cAccount = await CashAccount.findOne({ where: { tenantId }, transaction: t });
+          if (!cAccount) {
+            cAccount = await CashAccount.create({ tenantId, name: 'Main Cash Drawer', openingBalance: 0 }, { transaction: t });
+          }
+          await CashTransaction.create({
+            cashAccountId: (cAccount as any).id,
+            tenantId,
+            type: 'OUT',
+            amount: Number(amount),
+            source: 'EXPENSE',
+            referenceId: expNum,
+            description: `Counter Expense (${categoryName}): ${notes || expNum}`,
+            transactionDate: expenseDate || new Date().toISOString()
+          }, { transaction: t });
+        }
 
         await t.commit();
 

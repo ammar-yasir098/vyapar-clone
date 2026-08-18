@@ -20,7 +20,9 @@ import {
   PurchaseReturn,
   PurchaseReturnItem,
   SaleReturn,
-  SaleReturnItem
+  SaleReturnItem,
+  CashAccount,
+  CashTransaction
 } from '../db/sequelize.js';
 
 export const syncRouter = Router();
@@ -33,7 +35,7 @@ syncRouter.post('/reset', async (req: Request, res: Response) => {
     if (isDbConnected()) {
       try {
         await sequelize.query(
-          'TRUNCATE TABLE invoice_items, invoices, items, parties, journal_entries, estimates, estimate_items, payment_in, purchase_order_items, purchase_orders, purchase_bill_items, purchase_bills, payment_out, expenses, purchase_return_items, purchase_returns, sale_return_items, sale_returns RESTART IDENTITY CASCADE;'
+          'TRUNCATE TABLE invoice_items, invoices, items, parties, journal_entries, estimates, estimate_items, payment_in, purchase_order_items, purchase_orders, purchase_bill_items, purchase_bills, payment_out, expenses, purchase_return_items, purchase_returns, sale_return_items, sale_returns, cash_transactions, cash_accounts RESTART IDENTITY CASCADE;'
         );
       } catch (truncateErr) {
         console.warn('Truncate SQL warning, using Sequelize destroy fallback:', truncateErr);
@@ -55,6 +57,8 @@ syncRouter.post('/reset', async (req: Request, res: Response) => {
         await PurchaseReturn.destroy({ where: {} }).catch(() => {});
         await SaleReturnItem.destroy({ where: {} }).catch(() => {});
         await SaleReturn.destroy({ where: {} }).catch(() => {});
+        await CashTransaction.destroy({ where: {} }).catch(() => {});
+        await CashAccount.destroy({ where: {} }).catch(() => {});
       }
 
       await sequelize.query('UPDATE ledger_accounts SET balance = 0.0;').catch(() => {});
@@ -558,6 +562,50 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
                   totalAmount: item.totalAmount || ((item.returnQuantity || item.quantity || 1) * (item.unitPrice || item.price || 0))
                 });
               }
+            }
+          }
+        } else if (entityType === 'CASH_ACCOUNT') {
+          if (mutationType === 'DELETE' && payload.id) {
+            await CashAccount.destroy({ where: { id: payload.id } });
+          } else if (payload.name) {
+            let existing = payload.id ? await CashAccount.findByPk(payload.id) : null;
+            if (!existing) {
+              existing = await CashAccount.findOne({ where: { tenantId: tenantId || 'default-tenant' } });
+            }
+            const accData = {
+              tenantId: tenantId || 'default-tenant',
+              name: payload.name || 'Main Cash Drawer',
+              openingBalance: payload.openingBalance || 0
+            };
+            if (existing) {
+              await existing.update(accData);
+            } else {
+              await CashAccount.create(accData);
+            }
+          }
+        } else if (entityType === 'CASH_TRANSACTION') {
+          if (mutationType === 'DELETE' && payload.id) {
+            await CashTransaction.destroy({ where: { id: payload.id } });
+          } else if (payload.amount && payload.type) {
+            let cAcc = await CashAccount.findOne({ where: { tenantId: tenantId || 'default-tenant' } });
+            if (!cAcc) {
+              cAcc = await CashAccount.create({ tenantId: tenantId || 'default-tenant', name: 'Main Cash Drawer', openingBalance: 0 });
+            }
+            let existingTx = payload.referenceId ? await CashTransaction.findOne({ where: { referenceId: payload.referenceId } }) : null;
+            const txData = {
+              cashAccountId: (cAcc as any).id,
+              tenantId: tenantId || 'default-tenant',
+              type: payload.type,
+              amount: payload.amount,
+              source: payload.source || 'MANUAL_ADJUSTMENT',
+              referenceId: payload.referenceId || `TXN-${Date.now()}`,
+              description: payload.description || 'Synced Cash Transaction',
+              transactionDate: payload.transactionDate || new Date().toISOString()
+            };
+            if (existingTx) {
+              await existingTx.update(txData);
+            } else {
+              await CashTransaction.create(txData);
             }
           }
         }

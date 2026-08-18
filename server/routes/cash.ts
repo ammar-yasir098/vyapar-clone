@@ -13,9 +13,7 @@ const round2 = (val: any) => {
 // Helper: Ensure default Main Cash Drawer exists for tenant
 async function getOrCreateCashAccount(tId: string = 'default-tenant', transaction?: any) {
   let account = await CashAccount.findOne({
-    where: {
-      [Op.or]: [{ tenantId: tId }, { tenantId: 'default-tenant' }]
-    },
+    where: { tenantId: tId },
     transaction
   });
 
@@ -32,6 +30,53 @@ async function getOrCreateCashAccount(tId: string = 'default-tenant', transactio
   return account;
 }
 
+// Helper: Deduplicate cash transactions by referenceId or signature
+async function deduplicateCashTransactions(cId: number, transaction?: any) {
+  try {
+    const txs = await CashTransaction.findAll({
+      where: { cashAccountId: cId },
+      order: [['id', 'ASC']],
+      transaction
+    });
+
+    const seen = new Set<string>();
+    const toDeleteIds: number[] = [];
+
+    // Track payment-out amounts to eliminate redundant purchase bill cash entries
+    const payoutAmounts = new Set<number>();
+    for (const t of txs) {
+      if (t.get('source') === 'PAYMENT_OUT') {
+        payoutAmounts.add(round2(t.get('amount')));
+      }
+    }
+
+    for (const t of txs) {
+      const ref = t.get('referenceId');
+      const type = t.get('type');
+      const source = t.get('source');
+      const amount = round2(t.get('amount'));
+      const key = ref ? `${ref}-${type}` : `sig-${source}-${amount}-${t.get('description')}`;
+
+      if (source === 'PURCHASE_BILL' && payoutAmounts.has(amount)) {
+        toDeleteIds.push(t.get('id') as number);
+      } else if (seen.has(key)) {
+        toDeleteIds.push(t.get('id') as number);
+      } else {
+        seen.add(key);
+      }
+    }
+
+    if (toDeleteIds.length > 0) {
+      await CashTransaction.destroy({
+        where: { id: toDeleteIds },
+        transaction
+      });
+    }
+  } catch (err) {
+    console.error('Error deduplicating cash transactions:', err);
+  }
+}
+
 // GET /api/v1/cash/balance - Derived cash balance (Opening + IN - OUT)
 cashRouter.get('/balance', async (req: Request, res: Response) => {
   try {
@@ -45,6 +90,7 @@ cashRouter.get('/balance', async (req: Request, res: Response) => {
       }
 
       const cId = cashAcc.get('id') as number;
+      await deduplicateCashTransactions(cId);
       const openingBal = round2(cashAcc.get('openingBalance') || 0);
 
       const inSum = (await CashTransaction.sum('amount', {
@@ -90,6 +136,7 @@ cashRouter.get('/transactions', async (req: Request, res: Response) => {
     if (isDbConnected()) {
       const cashAcc = await getOrCreateCashAccount(tenantId);
       const cId = cashAcc.get('id') as number;
+      await deduplicateCashTransactions(cId);
       const openingBal = round2(cashAcc.get('openingBalance') || 0);
 
       const whereClause: any = { cashAccountId: cId };
@@ -154,6 +201,12 @@ cashRouter.get('/transactions', async (req: Request, res: Response) => {
       const filtered = sortedLatestFirst.filter(t => {
         if (type && type !== 'ALL' && t.type !== type) return false;
         if (source && source !== 'ALL' && t.source !== source) return false;
+        if (startDate && endDate) {
+          const txTime = new Date(t.transactionDate || t.createdAt || 0).getTime();
+          const sTime = new Date(String(startDate)).getTime();
+          const eTime = new Date(String(endDate)).setHours(23, 59, 59, 999);
+          if (isNaN(sTime) || isNaN(eTime) || txTime < sTime || txTime > eTime) return false;
+        }
         if (search && String(search).trim()) {
           const s = String(search).toLowerCase();
           const matchesDesc = (t.description || '').toLowerCase().includes(s);
@@ -302,12 +355,14 @@ cashRouter.post('/transfer-to-bank', async (req: Request, res: Response) => {
           await bankAccountLedger.update({ balance: round2(cur + safeAmt) }, { transaction: t });
         }
 
+        const validDateStr = (date && typeof date === 'string' ? date : new Date().toISOString()).split('T')[0];
+
         await JournalEntry.create(
           {
             tenantId,
             entryNumber: `JE-DEP-${Date.now().toString().slice(-4)}`,
             referenceId: refId,
-            transactionDate: date.split('T')[0],
+            transactionDate: validDateStr,
             description: txDesc,
             totalDebit: safeAmt,
             totalCredit: safeAmt
@@ -378,12 +433,14 @@ cashRouter.post('/transfer-from-bank', async (req: Request, res: Response) => {
           await bankAccountLedger.update({ balance: round2(cur - safeAmt) }, { transaction: t });
         }
 
+        const validDateStr = (date && typeof date === 'string' ? date : new Date().toISOString()).split('T')[0];
+
         await JournalEntry.create(
           {
             tenantId,
             entryNumber: `JE-WTH-${Date.now().toString().slice(-4)}`,
             referenceId: refId,
-            transactionDate: date.split('T')[0],
+            transactionDate: validDateStr,
             description: txDesc,
             totalDebit: safeAmt,
             totalCredit: safeAmt

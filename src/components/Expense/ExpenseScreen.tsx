@@ -16,6 +16,7 @@ import { Expense, BusinessDetails } from '../../types';
 import { db } from '../../db';
 import { createServerExpense, deleteServerExpense } from '../../services/api';
 import { syncManager } from '../../services/sync';
+import { recordCashEntry } from '../../services/cash';
 import { useToast } from '../Common/ToastContext';
 
 interface ExpenseScreenProps {
@@ -110,6 +111,19 @@ export const ExpenseScreen: React.FC<ExpenseScreenProps> = ({
 
       // 1. Add to local Dexie IndexedDB v11
       const expId = await db.expenses.add(newExpense);
+
+      // Record Cash Outflow if paymentMode is CASH
+      if (paymentMode === 'CASH' && amount > 0) {
+        await recordCashEntry({
+          tenantId: activeTenantId,
+          type: 'OUT',
+          amount,
+          source: 'EXPENSE',
+          referenceId: expenseNumber,
+          description: `Counter Expense (${finalCategory}): ${notes || expenseNumber}`,
+          transactionDate: expenseDate
+        });
+      }
 
       // 2. Deduct from Cash/Bank Account Balance in db.ledgerAccounts
       const accounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === activeTenantId).toArray();

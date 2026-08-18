@@ -4,6 +4,7 @@ import { Item, Party, BusinessDetails, PurchaseReturnItem, PurchaseReturn } from
 import { db } from '../../db';
 import { createServerPurchaseReturn } from '../../services/api';
 import { syncManager } from '../../services/sync';
+import { recordCashEntry } from '../../services/cash';
 import { useToast } from '../Common/ToastContext';
 
 interface CreatePurchaseReturnScreenProps {
@@ -130,6 +131,19 @@ export const CreatePurchaseReturnScreen: React.FC<CreatePurchaseReturnScreenProp
 
       // 1. Add to local Dexie IndexedDB v12
       await db.purchaseReturns.add(newReturn);
+
+      // Record Cash Inflow Refund if totalReturnAmount > 0
+      if (totalReturnAmount > 0) {
+        await recordCashEntry({
+          tenantId: activeTenantId,
+          type: 'IN',
+          amount: totalReturnAmount,
+          source: 'PURCHASE_RETURN_REFUND',
+          referenceId: debitNoteNumber,
+          description: `Cash refund received for Purchase Return ${debitNoteNumber} (${selectedSupplier.name})`,
+          transactionDate: returnDate
+        });
+      }
 
       // 2. Reduce Stock in Dexie DB (item.currentStock -= returnQuantity)
       for (const rItem of returnItems) {

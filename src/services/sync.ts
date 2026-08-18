@@ -274,6 +274,38 @@ class ClientSyncManager {
           }
         }
 
+        const localCashAccs = await db.cashAccounts.toArray();
+        for (const cAcc of localCashAccs) {
+          if (cAcc.id) {
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-cashacc-${cAcc.id}`,
+              clientSequence: Date.now(),
+              entityType: 'CASH_ACCOUNT',
+              entityId: String(cAcc.id),
+              mutationType: 'INSERT',
+              payload: JSON.stringify(cAcc),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          }
+        }
+
+        const localCashTxns = await db.cashTransactions.toArray();
+        for (const cTx of localCashTxns) {
+          if (cTx.id || cTx.referenceId) {
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-cashtx-${cTx.id || cTx.referenceId}`,
+              clientSequence: Date.now(),
+              entityType: 'CASH_TRANSACTION',
+              entityId: String(cTx.id || cTx.referenceId),
+              mutationType: 'INSERT',
+              payload: JSON.stringify(cTx),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          }
+        }
+
         // Re-fetch unsynced queue after auto-populating
         unsynced = await db.syncJournal.filter(record => !record.synced).toArray();
       }

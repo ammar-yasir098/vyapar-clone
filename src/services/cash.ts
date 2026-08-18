@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { CashAccount, CashTransaction, CashTransactionSource } from '../types';
 import { roundCurrency } from '../utils/edgeCaseHelpers';
+import { syncManager } from './sync';
 
 const API_BASE_URL = 'http://localhost:5000/api/v1/cash';
 
@@ -35,9 +36,50 @@ export async function getOrCreateLocalCashAccount(tenantId: string = 'default-te
 }
 
 /**
+ * Cleans up any duplicate cash transactions in local Dexie IndexedDB
+ */
+export async function deduplicateLocalCashTransactions() {
+  try {
+    const txns = await db.cashTransactions.toArray();
+    const seen = new Set<string>();
+    const toDeleteIds: number[] = [];
+
+    const payoutAmounts = new Set<number>();
+    for (const t of txns) {
+      if (t.source === 'PAYMENT_OUT') {
+        payoutAmounts.add(roundCurrency(t.amount));
+      }
+    }
+
+    for (const t of txns) {
+      const ref = t.referenceId;
+      const type = t.type;
+      const source = t.source;
+      const amount = roundCurrency(t.amount);
+      const key = ref ? `${ref}-${type}` : `sig-${source}-${amount}-${t.description}`;
+
+      if (source === 'PURCHASE_BILL' && payoutAmounts.has(amount) && t.id) {
+        toDeleteIds.push(Number(t.id));
+      } else if (seen.has(key) && t.id) {
+        toDeleteIds.push(Number(t.id));
+      } else {
+        seen.add(key);
+      }
+    }
+
+    if (toDeleteIds.length > 0) {
+      await db.cashTransactions.bulkDelete(toDeleteIds);
+    }
+  } catch (err) {
+    console.error('Error deduplicating local cash transactions:', err);
+  }
+}
+
+/**
  * Calculates current cash balance dynamically (Opening + IN - OUT)
  */
 export async function fetchCashBalance(tenantId: string = 'default-tenant') {
+  await deduplicateLocalCashTransactions();
   try {
     // Try server API first
     const res = await fetchWithTimeout(`${API_BASE_URL}/balance?tenantId=${encodeURIComponent(tenantId)}`);
@@ -135,6 +177,12 @@ export async function fetchCashTransactions(tenantId: string = 'default-tenant',
   const filtered = latestFirst.filter(t => {
     if (filters.type && filters.type !== 'ALL' && t.type !== filters.type) return false;
     if (filters.source && t.source !== filters.source) return false;
+    if (filters.startDate && filters.endDate) {
+      const txTime = new Date(t.transactionDate || t.createdAt || 0).getTime();
+      const sTime = new Date(String(filters.startDate)).getTime();
+      const eTime = new Date(String(filters.endDate)).setHours(23, 59, 59, 999);
+      if (isNaN(sTime) || isNaN(eTime) || txTime < sTime || txTime > eTime) return false;
+    }
     if (filters.search && String(filters.search).trim()) {
       const s = String(filters.search).toLowerCase();
       const matchDesc = (t.description || '').toLowerCase().includes(s);
@@ -188,7 +236,10 @@ export async function recordCashEntry(data: {
   };
 
   // Save into Dexie local IndexedDB
-  await db.cashTransactions.add(txRecord);
+  const txId = await db.cashTransactions.add(txRecord);
+
+  // Queue mutation for Cloud Sync
+  await syncManager.logMutation('CASH_TRANSACTION', String(txRecord.referenceId || txId), 'INSERT', txRecord);
 
   // Try pushing to cloud backend server
   try {
