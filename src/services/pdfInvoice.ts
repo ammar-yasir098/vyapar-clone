@@ -1,4 +1,5 @@
 import { Invoice, BusinessDetails } from '../types';
+import { escapeHtml } from '../utils/edgeCaseHelpers';
 
 /**
  * Generates direct WhatsApp click-to-send link with pre-filled invoice summary message.
@@ -33,7 +34,7 @@ export function printA4TaxInvoice(invoice: Invoice, business: BusinessDetails, f
     <!DOCTYPE html>
     <html>
     <head>
-      <title>SALES TAX INVOICE - ${invoice.invoiceNumber}</title>
+      <title>SALES TAX INVOICE - ${escapeHtml(invoice.invoiceNumber)}</title>
       <style>
         @page { size: ${format}; margin: 15mm; }
         body {
@@ -65,15 +66,15 @@ export function printA4TaxInvoice(invoice: Invoice, business: BusinessDetails, f
       <table class="header-table">
         <tr>
           <td>
-            <div class="title">${business.name}</div>
-            <div>${business.address}</div>
-            <div>Phone: ${business.phone} | ${business.state}</div>
-            <div class="sub-title">${business.gstin}</div>
+            <div class="title">${escapeHtml(business.name)}</div>
+            <div>${escapeHtml(business.address)}</div>
+            <div>Phone: ${escapeHtml(business.phone)} | ${escapeHtml(business.state)}</div>
+            <div class="sub-title">${escapeHtml(business.gstin)}</div>
           </td>
           <td class="text-right" style="vertical-align: top;">
             <div style="font-size: 20px; font-weight: bold; color: #2563eb;">TAX INVOICE</div>
-            <div class="font-mono"><strong>Invoice #:</strong> ${invoice.invoiceNumber}</div>
-            <div class="font-mono"><strong>Date:</strong> ${invoice.invoiceDate}</div>
+            <div class="font-mono"><strong>Invoice #:</strong> ${escapeHtml(invoice.invoiceNumber)}</div>
+            <div class="font-mono"><strong>Date:</strong> ${escapeHtml(invoice.invoiceDate)}</div>
           </td>
         </tr>
       </table>
@@ -81,14 +82,14 @@ export function printA4TaxInvoice(invoice: Invoice, business: BusinessDetails, f
       <div class="meta-box grid-2">
         <div>
           <div style="font-[10px] text-transform: uppercase; color: #64748b; font-weight: bold;">Billed To (Customer):</div>
-          <div style="font-size: 14px; font-weight: bold; color: #0f172a;">${invoice.partyName}</div>
-          ${invoice.partyPhone ? `<div>Phone: ${invoice.partyPhone}</div>` : ''}
-          ${invoice.partyGstin ? `<div>NTN / STRN / CNIC: ${invoice.partyGstin}</div>` : ''}
+          <div style="font-size: 14px; font-weight: bold; color: #0f172a;">${escapeHtml(invoice.partyName)}</div>
+          ${invoice.partyPhone ? `<div>Phone: ${escapeHtml(invoice.partyPhone)}</div>` : ''}
+          ${invoice.partyGstin ? `<div>NTN / STRN / CNIC: ${escapeHtml(invoice.partyGstin)}</div>` : ''}
         </div>
         <div class="text-right">
           <div style="font-size: 11px; color: #64748b; font-weight: bold;">Payment Details:</div>
-          <div>Status: <strong style="color: ${invoice.paymentStatus === 'PAID' ? '#059669' : '#d97706'};">${invoice.paymentStatus}</strong></div>
-          <div>Method: <strong>${invoice.paymentMethod}</strong></div>
+          <div>Status: <strong style="color: ${invoice.paymentStatus === 'PAID' ? '#059669' : '#d97706'};">${escapeHtml(invoice.paymentStatus)}</strong></div>
+          <div>Method: <strong>${escapeHtml(invoice.paymentMethod)}</strong></div>
         </div>
       </div>
 
@@ -112,11 +113,11 @@ export function printA4TaxInvoice(invoice: Invoice, business: BusinessDetails, f
             <tr>
               <td class="font-mono">${i + 1}</td>
               <td>
-                <div class="bold">${item.itemName || 'Item'}</div>
-                ${item.batchNumber ? `<div style="font-size: 10px; color: #64748b;">Batch: ${item.batchNumber} (Exp: ${item.expiryDate || 'N/A'})</div>` : ''}
+                <div class="bold">${escapeHtml(item.itemName || 'Item')}</div>
+                ${item.batchNumber ? `<div style="font-size: 10px; color: #64748b;">Batch: ${escapeHtml(item.batchNumber)} (Exp: ${escapeHtml(item.expiryDate || 'N/A')})</div>` : ''}
               </td>
-              <td class="font-mono">${item.hsnSacCode || '-'}</td>
-              <td class="text-right font-mono">${Number(item.quantity || 0)} ${item.unitType || 'PCS'}</td>
+              <td class="font-mono">${escapeHtml(item.hsnSacCode || '-')}</td>
+              <td class="text-right font-mono">${Number(item.quantity || 0)} ${escapeHtml(item.unitType || 'PCS')}</td>
               <td class="text-right font-mono">Rs ${Number(item.unitPrice || 0).toFixed(2)}</td>
               <td class="text-right font-mono">${Number(item.cgstRate || 0) + Number(item.sgstRate || 0)}%</td>
               <td class="text-right font-mono">Rs ${Number(item.taxAmount || 0).toFixed(2)}</td>

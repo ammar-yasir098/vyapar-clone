@@ -30,6 +30,7 @@ export async function generateIRNHash(invoice: Invoice, gstin: string): Promise<
  * Generates official NIC GST E-Invoice JSON payload for bulk portal upload.
  */
 export function exportEInvoiceNICJSON(invoice: Invoice, business: BusinessDetails) {
+  const safeBus = business || {};
   const invNum = invoice?.invoiceNumber || 'INV-001';
   const invDateStr = invoice?.invoiceDate ? String(invoice.invoiceDate) : new Date().toISOString().split('T')[0];
   const formattedDate = invDateStr.includes('-') ? invDateStr.split('-').reverse().join('/') : invDateStr;
@@ -50,11 +51,11 @@ export function exportEInvoiceNICJSON(invoice: Invoice, business: BusinessDetail
       Dt: formattedDate
     },
     SellerDetails: {
-      Gstin: business.gstin || 'NTN: 7654321-0',
-      LglName: business.name || 'Company Name',
-      TrdName: business.name || 'Company Name',
-      Addr1: business.address || 'Address',
-      Loc: business.state || 'Punjab',
+      Gstin: safeBus.gstin || 'NTN: 7654321-0',
+      LglName: safeBus.name || 'Company Name',
+      TrdName: safeBus.name || 'Company Name',
+      Addr1: safeBus.address || 'Address',
+      Loc: safeBus.state || 'Punjab',
       Pin: 54000,
       Stcd: "PB"
     },
@@ -115,7 +116,15 @@ export function exportEInvoiceNICJSON(invoice: Invoice, business: BusinessDetail
 /**
  * Generates official E-Way Bill JSON payload for inter-state goods transport consignment (> Rs 50,000).
  */
-export function exportEWayBillJSON(invoice: Invoice, business: BusinessDetails, transporter: TransporterDetails) {
+export function exportEWayBillJSON(invoice: Invoice, business: BusinessDetails, transporter?: TransporterDetails) {
+  const safeBus = business || {};
+  const safeTrans = transporter || {
+    transporterId: 'TRANS-100',
+    transporterName: 'Local Transport',
+    vehicleNumber: 'AB-01-1234',
+    distanceKm: 100,
+    mode: 'ROAD'
+  };
   const invNum = invoice?.invoiceNumber || 'INV-001';
   const invDateStr = invoice?.invoiceDate ? String(invoice.invoiceDate) : new Date().toISOString().split('T')[0];
   const formattedDate = invDateStr.includes('-') ? invDateStr.split('-').reverse().join('/') : invDateStr;
@@ -127,10 +136,10 @@ export function exportEWayBillJSON(invoice: Invoice, business: BusinessDetails, 
     docType: "INV",
     docNo: invNum,
     docDate: formattedDate,
-    fromGstin: business.gstin || 'NTN: 7654321-0',
-    fromTrdName: business.name || 'Company Name',
-    fromAddr1: business.address || 'Address',
-    fromPlace: business.state || 'Punjab',
+    fromGstin: safeBus.gstin || 'NTN: 7654321-0',
+    fromTrdName: safeBus.name || 'Company Name',
+    fromAddr1: safeBus.address || 'Address',
+    fromPlace: safeBus.state || 'Punjab',
     fromPincode: 54000,
     actFromStateCode: "PB",
     fromStateCode: "PB",
@@ -146,12 +155,12 @@ export function exportEWayBillJSON(invoice: Invoice, business: BusinessDetails, 
     sgstValue: Number(invoice?.sgstTotal || 0),
     igstValue: Number(invoice?.igstTotal || 0),
     totInvValue: Number(invoice?.grandTotal || 0),
-    transporterId: transporter.transporterId,
-    transporterName: transporter.transporterName,
+    transporterId: safeTrans.transporterId || 'TRANS-100',
+    transporterName: safeTrans.transporterName || 'Local Transport',
     transDocNo: `TD-${Date.now().toString().slice(-6)}`,
-    transMode: transporter.mode === 'ROAD' ? "1" : "2",
-    transDistance: (transporter.distanceKm || 100).toString(),
-    vehicleNo: transporter.vehicleNumber || 'AB-01-1234',
+    transMode: safeTrans.mode === 'ROAD' ? "1" : "2",
+    transDistance: (safeTrans.distanceKm || 100).toString(),
+    vehicleNo: safeTrans.vehicleNumber || 'AB-01-1234',
     vehicleType: "R",
     itemList: itemsList.map(item => ({
       productName: item.itemName || 'Product',

@@ -39,13 +39,11 @@ export class ErrorBoundary extends Component<Props, State> {
             <button
               onClick={() => {
                 this.setState({ hasError: false, error: null });
-                window.location.hash = '#home';
-                window.location.reload();
               }}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition cursor-pointer"
             >
               <RefreshCw className="w-4 h-4" />
-              <span>Reload App</span>
+              <span>Try Again</span>
             </button>
             <button
               onClick={() => {
@@ -56,6 +54,15 @@ export class ErrorBoundary extends Component<Props, State> {
             >
               <Home className="w-4 h-4" />
               <span>Return Home</span>
+            </button>
+            <button
+              onClick={() => {
+                this.setState({ hasError: false, error: null });
+                window.location.reload();
+              }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600/80 hover:bg-red-700 text-white text-xs font-bold transition cursor-pointer"
+            >
+              <span>Reload Page</span>
             </button>
           </div>
         </div>

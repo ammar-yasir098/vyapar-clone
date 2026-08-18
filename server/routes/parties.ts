@@ -58,21 +58,25 @@ partiesRouter.post('/', async (req: Request, res: Response) => {
       address = ''
     } = req.body;
 
-    if (!name || !phone) {
+    const cleanName = String(name || '').trim();
+    const cleanPhone = String(phone || '').trim();
+    const safeOpeningBal = Math.round((Number(openingBalance) || 0) * 100) / 100;
+
+    if (!cleanName || !cleanPhone) {
       return res.status(400).json({ success: false, error: 'Party name and phone number are required' });
     }
 
     if (isDbConnected()) {
       const party = await Party.create({
         tenantId,
-        name,
-        phone,
+        name: cleanName,
+        phone: cleanPhone,
         type,
-        openingBalance,
+        openingBalance: safeOpeningBal,
         balanceType,
-        currentBalance: openingBalance,
-        gstin,
-        address
+        currentBalance: safeOpeningBal,
+        gstin: String(gstin || '').trim(),
+        address: String(address || '').trim()
       });
       return res.status(201).json({ success: true, data: party });
     }
@@ -88,7 +92,11 @@ partiesRouter.post('/:id/payment', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { amount, remarks = '', partyType = 'CUSTOMER', partyName, tenantId = 'default-tenant' } = req.body;
-    const paymentAmt = Number(amount) || 0;
+    const paymentAmt = Math.round((Number(amount) || 0) * 100) / 100;
+
+    if (paymentAmt <= 0) {
+      return res.status(400).json({ success: false, error: 'Payment amount must be greater than 0' });
+    }
 
     if (isDbConnected()) {
       const { LedgerAccount } = await import('../db/sequelize.js');

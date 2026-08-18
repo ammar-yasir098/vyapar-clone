@@ -55,25 +55,30 @@ itemsRouter.post('/', async (req: Request, res: Response) => {
       igstRate = 18
     } = req.body;
 
-    if (!name || salesPrice === undefined) {
-      return res.status(400).json({ success: false, error: 'Product name and sales price are required' });
+    const cleanName = String(name || '').trim();
+    const safePurchasePrice = Math.max(0, Math.round((Number(purchasePrice) || 0) * 100) / 100);
+    const safeSalesPrice = Math.max(0, Math.round((Number(salesPrice) || 0) * 100) / 100);
+    const safeCurrentStock = Math.max(0, Number(currentStock) || 0);
+
+    if (!cleanName || safeSalesPrice < 0) {
+      return res.status(400).json({ success: false, error: 'Product name and valid sales price are required' });
     }
 
     if (isDbConnected()) {
       const newItem = await Item.create({
         tenantId,
-        name,
-        skuCode: skuCode || null,
-        barcode: barcode || null,
-        hsnSacCode,
-        unitType,
-        purchasePrice,
-        salesPrice,
-        minStockAlert,
-        currentStock,
-        cgstRate,
-        sgstRate,
-        igstRate
+        name: cleanName,
+        skuCode: skuCode ? String(skuCode).trim() : null,
+        barcode: barcode ? String(barcode).trim() : null,
+        hsnSacCode: hsnSacCode || '1000',
+        unitType: unitType || 'PCS',
+        purchasePrice: safePurchasePrice,
+        salesPrice: safeSalesPrice,
+        minStockAlert: Math.max(0, Number(minStockAlert) || 5),
+        currentStock: safeCurrentStock,
+        cgstRate: Math.max(0, Number(cgstRate) || 0),
+        sgstRate: Math.max(0, Number(sgstRate) || 0),
+        igstRate: Math.max(0, Number(igstRate) || 0)
       });
       return res.status(201).json({ success: true, data: newItem });
     }

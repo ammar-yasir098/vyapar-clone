@@ -1,6 +1,7 @@
 import { db, seedDatabaseIfEmpty, seedLedgerAccountsForTenant } from '../db';
 import { Invoice, JournalEntry, JournalLine } from '../types';
 import { syncManager } from './sync';
+import { roundCurrency } from '../utils/edgeCaseHelpers';
 
 /**
  * Automatically creates balanced double-entry Journal Entries for any POS Invoice.
@@ -31,69 +32,78 @@ export async function postInvoiceJournalEntry(invoice: Invoice): Promise<Journal
     }
 
     const lines: JournalLine[] = [];
+    const received = Math.max(0, roundCurrency(invoice.receivedAmount || 0));
+    const due = Math.max(0, roundCurrency(invoice.dueAmount || (invoice.grandTotal - received)));
+    const paymentAcc = invoice.paymentMethod === 'CASH' ? cashAcc : bankAcc;
 
-    // 1. DEBIT: Payment Receiving Account or Accounts Receivable
-    if (invoice.paymentMethod === 'CREDIT' || invoice.dueAmount > 0) {
+    // 1. DEBIT: Split between Payment Receiving Account (Cash/Bank) and Accounts Receivable for Dues
+    if (received > 0) {
+      lines.push({
+        accountId: paymentAcc.id!,
+        accountCode: paymentAcc.accountCode,
+        accountName: paymentAcc.accountName,
+        debit: received,
+        credit: 0
+      });
+    }
+
+    if (due > 0 || received === 0) {
+      const arDebit = due > 0 ? due : roundCurrency(invoice.grandTotal);
       lines.push({
         accountId: arAcc.id!,
         accountCode: arAcc.accountCode,
-        accountName: `Accounts Receivable (${invoice.partyName})`,
-        debit: invoice.grandTotal,
-        credit: 0
-      });
-    } else if (invoice.paymentMethod === 'CASH') {
-      lines.push({
-        accountId: cashAcc.id!,
-        accountCode: cashAcc.accountCode,
-        accountName: cashAcc.accountName,
-        debit: invoice.grandTotal,
-        credit: 0
-      });
-    } else {
-      // UPI or CARD -> Bank Account
-      lines.push({
-        accountId: bankAcc.id!,
-        accountCode: bankAcc.accountCode,
-        accountName: bankAcc.accountName,
-        debit: invoice.grandTotal,
+        accountName: `Accounts Receivable (${invoice.partyName || 'Customer'})`,
+        debit: arDebit,
         credit: 0
       });
     }
 
     // 2. DEBIT: Sales Discount (if applicable)
-    if (invoice.discountTotal > 0) {
+    const discountAmt = roundCurrency(invoice.discountTotal || 0);
+    if (discountAmt > 0) {
       lines.push({
         accountId: discountAcc.id!,
         accountCode: discountAcc.accountCode,
         accountName: discountAcc.accountName,
-        debit: invoice.discountTotal,
+        debit: discountAmt,
         credit: 0
       });
     }
 
     // 3. CREDIT: Sales Revenue
+    const subtotalAmt = roundCurrency(invoice.subtotal || (invoice.grandTotal - (invoice.taxTotal || 0)));
     lines.push({
       accountId: salesAcc.id!,
       accountCode: salesAcc.accountCode,
       accountName: salesAcc.accountName,
       debit: 0,
-      credit: invoice.subtotal
+      credit: subtotalAmt
     });
 
     // 4. CREDIT: GST Tax Liability (if applicable)
-    if (invoice.taxTotal > 0) {
+    const taxAmt = roundCurrency(invoice.taxTotal || 0);
+    if (taxAmt > 0) {
       lines.push({
         accountId: gstAcc.id!,
         accountCode: gstAcc.accountCode,
         accountName: gstAcc.accountName,
         debit: 0,
-        credit: invoice.taxTotal
+        credit: taxAmt
       });
     }
 
-    // Calculate total Debits and Credits
-    const totalDebit = lines.reduce((sum, l) => sum + l.debit, 0);
-    const totalCredit = lines.reduce((sum, l) => sum + l.credit, 0);
+    // Calculate total Debits and Credits with rounding safety
+    const totalDebit = roundCurrency(lines.reduce((sum, l) => sum + l.debit, 0));
+    const totalCredit = roundCurrency(lines.reduce((sum, l) => sum + l.credit, 0));
+
+    // Double-entry validation safety
+    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+      console.warn(`Double-entry unbalance detected (${totalDebit} vs ${totalCredit}). Adjusting sales credit line.`);
+      const lastLine = lines[lines.length - 1];
+      if (lastLine) {
+        lastLine.credit = roundCurrency(lastLine.credit + (totalDebit - totalCredit));
+      }
+    }
 
     const count = await db.journalEntries.count();
     const entryNumber = `JE-2026-${(count + 1).toString().padStart(4, '0')}`;

@@ -55,41 +55,52 @@ invoicesRouter.post('/', async (req: Request, res: Response) => {
       paymentMethod = 'CASH'
     } = req.body;
 
-    if (!items || items.length === 0) {
+    if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ success: false, error: 'Invoice must contain at least 1 line item' });
     }
 
-    // Server-Side Calculations
-    let subtotal = 0;
-    let taxTotal = 0;
-    const formattedLineItems = items.map((line: any) => {
-      const qty = Number(line.quantity) || 1;
-      const price = Number(line.unitPrice) || 0;
-      const cgst = Number(line.cgstRate) || 0;
-      const sgst = Number(line.sgstRate) || 0;
-      const lineSub = qty * price;
-      const lineTax = (lineSub * (cgst + sgst)) / 100;
-      const lineTotal = lineSub + lineTax;
+    // Helper currency rounding
+    const round2 = (val: any) => {
+      const n = Number(val);
+      return isNaN(n) || !isFinite(n) ? 0 : Math.round((n + Number.EPSILON) * 100) / 100;
+    };
 
-      subtotal += lineSub;
-      taxTotal += lineTax;
+    // Server-Side Calculations with Edge Case Protection
+    let rawSubtotal = 0;
+    let rawTaxTotal = 0;
+    const formattedLineItems = [];
 
-      return {
+    for (const line of items) {
+      const qty = Math.max(0.001, round2(line.quantity) || 1);
+      const price = Math.max(0, round2(line.unitPrice));
+      const cgst = Math.max(0, round2(line.cgstRate));
+      const sgst = Math.max(0, round2(line.sgstRate));
+      const lineSub = round2(qty * price);
+      const lineTax = round2((lineSub * (cgst + sgst)) / 100);
+      const lineTotal = round2(lineSub + lineTax);
+
+      rawSubtotal += lineSub;
+      rawTaxTotal += lineTax;
+
+      formattedLineItems.push({
         itemId: line.itemId,
         itemName: line.itemName || 'Product Item',
         hsnSacCode: line.hsnSacCode || '1000',
         unitType: line.unitType || 'PCS',
         quantity: qty,
         unitPrice: price,
-        purchasePrice: Number(line.purchasePrice) || 0,
+        purchasePrice: round2(line.purchasePrice),
         taxAmount: lineTax,
         totalAmount: lineTotal
-      };
-    });
+      });
+    }
 
-    const grandTotal = subtotal + taxTotal;
-    const dueAmount = Math.max(0, grandTotal - Number(receivedAmount));
-    const paymentStatus = dueAmount === 0 ? 'PAID' : receivedAmount > 0 ? 'PARTIAL' : 'UNPAID';
+    const subtotal = round2(rawSubtotal);
+    const taxTotal = round2(rawTaxTotal);
+    const grandTotal = round2(subtotal + taxTotal);
+    const safeReceivedAmount = Math.max(0, Math.min(grandTotal, round2(receivedAmount)));
+    const dueAmount = round2(Math.max(0, grandTotal - safeReceivedAmount));
+    const paymentStatus = dueAmount === 0 ? 'PAID' : safeReceivedAmount > 0 ? 'PARTIAL' : 'UNPAID';
     const invoiceId = `INV-TXN-${Date.now()}`;
 
     if (isDbConnected()) {
