@@ -666,7 +666,7 @@ export function App() {
       } else {
         await db.companyProfiles.add(newCompObj as any);
       }
-    } catch {}
+    } catch { }
 
     setCompanies(prev => [...prev, newCompObj]);
     handleSelectCompany(newTenantId);
@@ -684,22 +684,22 @@ export function App() {
           await deleteServerCompanyProfile(tenantIdToDelete);
 
           // 2. Cascade delete from local Dexie IndexedDB
-          await db.companyProfiles.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.items.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.parties.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.invoices.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.saleReturns.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.purchaseReturns.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.purchaseBills.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.purchaseOrders.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.expenses.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.paymentIn.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.paymentOut.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.estimates.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.ledgerAccounts.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.journalEntries.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.cashAccounts.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
-          await db.cashTransactions.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.companyProfiles.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.items.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.parties.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.invoices.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.saleReturns.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.purchaseReturns.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.purchaseBills.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.purchaseOrders.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.expenses.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.paymentIn.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.paymentOut.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.estimates.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.ledgerAccounts.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.journalEntries.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.cashAccounts.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.cashTransactions.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
 
           // 3. Update React state
           const remainingCompanies = companies.filter(c => c.tenantId !== tenantIdToDelete);
