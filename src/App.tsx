@@ -675,36 +675,37 @@ export function App() {
           await db.estimates.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
           await db.ledgerAccounts.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
           await db.journalEntries.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.cashAccounts.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
+          await db.cashTransactions.where('tenantId').equals(tenantIdToDelete).delete().catch(() => {});
 
           // 3. Update React state
-          const remainingCompanies = companies.filter(c => (c.tenantId || 'default-tenant') !== tenantIdToDelete);
+          const remainingCompanies = companies.filter(c => c.tenantId !== tenantIdToDelete);
           setCompanies(remainingCompanies);
 
           if (remainingCompanies.length > 0) {
             const nextActive = remainingCompanies[0];
-            const nextTenantId = nextActive.tenantId || 'default-tenant';
+            const nextTenantId = nextActive.tenantId || '';
             setCurrentTenantId(nextTenantId);
             setBusinessDetails(nextActive);
             localStorage.setItem('vyapar_current_tenant', nextTenantId);
             localStorage.setItem('vyapar_business_details', JSON.stringify(nextActive));
           } else {
-            const defaultComp: BusinessDetails = {
-              tenantId: 'default-tenant',
-              name: 'SuperMarket Retail & Traders',
-              phone: '+92 300 xxxxxxx',
-              email: 'contact@supermarket.com',
-              address: 'Shop #12, Commercial Market, Main Boulevard, Gulberg, Lahore',
-              gstin: 'NTN: 7654321-0',
+            setCompanies([]);
+            setBusinessDetails({
+              tenantId: '',
+              name: '',
+              phone: '',
+              email: '',
+              address: '',
+              gstin: '',
               state: 'Punjab, Pakistan',
               tagline: 'Quality Products at Everyday Low Prices',
               businessType: 'Retail',
               businessCategory: 'Supermarket & FMCG'
-            };
-            setCompanies([defaultComp]);
-            setBusinessDetails(defaultComp);
-            setCurrentTenantId('default-tenant');
-            localStorage.setItem('vyapar_current_tenant', 'default-tenant');
-            localStorage.setItem('vyapar_business_details', JSON.stringify(defaultComp));
+            });
+            setCurrentTenantId('');
+            localStorage.removeItem('vyapar_current_tenant');
+            localStorage.removeItem('vyapar_business_details');
           }
 
           showToast(`Store profile "${storeName}" deleted successfully from local and cloud databases.`, 'success');

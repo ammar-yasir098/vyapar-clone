@@ -198,7 +198,9 @@ companyRouter.delete('/', async (req: Request, res: Response) => {
         Estimate, 
         EstimateItem, 
         LedgerAccount, 
-        JournalEntry 
+        JournalEntry,
+        CashAccount,
+        CashTransaction
       } = await import('../db/sequelize.js');
 
       await Item.destroy({ where: { tenantId: tId } }).catch(() => {});
@@ -214,6 +216,8 @@ companyRouter.delete('/', async (req: Request, res: Response) => {
       await Estimate.destroy({ where: { tenantId: tId } }).catch(() => {});
       await LedgerAccount.destroy({ where: { tenantId: tId } }).catch(() => {});
       await JournalEntry.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await CashTransaction.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await CashAccount.destroy({ where: { tenantId: tId } }).catch(() => {});
     }
 
     console.log(`🗑️ [DELETE COMPANY] Successfully deleted company profile and associated store records for tenantId: ${tId}`);

@@ -198,7 +198,7 @@ export const Header: React.FC<HeaderProps> = ({
                             <Check className="w-3 h-3 stroke-[3]" />
                           </div>
                         )}
-                        {onDeleteCompany && safeCompanies.length > 1 && (
+                        {onDeleteCompany && (
                           <button
                             type="button"
                             title={`Delete Store "${c.name}"`}
