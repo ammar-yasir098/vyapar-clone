@@ -85,7 +85,8 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
   }, [isOpen]);
 
   const handleManualSync = async () => {
-    await syncManager.triggerSync();
+    const activeTenant = localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+    await syncManager.triggerSync(activeTenant);
     showToast('Cloud sync triggered successfully!', 'success');
     await refreshModalData();
   };

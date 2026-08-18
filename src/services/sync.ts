@@ -71,7 +71,8 @@ class ClientSyncManager {
    * Pushes pending local mutations to the cloud backend API.
    */
   public async triggerSync(targetTenantId?: string) {
-    if (this.isSyncing || !navigator.onLine || !targetTenantId) return;
+    const activeTenantId = targetTenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+    if (this.isSyncing || !navigator.onLine) return;
 
     this.isSyncing = true;
     this.notify();
@@ -81,7 +82,7 @@ class ClientSyncManager {
 
       // If sync journal is empty, auto-queue all current local records for cloud sync
       if (unsynced.length === 0) {
-        const tId = targetTenantId;
+        const tId = activeTenantId;
         const localItems = await db.items.filter(i => i.tenantId === tId).toArray();
         const localParties = await db.parties.filter(p => (p.tenantId || 'default-tenant') === tId).toArray();
         const localInvoices = await db.invoices.filter(inv => (inv.tenantId || 'default-tenant') === tId).toArray();
