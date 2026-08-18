@@ -28,6 +28,7 @@ import { PurchaseReturnListScreen } from './components/PurchaseReturn/PurchaseRe
 import { CreatePurchaseReturnScreen } from './components/PurchaseReturn/CreatePurchaseReturnScreen';
 import { SaleReturnListScreen } from './components/SaleReturn/SaleReturnListScreen';
 import { CreateSaleReturnScreen } from './components/SaleReturn/CreateSaleReturnScreen';
+import { CashInHandScreen } from './components/CashBank/CashInHandScreen';
 import { Invoice, BusinessDetails, Party } from './types';
 import { triggerThermalPrint } from './services/printer';
 import {
@@ -862,8 +863,8 @@ export function App() {
             />
           )}
 
-          {activeTab === 'ledger' && (
-            <LedgerScreen accounts={accounts} journalEntries={journalEntries} business={businessDetails} />
+          {(activeTab === 'cash-in-hand' || activeTab === 'ledger' || activeTab === 'cash-bank') && (
+            <CashInHandScreen business={businessDetails} />
           )}
 
           {activeTab === 'invoices' && (

@@ -23,8 +23,9 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
   const [isSaleOpen, setIsSaleOpen] = useState(true);
   const [isPurchaseOpen, setIsPurchaseOpen] = useState(true);
+  const [isCashBankOpen, setIsCashBankOpen] = useState(true);
 
-  // Automatically expand Sale or Purchase groups based on active tab
+  // Automatically expand Sale, Purchase, or Cash & Bank groups based on active tab
   useEffect(() => {
     if (activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices' || activeTab === 'sale-returns' || activeTab === 'create-sale-return') {
       setIsSaleOpen(true);
@@ -32,17 +33,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     if (activeTab === 'purchase' || activeTab === 'purchase-orders' || activeTab === 'create-po' || activeTab === 'payment-out' || activeTab === 'expenses' || activeTab === 'purchase-returns' || activeTab === 'create-purchase-return') {
       setIsPurchaseOpen(true);
     }
+    if (activeTab === 'cash-in-hand' || activeTab === 'ledger' || activeTab === 'cash-bank') {
+      setIsCashBankOpen(true);
+    }
   }, [activeTab]);
 
   const isSaleActive = activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices' || activeTab === 'sale-returns' || activeTab === 'create-sale-return';
   const isPurchaseActive = activeTab === 'purchase' || activeTab === 'purchase-orders' || activeTab === 'create-po' || activeTab === 'payment-out' || activeTab === 'expenses' || activeTab === 'purchase-returns' || activeTab === 'create-purchase-return';
+  const isCashBankActive = activeTab === 'cash-in-hand' || activeTab === 'ledger' || activeTab === 'cash-bank';
 
   const menuGroups = [
     { id: 'home', label: 'Home', icon: Home },
     { id: 'parties', label: 'Parties', icon: Users },
     { id: 'inventory', label: 'Items', icon: Package },
-    // Sale and Purchase & Expense are rendered separately as expandable menus
-    { id: 'ledger', label: 'Cash & Bank', icon: BookOpen },
+    // Sale, Purchase & Expense, and Cash & Bank are rendered separately as expandable menus
     { id: 'gst', label: 'GST & E-Way Bills', icon: ShieldCheck },
     { id: 'reports', label: 'Reports', icon: BarChart3 },
     { id: 'settings', label: 'Thermal Printer', icon: Printer }
@@ -282,7 +286,47 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
           )}
         </div>
 
-        {/* Render Remaining Menu Items (Cash & Bank, GST, Reports, Printer) */}
+        {/* EXPANDABLE CASH & BANK MENU */}
+        <div className="pt-0.5 pb-0.5">
+          <button
+            type="button"
+            onClick={() => setIsCashBankOpen(!isCashBankOpen)}
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              isCashBankActive
+                ? 'bg-[#232342] text-white shadow-sm border-l-4 border-emerald-500'
+                : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <BookOpen className={`w-4 h-4 ${isCashBankActive ? 'text-emerald-400' : 'text-slate-400'}`} />
+              <span>Cash & Bank</span>
+            </div>
+            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${isCashBankOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {/* Sub-menu items under Cash & Bank */}
+          {isCashBankOpen && (
+            <div className="mt-1 mb-1 pl-3 pr-1 py-1 space-y-1 bg-[#121223]/60 rounded-lg border-l-2 border-slate-700/60 ml-3">
+              {/* Cash In Hand Sub-option */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('cash-in-hand')}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                  activeTab === 'cash-in-hand' || activeTab === 'ledger'
+                    ? 'bg-emerald-600 text-white font-bold shadow-xs'
+                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'cash-in-hand' || activeTab === 'ledger' ? 'bg-white' : 'bg-emerald-400'}`}></div>
+                  <span>Cash In Hand</span>
+                </div>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Render Remaining Menu Items (GST, Reports, Printer) */}
         {menuGroups.slice(3).map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;

@@ -65,7 +65,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     { label: 'Items & SKU Stock Manager', tab: 'inventory', icon: Package },
     { label: 'Customers & Suppliers Ledger', tab: 'parties', icon: Users },
     { label: 'Purchase Inward Bills', tab: 'purchase', icon: FileText },
-    { label: 'Cash & Bank / General Ledger', tab: 'ledger', icon: FileText },
+    { label: 'Cash In Hand & Cash Bank', tab: 'cash-in-hand', icon: FileText },
     { label: 'Sales History & Bills', tab: 'invoices', icon: FileText }
   ].filter(p => !q || p.label.toLowerCase().includes(q));
 
