@@ -11,25 +11,10 @@ expensesRouter.get('/', async (req: Request, res: Response) => {
 
     if (isDbConnected()) {
       const tId = String(tenantId);
-      const whereClause = {
-        [Op.or]: [
-          { tenantId: tId },
-          { tenantId: 'default-tenant' },
-          { tenantId: null as any }
-        ]
-      };
       const expensesList = await Expense.findAll({
-        where: whereClause,
+        where: { tenantId: tId },
         order: [['id', 'DESC']]
       });
-
-      if (tId !== 'default-tenant' && expensesList.length > 0) {
-        for (const exp of expensesList) {
-          if (!exp.get('tenantId') || exp.get('tenantId') === 'default-tenant') {
-            await exp.update({ tenantId: tId }).catch(() => {});
-          }
-        }
-      }
 
       return res.json({ success: true, data: expensesList });
     }

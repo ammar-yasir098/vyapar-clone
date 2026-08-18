@@ -10,23 +10,7 @@ itemsRouter.get('/', async (req: Request, res: Response) => {
     const { tenantId } = req.query;
     if (isDbConnected()) {
       const tId = tenantId ? String(tenantId) : 'default-tenant';
-      const whereClause = {
-        [Op.or]: [
-          { tenantId: tId },
-          { tenantId: 'default-tenant' },
-          { tenantId: null as any }
-        ]
-      };
-      const items = await Item.findAll({ where: whereClause, order: [['name', 'ASC']] });
-
-      // Auto-migrate any default-tenant items to active store tenantId
-      if (tId !== 'default-tenant' && items.length > 0) {
-        for (const item of items) {
-          if (!item.get('tenantId') || item.get('tenantId') === 'default-tenant') {
-            await item.update({ tenantId: tId }).catch(() => {});
-          }
-        }
-      }
+      const items = await Item.findAll({ where: { tenantId: tId }, order: [['name', 'ASC']] });
 
       return res.json({ success: true, count: items.length, data: items });
     }

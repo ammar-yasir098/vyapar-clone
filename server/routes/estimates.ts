@@ -11,26 +11,11 @@ estimatesRouter.get('/', async (req: Request, res: Response) => {
 
     if (isDbConnected()) {
       const tId = String(tenantId);
-      const whereClause = {
-        [Op.or]: [
-          { tenantId: tId },
-          { tenantId: 'default-tenant' },
-          { tenantId: null as any }
-        ]
-      };
       const estimates = await Estimate.findAll({
-        where: whereClause,
+        where: { tenantId: tId },
         include: [{ model: EstimateItem, as: 'items' }],
         order: [['id', 'DESC']]
       });
-
-      if (tId !== 'default-tenant' && estimates.length > 0) {
-        for (const est of estimates) {
-          if (!est.get('tenantId') || est.get('tenantId') === 'default-tenant') {
-            await est.update({ tenantId: tId }).catch(() => {});
-          }
-        }
-      }
 
       return res.json({ success: true, data: estimates });
     }

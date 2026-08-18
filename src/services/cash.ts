@@ -21,8 +21,8 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
 /**
  * Gets or initializes the local Cash Account in Dexie IndexedDB
  */
-export async function getOrCreateLocalCashAccount(tenantId: string = 'default-tenant'): Promise<CashAccount> {
-  let acc = await db.cashAccounts.filter(a => (a.tenantId || 'default-tenant') === tenantId).first();
+export async function getOrCreateLocalCashAccount(tenantId: string): Promise<CashAccount> {
+  let acc = await db.cashAccounts.filter(a => a.tenantId === tenantId).first();
   if (!acc) {
     const newId = await db.cashAccounts.add({
       tenantId,
@@ -78,7 +78,7 @@ export async function deduplicateLocalCashTransactions() {
 /**
  * Calculates current cash balance dynamically (Opening + IN - OUT)
  */
-export async function fetchCashBalance(tenantId: string = 'default-tenant') {
+export async function fetchCashBalance(tenantId: string) {
   await deduplicateLocalCashTransactions();
   try {
     // Try server API first
@@ -97,7 +97,7 @@ export async function fetchCashBalance(tenantId: string = 'default-tenant') {
   const openingBalance = roundCurrency(cashAcc.openingBalance || 0);
 
   const txns = await db.cashTransactions
-    .filter(t => (t.tenantId || 'default-tenant') === tenantId)
+    .filter(t => t.tenantId === tenantId)
     .toArray();
 
   let totalIn = 0;
@@ -124,7 +124,7 @@ export async function fetchCashBalance(tenantId: string = 'default-tenant') {
 /**
  * Fetches transaction history with calculated running balances
  */
-export async function fetchCashTransactions(tenantId: string = 'default-tenant', filters: any = {}) {
+export async function fetchCashTransactions(tenantId: string, filters: any = {}) {
   try {
     const query = new URLSearchParams({
       tenantId,
@@ -246,7 +246,15 @@ export async function recordCashEntry(data: {
     const res = await fetch(`${API_BASE_URL}/entry`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...txRecord, accountId: cashAcc.id })
+      body: JSON.stringify({
+        tenantId,
+        type: data.type,
+        amount: safeAmt,
+        source: data.source || 'MANUAL_ADJUSTMENT',
+        referenceId: txRecord.referenceId,
+        description: txRecord.description,
+        transactionDate: txRecord.transactionDate
+      })
     });
     const json = await res.json();
     return json;

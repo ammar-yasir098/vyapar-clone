@@ -11,28 +11,13 @@ purchasesRouter.get('/', async (req: Request, res: Response) => {
 
     if (isDbConnected()) {
       const tId = String(tenantId);
-      const whereClause = {
-        [Op.or]: [
-          { tenantId: tId },
-          { tenantId: 'default-tenant' },
-          { tenantId: null as any }
-        ]
-      };
       const bills = await PurchaseBill.findAll({
-        where: whereClause,
+        where: { tenantId: tId },
         include: [{ model: PurchaseBillItem, as: 'items' }],
         order: [['id', 'DESC']]
       });
 
-      if (tId !== 'default-tenant' && bills.length > 0) {
-        for (const bill of bills) {
-          if (!bill.get('tenantId') || bill.get('tenantId') === 'default-tenant') {
-            await bill.update({ tenantId: tId }).catch(() => {});
-          }
-        }
-      }
-
-      return res.json({ success: true, data: bills });
+      return res.json({ success: true, count: bills.length, data: bills });
     }
 
     return res.json({ success: true, data: [] });

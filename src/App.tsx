@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Building2, Store } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, seedDatabaseIfEmpty, seedLedgerAccountsForTenant, seedWalkInCustomerForTenant, DEFAULT_BUSINESS } from './db';
 import { Header } from './components/Header';
@@ -81,7 +82,7 @@ export function App() {
   const [companies, setCompanies] = useState<BusinessDetails[]>([]);
   const [partyForPaymentIn, setPartyForPaymentIn] = useState<Party | null>(null);
   const [partyForPaymentOut, setPartyForPaymentOut] = useState<Party | null>(null);
-  const [currentTenantId, setCurrentTenantId] = useState<string>(localStorage.getItem('vyapar_current_tenant') || 'default-tenant');
+  const [currentTenantId, setCurrentTenantId] = useState<string>(localStorage.getItem('vyapar_current_tenant') || '');
 
   const setActiveTab = (tab: string) => {
     setActiveTabState(tab);
@@ -111,11 +112,11 @@ export function App() {
       const localDexieProfiles = await db.companyProfiles.toArray();
       if (localDexieProfiles && localDexieProfiles.length > 0) {
         const mappedLocal = localDexieProfiles.map(c => ({
-          tenantId: c.tenantId || 'default-tenant',
+          tenantId: c.tenantId,
           name: c.name || 'My Store',
-          phone: c.phone || '+92 300 xxxxxxx',
+          phone: c.phone || '',
           address: c.address || '',
-          gstin: c.gstin || 'NTN: 7654321-0',
+          gstin: c.gstin || '',
           state: 'Punjab, Pakistan',
           tagline: 'Quality Products at Everyday Low Prices',
           email: c.email || '',
@@ -124,8 +125,14 @@ export function App() {
           signatureUrl: c.signatureUrl || null
         }));
         setCompanies(mappedLocal);
-        const activeComp = mappedLocal.find(c => (c.tenantId || 'default-tenant') === currentTenantId) || mappedLocal[0];
-        if (activeComp) setBusinessDetails(activeComp);
+        const activeComp = mappedLocal.find(c => c.tenantId === currentTenantId) || mappedLocal[0];
+        if (activeComp) {
+          setBusinessDetails(activeComp);
+          if (!currentTenantId) {
+            setCurrentTenantId(activeComp.tenantId);
+            localStorage.setItem('vyapar_current_tenant', activeComp.tenantId);
+          }
+        }
       }
 
       let activeTenantId = currentTenantId;
@@ -557,19 +564,19 @@ export function App() {
   const allPurchaseReturns = useLiveQuery(() => db.purchaseReturns.reverse().toArray(), []) || [];
   const allSaleReturns = useLiveQuery(() => db.saleReturns.reverse().toArray(), []) || [];
 
-  const items = allItems.filter(item => !item.tenantId || item.tenantId === 'default-tenant' || item.tenantId === currentTenantId);
-  const parties = allParties.filter(party => !party.tenantId || party.tenantId === 'default-tenant' || party.tenantId === currentTenantId);
-  const invoices = allInvoices.filter(inv => !inv.tenantId || inv.tenantId === 'default-tenant' || inv.tenantId === currentTenantId);
-  const accounts = allAccounts.filter(acc => !acc.tenantId || acc.tenantId === 'default-tenant' || acc.tenantId === currentTenantId);
-  const journalEntries = allJournalEntries.filter(je => !je.tenantId || je.tenantId === 'default-tenant' || je.tenantId === currentTenantId);
-  const estimates = allEstimates.filter(est => !est.tenantId || est.tenantId === 'default-tenant' || est.tenantId === currentTenantId);
-  const paymentsIn = allPaymentsIn.filter(p => !p.tenantId || p.tenantId === 'default-tenant' || p.tenantId === currentTenantId);
-  const purchaseOrders = allPurchaseOrders.filter(po => !po.tenantId || po.tenantId === 'default-tenant' || po.tenantId === currentTenantId);
-  const purchaseBills = allPurchaseBills.filter(pb => !pb.tenantId || pb.tenantId === 'default-tenant' || pb.tenantId === currentTenantId);
-  const paymentsOut = allPaymentsOut.filter(po => !po.tenantId || po.tenantId === 'default-tenant' || po.tenantId === currentTenantId);
-  const expenses = allExpenses.filter(e => !e.tenantId || e.tenantId === 'default-tenant' || e.tenantId === currentTenantId);
-  const purchaseReturns = allPurchaseReturns.filter(pr => !pr.tenantId || pr.tenantId === 'default-tenant' || pr.tenantId === currentTenantId);
-  const saleReturns = allSaleReturns.filter(sr => !sr.tenantId || sr.tenantId === 'default-tenant' || sr.tenantId === currentTenantId);
+  const items = allItems.filter(item => item.tenantId === currentTenantId);
+  const parties = allParties.filter(party => party.tenantId === currentTenantId);
+  const invoices = allInvoices.filter(inv => inv.tenantId === currentTenantId);
+  const accounts = allAccounts.filter(acc => acc.tenantId === currentTenantId);
+  const journalEntries = allJournalEntries.filter(je => je.tenantId === currentTenantId);
+  const estimates = allEstimates.filter(est => est.tenantId === currentTenantId);
+  const paymentsIn = allPaymentsIn.filter(p => p.tenantId === currentTenantId);
+  const purchaseOrders = allPurchaseOrders.filter(po => po.tenantId === currentTenantId);
+  const purchaseBills = allPurchaseBills.filter(pb => pb.tenantId === currentTenantId);
+  const paymentsOut = allPaymentsOut.filter(po => po.tenantId === currentTenantId);
+  const expenses = allExpenses.filter(e => e.tenantId === currentTenantId);
+  const purchaseReturns = allPurchaseReturns.filter(pr => pr.tenantId === currentTenantId);
+  const saleReturns = allSaleReturns.filter(sr => sr.tenantId === currentTenantId);
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');
@@ -605,7 +612,20 @@ export function App() {
   };
 
   const handleCreateCompany = async (newCompanyData: Partial<BusinessDetails>) => {
-    const newTenantId = `tenant-${Date.now().toString().slice(-6)}`;
+    // Auto-increment sequential tenant ID (tenant-1, tenant-2, tenant-3...)
+    let maxNum = 0;
+    for (const c of companies) {
+      if (c.tenantId) {
+        const match = c.tenantId.match(/^tenant-(\d+)$/i);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (!isNaN(num) && num > maxNum) {
+            maxNum = num;
+          }
+        }
+      }
+    }
+    const newTenantId = newCompanyData.tenantId || `tenant-${maxNum + 1}`;
     const fullCompanyData = {
       tenantId: newTenantId,
       name: newCompanyData.name || 'New Branch',
@@ -963,6 +983,54 @@ export function App() {
         isOpen={isSyncModalOpen}
         onClose={() => setIsSyncModalOpen(false)}
       />
+
+      {/* No Company Profile Setup Prompt Modal */}
+      {isDbLoaded && companies.length === 0 && (
+        <div className="fixed inset-0 bg-slate-900/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-8 max-w-lg w-full shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200">
+            <div className="text-center space-y-2 mb-6">
+              <div className="w-16 h-16 rounded-2xl bg-blue-600 flex items-center justify-center text-white mx-auto shadow-lg">
+                <Building2 className="w-9 h-9 stroke-[2.5]" />
+              </div>
+              <h2 className="text-2xl font-black text-slate-800">Welcome to Vyapar POS</h2>
+              <p className="text-sm text-slate-500 font-medium">Please create your Store / Business Profile to get started.</p>
+            </div>
+
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const form = e.currentTarget;
+              const name = (form.elements.namedItem('storeName') as HTMLInputElement).value;
+              const phone = (form.elements.namedItem('storePhone') as HTMLInputElement).value;
+              const address = (form.elements.namedItem('storeAddress') as HTMLInputElement).value;
+              const gstin = (form.elements.namedItem('storeGstin') as HTMLInputElement).value;
+              if (!name) return;
+              handleCreateCompany({ name, phone, address, gstin, businessType: 'Retail' });
+            }} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Company / Store Name *</label>
+                <input required name="storeName" placeholder="e.g. Acme SuperMarket" className="w-full px-4 py-2.5 rounded-xl border border-slate-300 font-bold text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Phone Number</label>
+                  <input name="storePhone" placeholder="+92 300 1234567" className="w-full px-4 py-2.5 rounded-xl border border-slate-300 font-medium text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">GSTIN / NTN</label>
+                  <input name="storeGstin" placeholder="NTN: 1234567-8" className="w-full px-4 py-2.5 rounded-xl border border-slate-300 font-medium text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Store Address</label>
+                <input name="storeAddress" placeholder="Shop #1, Main Market..." className="w-full px-4 py-2.5 rounded-xl border border-slate-300 font-medium text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <button type="submit" className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-sm rounded-xl shadow-lg transition cursor-pointer flex items-center justify-center gap-2">
+                <span>Create Business Profile & Start POS</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

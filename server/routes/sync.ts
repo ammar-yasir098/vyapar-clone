@@ -38,27 +38,32 @@ syncRouter.post('/reset', async (req: Request, res: Response) => {
           'TRUNCATE TABLE invoice_items, invoices, items, parties, journal_entries, estimates, estimate_items, payment_in, purchase_order_items, purchase_orders, purchase_bill_items, purchase_bills, payment_out, expenses, purchase_return_items, purchase_returns, sale_return_items, sale_returns, cash_transactions, cash_accounts RESTART IDENTITY CASCADE;'
         );
       } catch (truncateErr) {
-        console.warn('Truncate SQL warning, using Sequelize destroy fallback:', truncateErr);
-        await InvoiceItem.destroy({ where: {} }).catch(() => {});
-        await Invoice.destroy({ where: {} }).catch(() => {});
-        await Item.destroy({ where: {} }).catch(() => {});
-        await Party.destroy({ where: {} }).catch(() => {});
-        await JournalEntry.destroy({ where: {} }).catch(() => {});
-        await EstimateItem.destroy({ where: {} }).catch(() => {});
-        await Estimate.destroy({ where: {} }).catch(() => {});
-        await PaymentIn.destroy({ where: {} }).catch(() => {});
-        await PurchaseOrderItem.destroy({ where: {} }).catch(() => {});
-        await PurchaseOrder.destroy({ where: {} }).catch(() => {});
-        await PurchaseBillItem.destroy({ where: {} }).catch(() => {});
-        await PurchaseBill.destroy({ where: {} }).catch(() => {});
-        await PaymentOut.destroy({ where: {} }).catch(() => {});
-        await Expense.destroy({ where: {} }).catch(() => {});
-        await PurchaseReturnItem.destroy({ where: {} }).catch(() => {});
-        await PurchaseReturn.destroy({ where: {} }).catch(() => {});
-        await SaleReturnItem.destroy({ where: {} }).catch(() => {});
-        await SaleReturn.destroy({ where: {} }).catch(() => {});
-        await CashTransaction.destroy({ where: {} }).catch(() => {});
-        await CashAccount.destroy({ where: {} }).catch(() => {});
+        console.warn('Truncate SQL warning, using sequential model destroy fallback:', truncateErr);
+        // 1. Delete child detail/line item tables first
+        await InvoiceItem.destroy({ where: {}, force: true }).catch(() => {});
+        await EstimateItem.destroy({ where: {}, force: true }).catch(() => {});
+        await PurchaseOrderItem.destroy({ where: {}, force: true }).catch(() => {});
+        await PurchaseBillItem.destroy({ where: {}, force: true }).catch(() => {});
+        await PurchaseReturnItem.destroy({ where: {}, force: true }).catch(() => {});
+        await SaleReturnItem.destroy({ where: {}, force: true }).catch(() => {});
+        await CashTransaction.destroy({ where: {}, force: true }).catch(() => {});
+
+        // 2. Delete parent transactional header tables
+        await Invoice.destroy({ where: {}, force: true }).catch(() => {});
+        await Estimate.destroy({ where: {}, force: true }).catch(() => {});
+        await PaymentIn.destroy({ where: {}, force: true }).catch(() => {});
+        await PurchaseOrder.destroy({ where: {}, force: true }).catch(() => {});
+        await PurchaseBill.destroy({ where: {}, force: true }).catch(() => {});
+        await PaymentOut.destroy({ where: {}, force: true }).catch(() => {});
+        await Expense.destroy({ where: {}, force: true }).catch(() => {});
+        await PurchaseReturn.destroy({ where: {}, force: true }).catch(() => {});
+        await SaleReturn.destroy({ where: {}, force: true }).catch(() => {});
+        await JournalEntry.destroy({ where: {}, force: true }).catch(() => {});
+        await CashAccount.destroy({ where: {}, force: true }).catch(() => {});
+
+        // 3. Delete master entity tables last
+        await Item.destroy({ where: {}, force: true }).catch(() => {});
+        await Party.destroy({ where: {}, force: true }).catch(() => {});
       }
 
       await sequelize.query('UPDATE ledger_accounts SET balance = 0.0;').catch(() => {});
@@ -591,7 +596,7 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
             if (!cAcc) {
               cAcc = await CashAccount.create({ tenantId: tenantId || 'default-tenant', name: 'Main Cash Drawer', openingBalance: 0 });
             }
-            let existingTx = payload.referenceId ? await CashTransaction.findOne({ where: { referenceId: payload.referenceId } }) : null;
+            let existingTx = payload.referenceId ? await CashTransaction.findOne({ where: { referenceId: payload.referenceId, tenantId: tenantId || 'default-tenant' } }) : null;
             const txData = {
               cashAccountId: (cAcc as any).id,
               tenantId: tenantId || 'default-tenant',

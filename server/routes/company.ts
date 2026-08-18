@@ -44,39 +44,11 @@ function saveBase64Image(base64Data: string | undefined | null, subfolder: strin
 companyRouter.get('/all', async (req: Request, res: Response) => {
   try {
     if (isDbConnected()) {
-      let profiles = await CompanyProfile.findAll();
-      if (profiles.length === 0) {
-        const defaultProfile = await CompanyProfile.create({
-          tenantId: 'default-tenant',
-          name: 'SuperMarket Retail & Traders',
-          phone: '+92 300 xxxxxxx',
-          email: 'contact@supermarket.com',
-          address: 'Shop #12, Commercial Market, Main Boulevard, Gulberg, Lahore',
-          gstin: 'NTN: 7654321-0',
-          businessType: 'Retail',
-          businessCategory: 'Supermarket & FMCG',
-          pincode: '54000',
-          booksBeginDate: new Date().toISOString().split('T')[0]
-        });
-        profiles = [defaultProfile];
-      }
+      const profiles = await CompanyProfile.findAll({ order: [['id', 'ASC']] });
       return res.json({ success: true, data: profiles });
     }
 
-    return res.json({
-      success: true,
-      data: [{
-        tenantId: 'default-tenant',
-        name: 'SuperMarket Retail & Traders',
-        phone: '+92 300 xxxxxxx',
-        email: 'contact@supermarket.com',
-        address: 'Shop #12, Commercial Market, Main Boulevard, Gulberg, Lahore',
-        gstin: 'NTN: 7654321-0',
-        businessType: 'Retail',
-        businessCategory: 'Supermarket & FMCG',
-        pincode: '54000'
-      }]
-    });
+    return res.json({ success: true, data: [] });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -85,40 +57,16 @@ companyRouter.get('/all', async (req: Request, res: Response) => {
 // GET /api/v1/company - Fetch company profile using Sequelize
 companyRouter.get('/', async (req: Request, res: Response) => {
   try {
-    const { tenantId = 'default-tenant' } = req.query;
+    const { tenantId } = req.query;
+    if (!tenantId) {
+      return res.status(400).json({ success: false, error: 'tenantId parameter is required' });
+    }
     if (isDbConnected()) {
-      let profile = await CompanyProfile.findOne({ where: { tenantId: String(tenantId) } });
-      if (!profile) {
-        profile = await CompanyProfile.create({
-          tenantId: String(tenantId),
-          name: 'SuperMarket Retail & Traders',
-          phone: '+92 300 xxxxxxx',
-          email: 'contact@supermarket.com',
-          address: 'Shop #12, Commercial Market, Main Boulevard, Gulberg, Lahore',
-          gstin: 'NTN: 7654321-0',
-          businessType: 'Retail',
-          businessCategory: 'Supermarket & FMCG',
-          pincode: '54000',
-          booksBeginDate: new Date().toISOString().split('T')[0]
-        });
-      }
-      return res.json({ success: true, data: profile });
+      const profile = await CompanyProfile.findOne({ where: { tenantId: String(tenantId) } });
+      return res.json({ success: true, data: profile || null });
     }
 
-    return res.json({
-      success: true,
-      data: {
-        tenantId: String(tenantId),
-        name: 'SuperMarket Retail & Traders',
-        phone: '+92 300 xxxxxxx',
-        email: 'contact@supermarket.com',
-        address: 'Shop #12, Commercial Market, Main Boulevard, Gulberg, Lahore',
-        gstin: 'NTN: 7654321-0',
-        businessType: 'Retail',
-        businessCategory: 'Supermarket & FMCG',
-        pincode: '54000'
-      }
-    });
+    return res.json({ success: true, data: null });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -127,8 +75,8 @@ companyRouter.get('/', async (req: Request, res: Response) => {
 // POST /api/v1/company - Update company profile using Sequelize find/update or create
 companyRouter.post('/', async (req: Request, res: Response) => {
   try {
-    const {
-      tenantId = 'default-tenant',
+    let {
+      tenantId,
       name,
       phone,
       email,
@@ -142,10 +90,30 @@ companyRouter.post('/', async (req: Request, res: Response) => {
       booksBeginDate
     } = req.body;
 
+    if (!tenantId) {
+      tenantId = `tenant-${Date.now().toString().slice(-6)}`;
+    }
+
     const savedLogoUrl = saveBase64Image(logoUrl, 'logos', 'logo', tenantId);
     const savedSignatureUrl = saveBase64Image(signatureUrl, 'signatures', 'sig', tenantId);
 
     if (isDbConnected()) {
+      if (req.body.tenantId === undefined || !req.body.tenantId) {
+        let maxNum = 0;
+        const allProfiles = await CompanyProfile.findAll();
+        for (const p of allProfiles) {
+          const tid = p.get('tenantId') as string;
+          if (tid) {
+            const match = tid.match(/^tenant-(\d+)$/i);
+            if (match) {
+              const num = parseInt(match[1], 10);
+              if (!isNaN(num) && num > maxNum) maxNum = num;
+            }
+          }
+        }
+        tenantId = `tenant-${maxNum + 1}`;
+      }
+
       let profile = await CompanyProfile.findOne({ where: { tenantId } });
 
       if (profile) {

@@ -64,8 +64,9 @@ export const DEFAULT_BUSINESS: BusinessDetails = {
 /**
  * Seeds standard 10 Chart of Accounts for a specific store tenant if not present.
  */
-export async function seedLedgerAccountsForTenant(tenantId: string = 'default-tenant') {
-  const existingAccounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === tenantId).toArray();
+export async function seedLedgerAccountsForTenant(tenantId: string) {
+  if (!tenantId) return;
+  const existingAccounts = await db.ledgerAccounts.filter(a => a.tenantId === tenantId).toArray();
   if (existingAccounts.length === 0) {
     await db.ledgerAccounts.bulkAdd([
       { tenantId, accountCode: '1010', accountName: 'Cash in Hand', accountType: 'ASSET', balance: 0.00, description: 'Physical cash at POS counter' },
@@ -86,9 +87,10 @@ export async function seedLedgerAccountsForTenant(tenantId: string = 'default-te
  * Seeds default Walk-in Retail Customer for a specific store tenant if not present.
  * Automatically purges any duplicate Walk-in customer entries for that store.
  */
-export async function seedWalkInCustomerForTenant(tenantId: string = 'default-tenant') {
+export async function seedWalkInCustomerForTenant(tenantId: string) {
+  if (!tenantId) return;
   const walkIns = await db.parties
-    .filter(p => (p.tenantId || 'default-tenant') === tenantId && p.name === 'Walk-in Retail Customer')
+    .filter(p => p.tenantId === tenantId && p.name === 'Walk-in Retail Customer')
     .toArray();
 
   if (walkIns.length === 0) {
@@ -115,9 +117,11 @@ export async function seedWalkInCustomerForTenant(tenantId: string = 'default-te
 /**
  * Initializes clean Chart of Accounts & default Walk-in customer with ZERO pre-loaded products or bills.
  */
-export async function seedDatabaseIfEmpty() {
-  await seedLedgerAccountsForTenant('default-tenant');
-  await seedWalkInCustomerForTenant('default-tenant');
+export async function seedDatabaseIfEmpty(tenantId?: string) {
+  if (tenantId) {
+    await seedLedgerAccountsForTenant(tenantId);
+    await seedWalkInCustomerForTenant(tenantId);
+  }
 
   // Clean up any dummy basmati items or test customers from local Dexie IndexedDB
   const basmatiItems = await db.items.filter(i => (i.name || '').toLowerCase().includes('basmati')).toArray();
@@ -161,6 +165,8 @@ export async function clearAllDatabaseData() {
   await db.expenses.clear();
   await db.purchaseReturns.clear();
   await db.saleReturns.clear();
+  await db.cashTransactions.clear();
+  await db.cashAccounts.clear();
   
   // Reset account balances to 0 in local Dexie IndexedDB
   const accounts = await db.ledgerAccounts.toArray();

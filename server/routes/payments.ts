@@ -11,25 +11,10 @@ paymentsRouter.get('/in', async (req: Request, res: Response) => {
 
     if (isDbConnected()) {
       const tId = String(tenantId);
-      const whereClause = {
-        [Op.or]: [
-          { tenantId: tId },
-          { tenantId: 'default-tenant' },
-          { tenantId: null as any }
-        ]
-      };
       const payments = await PaymentIn.findAll({
-        where: whereClause,
+        where: { tenantId: tId },
         order: [['id', 'DESC']]
       });
-
-      if (tId !== 'default-tenant' && payments.length > 0) {
-        for (const p of payments) {
-          if (!p.get('tenantId') || p.get('tenantId') === 'default-tenant') {
-            await p.update({ tenantId: tId }).catch(() => {});
-          }
-        }
-      }
 
       return res.json({ success: true, data: payments });
     }
@@ -137,25 +122,10 @@ paymentsRouter.get('/out', async (req: Request, res: Response) => {
 
     if (isDbConnected()) {
       const tId = String(tenantId);
-      const whereClause = {
-        [Op.or]: [
-          { tenantId: tId },
-          { tenantId: 'default-tenant' },
-          { tenantId: null as any }
-        ]
-      };
       const payments = await PaymentOut.findAll({
-        where: whereClause,
+        where: { tenantId: tId },
         order: [['id', 'DESC']]
       });
-
-      if (tId !== 'default-tenant' && payments.length > 0) {
-        for (const p of payments) {
-          if (!p.get('tenantId') || p.get('tenantId') === 'default-tenant') {
-            await p.update({ tenantId: tId }).catch(() => {});
-          }
-        }
-      }
 
       return res.json({ success: true, data: payments });
     }

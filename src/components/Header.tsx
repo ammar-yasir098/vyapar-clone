@@ -34,7 +34,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   business,
   companies = [],
-  currentTenantId = 'default-tenant',
+  currentTenantId = '',
   itemCount,
   invoiceCount,
   activeTab,
@@ -90,7 +90,7 @@ export const Header: React.FC<HeaderProps> = ({
     };
   }, []);
 
-  const safeCompanies = companies.length > 0 ? companies : [business];
+  const safeCompanies = companies.length > 0 ? companies : (business?.name ? [business] : []);
 
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();

@@ -10,14 +10,7 @@ partiesRouter.get('/', async (req: Request, res: Response) => {
     const { tenantId = 'default-tenant' } = req.query;
     if (isDbConnected()) {
       const tId = String(tenantId);
-      const whereClause = {
-        [Op.or]: [
-          { tenantId: tId },
-          { tenantId: 'default-tenant' },
-          { tenantId: null as any }
-        ]
-      };
-      let parties = await Party.findAll({ where: whereClause, order: [['name', 'ASC']] });
+      let parties = await Party.findAll({ where: { tenantId: tId }, order: [['name', 'ASC']] });
       if (parties.length === 0) {
         const defaultWalkIn = await Party.create({
           tenantId: tId,
@@ -29,12 +22,6 @@ partiesRouter.get('/', async (req: Request, res: Response) => {
           currentBalance: 0
         });
         parties = [defaultWalkIn];
-      } else if (tId !== 'default-tenant') {
-        for (const party of parties) {
-          if (!party.get('tenantId') || party.get('tenantId') === 'default-tenant') {
-            await party.update({ tenantId: tId }).catch(() => {});
-          }
-        }
       }
       return res.json({ success: true, count: parties.length, data: parties });
     }

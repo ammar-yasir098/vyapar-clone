@@ -11,26 +11,11 @@ purchaseOrdersRouter.get('/', async (req: Request, res: Response) => {
 
     if (isDbConnected()) {
       const tId = String(tenantId);
-      const whereClause = {
-        [Op.or]: [
-          { tenantId: tId },
-          { tenantId: 'default-tenant' },
-          { tenantId: null as any }
-        ]
-      };
       const orders = await PurchaseOrder.findAll({
-        where: whereClause,
+        where: { tenantId: tId },
         include: [{ model: PurchaseOrderItem, as: 'items' }],
         order: [['id', 'DESC']]
       });
-
-      if (tId !== 'default-tenant' && orders.length > 0) {
-        for (const po of orders) {
-          if (!po.get('tenantId') || po.get('tenantId') === 'default-tenant') {
-            await po.update({ tenantId: tId }).catch(() => {});
-          }
-        }
-      }
 
       return res.json({ success: true, data: orders });
     }

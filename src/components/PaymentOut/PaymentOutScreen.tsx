@@ -62,8 +62,7 @@ export const PaymentOutScreen: React.FC<PaymentOutScreenProps> = ({
   useEffect(() => {
     if (selectedPartyFromParties) {
       setSelectedParty(selectedPartyFromParties);
-      const bal = Number(selectedPartyFromParties.currentBalance !== undefined ? selectedPartyFromParties.currentBalance : selectedPartyFromParties.openingBalance) || 0;
-      setAmount(bal > 0 ? bal : 0);
+      setAmount(0);
       setIsRecordModalOpen(true);
       if (onClearSelectedParty) onClearSelectedParty();
     }
@@ -242,7 +241,7 @@ export const PaymentOutScreen: React.FC<PaymentOutScreenProps> = ({
               onClick={() => {
                 if (suppliersList.length > 0) {
                   setSelectedParty(suppliersList[0]);
-                  setAmount(getPartyDueBalance(suppliersList[0]));
+                  setAmount(0);
                 }
                 setIsRecordModalOpen(true);
               }}
@@ -376,7 +375,7 @@ export const PaymentOutScreen: React.FC<PaymentOutScreenProps> = ({
                             <button
                               onClick={() => {
                                 setSelectedParty(supplier);
-                                setAmount(due);
+                                setAmount(0);
                                 setIsRecordModalOpen(true);
                               }}
                               className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition cursor-pointer"
@@ -494,7 +493,6 @@ export const PaymentOutScreen: React.FC<PaymentOutScreenProps> = ({
                     const found = suppliersList.find(p => p.id === Number(e.target.value));
                     if (found) {
                       setSelectedParty(found);
-                      setAmount(getPartyDueBalance(found));
                     }
                   }}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500"
@@ -517,7 +515,18 @@ export const PaymentOutScreen: React.FC<PaymentOutScreenProps> = ({
               )}
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Payment Amount (Rs) *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700 block">Payment Amount (Rs) *</label>
+                  {selectedParty && getPartyDueBalance(selectedParty) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setAmount(getPartyDueBalance(selectedParty))}
+                      className="text-[10px] font-extrabold text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2 py-0.5 rounded cursor-pointer transition"
+                    >
+                      Pay Full Due (Rs {getPartyDueBalance(selectedParty).toLocaleString()})
+                    </button>
+                  )}
+                </div>
                 <input
                   type="number"
                   step="any"

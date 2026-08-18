@@ -62,8 +62,7 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
   useEffect(() => {
     if (selectedPartyFromParties) {
       setSelectedParty(selectedPartyFromParties);
-      const bal = Number(selectedPartyFromParties.currentBalance !== undefined ? selectedPartyFromParties.currentBalance : selectedPartyFromParties.openingBalance) || 0;
-      setAmount(bal);
+      setAmount(0);
       setIsRecordModalOpen(true);
       if (onClearSelectedParty) onClearSelectedParty();
     }
@@ -91,8 +90,7 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
 
   const openPaymentModalForCustomer = (party: Party) => {
     setSelectedParty(party);
-    const due = getPartyDueBalance(party);
-    setAmount(due);
+    setAmount(0);
     setIsRecordModalOpen(true);
   };
 
@@ -539,8 +537,6 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
                     const p = parties.find(party => party.id === Number(e.target.value));
                     if (p) {
                       setSelectedParty(p);
-                      const due = getPartyDueBalance(p);
-                      if (due > 0) setAmount(due);
                     }
                   }}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
@@ -567,9 +563,20 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
 
               {/* Amount Received Input */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  Amount Received (Rs)
-                </label>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Amount Received (Rs) *
+                  </label>
+                  {selectedParty && getPartyDueBalance(selectedParty) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setAmount(getPartyDueBalance(selectedParty))}
+                      className="text-[10px] font-extrabold text-emerald-600 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded cursor-pointer transition"
+                    >
+                      Receive Full Due (Rs {getPartyDueBalance(selectedParty).toLocaleString()})
+                    </button>
+                  )}
+                </div>
                 <input
                   type="number"
                   step="any"

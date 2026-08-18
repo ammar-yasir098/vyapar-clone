@@ -30,9 +30,28 @@ async function getOrCreateCashAccount(tId: string = 'default-tenant', transactio
   return account;
 }
 
-// Helper: Deduplicate cash transactions by referenceId or signature
-async function deduplicateCashTransactions(cId: number, transaction?: any) {
+// Helper: Deduplicate cash transactions by referenceId or signature across tenant drawers
+async function deduplicateCashTransactions(cId: number, tenantId?: string, transaction?: any) {
   try {
+    // Purge orphaned default-tenant rows if present for the same referenceId
+    if (tenantId && tenantId !== 'default-tenant') {
+      const activeTxns = await CashTransaction.findAll({
+        where: { tenantId },
+        transaction
+      });
+      const activeRefs = new Set(activeTxns.map(t => t.get('referenceId')).filter(Boolean));
+
+      if (activeRefs.size > 0) {
+        await CashTransaction.destroy({
+          where: {
+            tenantId: 'default-tenant',
+            referenceId: Array.from(activeRefs)
+          },
+          transaction
+        }).catch(() => {});
+      }
+    }
+
     const txs = await CashTransaction.findAll({
       where: { cashAccountId: cId },
       order: [['id', 'ASC']],
@@ -42,7 +61,6 @@ async function deduplicateCashTransactions(cId: number, transaction?: any) {
     const seen = new Set<string>();
     const toDeleteIds: number[] = [];
 
-    // Track payment-out amounts to eliminate redundant purchase bill cash entries
     const payoutAmounts = new Set<number>();
     for (const t of txs) {
       if (t.get('source') === 'PAYMENT_OUT') {
@@ -80,17 +98,16 @@ async function deduplicateCashTransactions(cId: number, transaction?: any) {
 // GET /api/v1/cash/balance - Derived cash balance (Opening + IN - OUT)
 cashRouter.get('/balance', async (req: Request, res: Response) => {
   try {
-    const tenantId = req.query.tenantId ? String(req.query.tenantId) : 'default-tenant';
-    const accountId = req.query.accountId ? Number(req.query.accountId) : null;
+    const { tenantId } = req.query;
+    if (!tenantId) {
+      return res.status(400).json({ success: false, error: 'tenantId parameter is required' });
+    }
+    const tId = String(tenantId);
 
     if (isDbConnected()) {
-      let cashAcc = accountId ? await CashAccount.findByPk(accountId) : null;
-      if (!cashAcc) {
-        cashAcc = await getOrCreateCashAccount(tenantId);
-      }
-
+      const cashAcc = await getOrCreateCashAccount(tId);
       const cId = cashAcc.get('id') as number;
-      await deduplicateCashTransactions(cId);
+      await deduplicateCashTransactions(cId, tId);
       const openingBal = round2(cashAcc.get('openingBalance') || 0);
 
       const inSum = (await CashTransaction.sum('amount', {
@@ -130,13 +147,17 @@ cashRouter.get('/balance', async (req: Request, res: Response) => {
 // GET /api/v1/cash/transactions - Paginated transaction history with running balances
 cashRouter.get('/transactions', async (req: Request, res: Response) => {
   try {
-    const tenantId = req.query.tenantId ? String(req.query.tenantId) : 'default-tenant';
+    const { tenantId } = req.query;
+    if (!tenantId) {
+      return res.status(400).json({ success: false, error: 'tenantId parameter is required' });
+    }
+    const tId = String(tenantId);
     const { type, source, startDate, endDate, search, page = '1', limit = '50' } = req.query;
 
     if (isDbConnected()) {
-      const cashAcc = await getOrCreateCashAccount(tenantId);
+      const cashAcc = await getOrCreateCashAccount(tId);
       const cId = cashAcc.get('id') as number;
-      await deduplicateCashTransactions(cId);
+      await deduplicateCashTransactions(cId, tId);
       const openingBal = round2(cashAcc.get('openingBalance') || 0);
 
       const whereClause: any = { cashAccountId: cId };
@@ -251,7 +272,7 @@ cashRouter.get('/transactions', async (req: Request, res: Response) => {
 cashRouter.post('/entry', async (req: Request, res: Response) => {
   try {
     const {
-      tenantId = 'default-tenant',
+      tenantId,
       cashAccountId,
       type,
       amount,
@@ -260,6 +281,10 @@ cashRouter.post('/entry', async (req: Request, res: Response) => {
       description,
       transactionDate = new Date().toISOString()
     } = req.body;
+
+    if (!tenantId) {
+      return res.status(400).json({ success: false, error: 'tenantId parameter is required' });
+    }
 
     const safeAmt = round2(amount);
     if (safeAmt <= 0) {
@@ -272,11 +297,27 @@ cashRouter.post('/entry', async (req: Request, res: Response) => {
     if (isDbConnected()) {
       const t = await sequelize.transaction();
       try {
-        let cashAcc = cashAccountId ? await CashAccount.findByPk(cashAccountId, { transaction: t }) : null;
-        if (!cashAcc) {
-          cashAcc = await getOrCreateCashAccount(tenantId, t);
-        }
+        const cashAcc = await getOrCreateCashAccount(tenantId, t);
         const cId = cashAcc.get('id') as number;
+
+        let existingTx = referenceId ? await CashTransaction.findOne({
+          where: { referenceId, tenantId },
+          transaction: t
+        }) : null;
+
+        if (existingTx) {
+          await existingTx.update({
+            cashAccountId: cId,
+            tenantId,
+            type,
+            amount: safeAmt,
+            source,
+            description: description || `Cash ${type === 'IN' ? 'Inflow' : 'Outflow'} Entry`,
+            transactionDate
+          }, { transaction: t });
+          await t.commit();
+          return res.status(200).json({ success: true, data: existingTx });
+        }
 
         const newTx = await CashTransaction.create(
           {

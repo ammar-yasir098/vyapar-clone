@@ -11,26 +11,11 @@ saleReturnsRouter.get('/', async (req: Request, res: Response) => {
 
     if (isDbConnected()) {
       const tId = String(tenantId);
-      const whereClause = {
-        [Op.or]: [
-          { tenantId: tId },
-          { tenantId: 'default-tenant' },
-          { tenantId: null as any }
-        ]
-      };
       const returns = await SaleReturn.findAll({
-        where: whereClause,
+        where: { tenantId: tId },
         include: [{ model: SaleReturnItem, as: 'items' }],
         order: [['id', 'DESC']]
       });
-
-      if (tId !== 'default-tenant' && returns.length > 0) {
-        for (const ret of returns) {
-          if (!ret.get('tenantId') || ret.get('tenantId') === 'default-tenant') {
-            await ret.update({ tenantId: tId }).catch(() => {});
-          }
-        }
-      }
 
       return res.json({ success: true, data: returns });
     }

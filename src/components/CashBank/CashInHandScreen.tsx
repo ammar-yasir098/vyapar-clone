@@ -30,7 +30,7 @@ interface CashInHandScreenProps {
 
 export const CashInHandScreen: React.FC<CashInHandScreenProps> = ({ business }) => {
   const { showToast } = useToast();
-  const tenantId = business?.tenantId || 'default-tenant';
+  const tenantId = business?.tenantId || '';
 
   // Data States
   const [balanceInfo, setBalanceInfo] = useState({

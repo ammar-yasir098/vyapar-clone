@@ -70,8 +70,8 @@ class ClientSyncManager {
   /**
    * Pushes pending local mutations to the cloud backend API.
    */
-  public async triggerSync() {
-    if (this.isSyncing || !navigator.onLine) return;
+  public async triggerSync(targetTenantId?: string) {
+    if (this.isSyncing || !navigator.onLine || !targetTenantId) return;
 
     this.isSyncing = true;
     this.notify();
@@ -81,9 +81,10 @@ class ClientSyncManager {
 
       // If sync journal is empty, auto-queue all current local records for cloud sync
       if (unsynced.length === 0) {
-        const localItems = await db.items.toArray();
-        const localParties = await db.parties.toArray();
-        const localInvoices = await db.invoices.toArray();
+        const tId = targetTenantId;
+        const localItems = await db.items.filter(i => i.tenantId === tId).toArray();
+        const localParties = await db.parties.filter(p => (p.tenantId || 'default-tenant') === tId).toArray();
+        const localInvoices = await db.invoices.filter(inv => (inv.tenantId || 'default-tenant') === tId).toArray();
 
         for (const item of localItems) {
           if (item.id) {
@@ -130,7 +131,7 @@ class ClientSyncManager {
           }
         }
 
-        const localJournals = await db.journalEntries.toArray();
+        const localJournals = await db.journalEntries.filter(j => (j.tenantId || 'default-tenant') === tId).toArray();
         for (const je of localJournals) {
           if (je.id || je.entryNumber) {
             await db.syncJournal.add({
@@ -146,7 +147,7 @@ class ClientSyncManager {
           }
         }
 
-        const localEstimates = await db.estimates.toArray();
+        const localEstimates = await db.estimates.filter(e => (e.tenantId || 'default-tenant') === tId).toArray();
         for (const est of localEstimates) {
           if (est.id || est.estimateId) {
             await db.syncJournal.add({
@@ -162,7 +163,7 @@ class ClientSyncManager {
           }
         }
 
-        const localPaymentsIn = await db.paymentIn.toArray();
+        const localPaymentsIn = await db.paymentIn.filter(p => (p.tenantId || 'default-tenant') === tId).toArray();
         for (const payIn of localPaymentsIn) {
           if (payIn.id || payIn.receiptNumber) {
             await db.syncJournal.add({
@@ -178,7 +179,7 @@ class ClientSyncManager {
           }
         }
 
-        const localPOs = await db.purchaseOrders.toArray();
+        const localPOs = await db.purchaseOrders.filter(po => (po.tenantId || 'default-tenant') === tId).toArray();
         for (const po of localPOs) {
           if (po.id || po.poId) {
             await db.syncJournal.add({
@@ -194,7 +195,7 @@ class ClientSyncManager {
           }
         }
 
-        const localBills = await db.purchaseBills.toArray();
+        const localBills = await db.purchaseBills.filter(b => (b.tenantId || 'default-tenant') === tId).toArray();
         for (const bill of localBills) {
           if (bill.id || bill.billId) {
             await db.syncJournal.add({
@@ -210,7 +211,7 @@ class ClientSyncManager {
           }
         }
 
-        const localPaymentsOut = await db.paymentOut.toArray();
+        const localPaymentsOut = await db.paymentOut.filter(p => (p.tenantId || 'default-tenant') === tId).toArray();
         for (const payOut of localPaymentsOut) {
           if (payOut.id || payOut.receiptNumber) {
             await db.syncJournal.add({
@@ -226,7 +227,7 @@ class ClientSyncManager {
           }
         }
 
-        const localExpenses = await db.expenses.toArray();
+        const localExpenses = await db.expenses.filter(e => (e.tenantId || 'default-tenant') === tId).toArray();
         for (const exp of localExpenses) {
           if (exp.id || exp.expenseNumber) {
             await db.syncJournal.add({
@@ -242,7 +243,7 @@ class ClientSyncManager {
           }
         }
 
-        const localReturns = await db.purchaseReturns.toArray();
+        const localReturns = await db.purchaseReturns.filter(r => (r.tenantId || 'default-tenant') === tId).toArray();
         for (const ret of localReturns) {
           if (ret.id || ret.returnId) {
             await db.syncJournal.add({
@@ -258,7 +259,7 @@ class ClientSyncManager {
           }
         }
 
-        const localSaleReturns = await db.saleReturns.toArray();
+        const localSaleReturns = await db.saleReturns.filter(sr => (sr.tenantId || 'default-tenant') === tId).toArray();
         for (const sret of localSaleReturns) {
           if (sret.id || sret.returnId) {
             await db.syncJournal.add({
@@ -274,7 +275,7 @@ class ClientSyncManager {
           }
         }
 
-        const localCashAccs = await db.cashAccounts.toArray();
+        const localCashAccs = await db.cashAccounts.filter(c => (c.tenantId || 'default-tenant') === tId).toArray();
         for (const cAcc of localCashAccs) {
           if (cAcc.id) {
             await db.syncJournal.add({
@@ -290,7 +291,7 @@ class ClientSyncManager {
           }
         }
 
-        const localCashTxns = await db.cashTransactions.toArray();
+        const localCashTxns = await db.cashTransactions.filter(ct => (ct.tenantId || 'default-tenant') === tId).toArray();
         for (const cTx of localCashTxns) {
           if (cTx.id || cTx.referenceId) {
             await db.syncJournal.add({
@@ -311,11 +312,12 @@ class ClientSyncManager {
       }
 
       if (unsynced.length > 0) {
+        const activeTenantId = targetTenantId || 'default-tenant';
         const response = await fetch(`${SYNC_SERVER_URL}/push`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            tenantId: 'default-tenant',
+            tenantId: activeTenantId,
             mutations: unsynced
           })
         });

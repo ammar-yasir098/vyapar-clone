@@ -10,23 +10,10 @@ ledgerRouter.get('/accounts', async (req: Request, res: Response) => {
     const { tenantId = 'default-tenant' } = req.query;
     if (isDbConnected()) {
       const tId = String(tenantId);
-      const whereClause = {
-        [Op.or]: [
-          { tenantId: tId },
-          { tenantId: 'default-tenant' },
-          { tenantId: null as any }
-        ]
-      };
-      let accounts = await LedgerAccount.findAll({ where: whereClause, order: [['accountCode', 'ASC']] });
+      let accounts = await LedgerAccount.findAll({ where: { tenantId: tId }, order: [['accountCode', 'ASC']] });
       if (accounts.length === 0) {
         await seedServerLedgerAccounts(tId);
         accounts = await LedgerAccount.findAll({ where: { tenantId: tId }, order: [['accountCode', 'ASC']] });
-      } else if (tId !== 'default-tenant') {
-        for (const acc of accounts) {
-          if (!acc.get('tenantId') || acc.get('tenantId') === 'default-tenant') {
-            await acc.update({ tenantId: tId }).catch(() => {});
-          }
-        }
       }
       return res.json({ success: true, count: accounts.length, data: accounts });
     }
