@@ -577,6 +577,7 @@ export function App() {
   const allExpenses = useLiveQuery(() => db.expenses.reverse().toArray(), []) || [];
   const allPurchaseReturns = useLiveQuery(() => db.purchaseReturns.reverse().toArray(), []) || [];
   const allSaleReturns = useLiveQuery(() => db.saleReturns.reverse().toArray(), []) || [];
+  const allCashTransactions = useLiveQuery(() => db.cashTransactions.reverse().toArray(), []) || [];
 
   const activeTenantId = currentTenantId || 'default-tenant';
   const items = allItems.filter(item => (item.tenantId || 'default-tenant') === activeTenantId);
@@ -956,6 +957,11 @@ export function App() {
               invoices={allInvoices}
               purchaseBills={allPurchaseBills}
               purchaseReturns={allPurchaseReturns}
+              paymentsIn={allPaymentsIn}
+              paymentsOut={allPaymentsOut}
+              expenses={allExpenses}
+              saleReturns={allSaleReturns}
+              cashTransactions={allCashTransactions}
               business={businessDetails}
               companies={companies}
               onAddSale={() => setActiveTab('pos')}

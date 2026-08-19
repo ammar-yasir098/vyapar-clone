@@ -302,6 +302,9 @@ export interface PurchaseBill {
   subtotal: number;
   taxTotal: number;
   grandTotal: number;
+  paidAmount?: number;
+  dueAmount?: number;
+  paymentStatus?: 'PAID' | 'UNPAID' | 'PARTIAL';
   notes?: string;
   createdAt?: string;
   updatedAt?: string;

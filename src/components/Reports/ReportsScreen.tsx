@@ -12,15 +12,23 @@ import {
   Share2,
   Calendar,
   X,
-  PieChart
+  PieChart,
+  ChevronLeft,
+  ChevronRight,
+  MoreVertical
 } from 'lucide-react';
-import { Invoice, BusinessDetails, PurchaseBill, PurchaseReturn } from '../../types';
+import { Invoice, BusinessDetails, PurchaseBill, PurchaseReturn, PaymentIn, PaymentOut, Expense, SaleReturn, CashTransaction } from '../../types';
 import { triggerThermalPrint } from '../../services/printer';
 
 interface ReportsScreenProps {
   invoices?: Invoice[];
   purchaseBills?: PurchaseBill[];
   purchaseReturns?: PurchaseReturn[];
+  paymentsIn?: PaymentIn[];
+  paymentsOut?: PaymentOut[];
+  expenses?: Expense[];
+  saleReturns?: SaleReturn[];
+  cashTransactions?: CashTransaction[];
   business?: BusinessDetails;
   companies?: BusinessDetails[];
   onAddSale?: () => void;
@@ -143,6 +151,11 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   invoices = [],
   purchaseBills = [],
   purchaseReturns = [],
+  paymentsIn = [],
+  paymentsOut = [],
+  expenses = [],
+  saleReturns = [],
+  cashTransactions = [],
   business = {
     name: 'SuperMarket Retail & Traders',
     gstin: 'NTN: 7654321-0',
@@ -163,6 +176,9 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const [startDate, setStartDate] = useState<string>(initialDates.startDate);
   const [endDate, setEndDate] = useState<string>(initialDates.endDate);
   
+  // Day Book Single Date State (Defaults to Today)
+  const [dayBookDate, setDayBookDate] = useState<string>(formatDateISO(new Date()));
+
   const activeTenantId = business?.tenantId || 'default-tenant';
   const [selectedFirm, setSelectedFirm] = useState<string>(activeTenantId || 'all');
   const [search, setSearch] = useState<string>('');
@@ -178,6 +194,11 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const safeInvoices = Array.isArray(invoices) ? invoices : [];
   const safePurchaseBills = Array.isArray(purchaseBills) ? purchaseBills : [];
   const safePurchaseReturns = Array.isArray(purchaseReturns) ? purchaseReturns : [];
+  const safePaymentsIn = Array.isArray(paymentsIn) ? paymentsIn : [];
+  const safePaymentsOut = Array.isArray(paymentsOut) ? paymentsOut : [];
+  const safeExpenses = Array.isArray(expenses) ? expenses : [];
+  const safeSaleReturns = Array.isArray(saleReturns) ? saleReturns : [];
+  const safeCashTransactions = Array.isArray(cashTransactions) ? cashTransactions : [];
 
   // Handle Preset Change
   const handlePresetChange = (preset: DatePreset) => {
@@ -187,6 +208,23 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
       setStartDate(dates.startDate);
       setEndDate(dates.endDate);
     }
+  };
+
+  // Date Navigation Helpers for Day Book
+  const handlePrevDay = () => {
+    const cur = new Date(dayBookDate);
+    cur.setDate(cur.getDate() - 1);
+    setDayBookDate(formatDateISO(cur));
+  };
+
+  const handleNextDay = () => {
+    const cur = new Date(dayBookDate);
+    cur.setDate(cur.getDate() + 1);
+    setDayBookDate(formatDateISO(cur));
+  };
+
+  const handleToday = () => {
+    setDayBookDate(formatDateISO(new Date()));
   };
 
   // ----------------- SALE REPORT DATA -----------------
@@ -367,7 +405,6 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     return purchasePaidTotal + purchaseUnpaidTotal;
   }, [purchasePaidTotal, purchaseUnpaidTotal]);
 
-  // Accurate Payment Breakdown Calculations for Purchases
   const cashPurchasesTotal = useMemo(() => {
     return filteredPurchases
       .filter(p => (p.paymentType || 'CASH').toUpperCase() === 'CASH')
@@ -441,6 +478,262 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
     link.setAttribute('download', `Purchase_Report_${startDate}_to_${endDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // ----------------- DAY BOOK REPORT AGGREGATION DATA -----------------
+  // Normalized Day Book transactions adhering strictly to accounting business rules & reference UI layout:
+  // Columns: NAME | REF NO. | TYPE | PAYMENT TYPE | TOTAL | MONEY IN | MONEY OUT | PRINT / SHARE
+  const dayBookTransactions = useMemo(() => {
+    const targetDate = dayBookDate;
+
+    // 1. Sales / Invoices
+    const sales = safeInvoices.map(inv => {
+      const d = inv.invoiceDate || (inv.createdAt ? inv.createdAt.split('T')[0] : '');
+      const t = inv.createdAt ? inv.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+      const tot = Number(inv.grandTotal || 0);
+      const rec = Number(inv.receivedAmount !== undefined ? inv.receivedAmount : (inv.paymentStatus === 'PAID' ? inv.grandTotal : 0));
+
+      return {
+        id: `sale-${inv.id || inv.invoiceNumber}`,
+        date: d,
+        time: t,
+        partyName: inv.partyName || 'Walk-in Retail Customer',
+        refNo: inv.invoiceNumber || 'INV-000',
+        type: 'Sale',
+        paymentMode: inv.paymentMethod || 'Cash',
+        totalAmount: tot,
+        moneyIn: rec,
+        moneyOut: null as number | null,
+        tenantId: inv.tenantId || 'default-tenant'
+      };
+    });
+
+    // 2. Purchases / Bills
+    const purchases = safePurchaseBills.map(b => {
+      const d = b.billDate || (b.createdAt ? b.createdAt.split('T')[0] : '');
+      const t = b.createdAt ? b.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+      const tot = Number(b.grandTotal || 0);
+      const paid = b.paidAmount !== undefined ? Number(b.paidAmount) : tot;
+
+      return {
+        id: `pur-${b.id || b.billNumber}`,
+        date: d,
+        time: t,
+        partyName: b.supplierName || 'Vendor / Supplier',
+        refNo: b.billNumber || '',
+        type: 'Purchase',
+        paymentMode: 'Cash',
+        totalAmount: tot,
+        moneyIn: null as number | null,
+        moneyOut: paid,
+        tenantId: b.tenantId || 'default-tenant'
+      };
+    });
+
+    // 3. Customer Receipts (Payment-In)
+    const payIns = safePaymentsIn.map(p => {
+      const d = p.paymentDate || (p.createdAt ? p.createdAt.split('T')[0] : '');
+      const t = p.createdAt ? p.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+      const amt = Number(p.amount || 0);
+
+      return {
+        id: `payin-${p.id || p.receiptNumber}`,
+        date: d,
+        time: t,
+        partyName: p.partyName || 'Customer Receipt',
+        refNo: p.receiptNumber || '',
+        type: 'Payment-In',
+        paymentMode: p.paymentMethod || 'Cash',
+        totalAmount: amt,
+        moneyIn: amt,
+        moneyOut: null as number | null,
+        tenantId: p.tenantId || 'default-tenant'
+      };
+    });
+
+    // 4. Vendor Payments (Payment-Out)
+    const payOuts = safePaymentsOut.map(po => {
+      const d = po.paymentDate || (po.createdAt ? po.createdAt.split('T')[0] : '');
+      const t = po.createdAt ? po.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+      const amt = Number(po.amount || 0);
+
+      return {
+        id: `payout-${po.id || po.receiptNumber}`,
+        date: d,
+        time: t,
+        partyName: po.partyName || 'Supplier Payment',
+        refNo: po.receiptNumber || '',
+        type: 'Payment-Out',
+        paymentMode: po.paymentMethod || 'Cash',
+        totalAmount: amt,
+        moneyIn: null as number | null,
+        moneyOut: amt,
+        tenantId: po.tenantId || 'default-tenant'
+      };
+    });
+
+    // 5. Expenses
+    const exps = safeExpenses.map(e => {
+      const d = e.expenseDate || (e.createdAt ? e.createdAt.split('T')[0] : '');
+      const t = e.createdAt ? e.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+      const amt = Number(e.amount || 0);
+
+      return {
+        id: `exp-${e.id || e.expenseNumber}`,
+        date: d,
+        time: t,
+        partyName: e.categoryName || e.notes || 'Business Expense',
+        refNo: e.expenseNumber || '',
+        type: 'Expense',
+        paymentMode: e.paymentMode || 'Cash',
+        totalAmount: amt,
+        moneyIn: null as number | null,
+        moneyOut: amt,
+        tenantId: e.tenantId || 'default-tenant'
+      };
+    });
+
+    // 6. Debit Notes (Purchase Returns)
+    const purReturns = safePurchaseReturns.map(pr => {
+      const d = pr.returnDate || (pr.createdAt ? pr.createdAt.split('T')[0] : '');
+      const t = pr.createdAt ? pr.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+      const amt = Number(pr.grandTotal || 0);
+
+      return {
+        id: `pur-ret-${pr.id || pr.debitNoteNumber}`,
+        date: d,
+        time: t,
+        partyName: pr.supplierName || 'Vendor / Supplier',
+        refNo: pr.debitNoteNumber || '1',
+        type: 'Debit Note',
+        paymentMode: 'Cash',
+        totalAmount: amt,
+        moneyIn: amt,
+        moneyOut: null as number | null,
+        tenantId: pr.tenantId || 'default-tenant'
+      };
+    });
+
+    // 7. Credit Notes (Sale Returns)
+    const slReturns = safeSaleReturns.map(sr => {
+      const d = sr.returnDate || (sr.createdAt ? sr.createdAt.split('T')[0] : '');
+      const t = sr.createdAt ? sr.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+      const amt = Number(sr.grandTotal || 0);
+      const refund = sr.refundAmount !== undefined ? Number(sr.refundAmount) : amt;
+
+      return {
+        id: `sale-ret-${sr.id || sr.creditNoteNumber}`,
+        date: d,
+        time: t,
+        partyName: sr.partyName || 'Retail Customer',
+        refNo: sr.creditNoteNumber || '',
+        type: 'Sale Return',
+        paymentMode: 'Cash',
+        totalAmount: amt,
+        moneyIn: null as number | null,
+        moneyOut: refund,
+        tenantId: sr.tenantId || 'default-tenant'
+      };
+    });
+
+    // 8. Cash Adjustments (Manual Cash Entries)
+    const manualCashAdjustments = safeCashTransactions
+      .filter(ct => {
+        const src = ct.source;
+        return (
+          src === 'MANUAL_ADJUSTMENT' ||
+          src === 'BANK_DEPOSIT' ||
+          src === 'BANK_WITHDRAWAL'
+        );
+      })
+      .map(ct => {
+        const d = ct.transactionDate || (ct.createdAt ? ct.createdAt.split('T')[0] : '');
+        const t = ct.createdAt ? ct.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+        const amt = Number(ct.amount || 0);
+        const isIncrease = ct.type === 'IN';
+
+        return {
+          id: `cash-adj-${ct.id}`,
+          date: d,
+          time: t,
+          partyName: 'Cash Adjustment',
+          refNo: '',
+          type: isIncrease ? 'Cash Increase' : 'Cash Reduce',
+          paymentMode: '',
+          totalAmount: amt,
+          moneyIn: isIncrease ? amt : null,
+          moneyOut: isIncrease ? null : amt,
+          tenantId: ct.tenantId || 'default-tenant'
+        };
+      });
+
+    const combined = [
+      ...sales,
+      ...purchases,
+      ...payIns,
+      ...payOuts,
+      ...exps,
+      ...purReturns,
+      ...slReturns,
+      ...manualCashAdjustments
+    ];
+
+    const filtered = combined.filter(item => {
+      if (selectedFirm !== 'all' && item.tenantId !== selectedFirm) return false;
+      if (item.date !== targetDate) return false;
+
+      if (search.trim()) {
+        const q = search.toLowerCase().trim();
+        return (
+          item.refNo.toLowerCase().includes(q) ||
+          item.partyName.toLowerCase().includes(q) ||
+          item.type.toLowerCase().includes(q) ||
+          item.paymentMode.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+
+    return filtered.sort((a, b) => a.time.localeCompare(b.time));
+  }, [dayBookDate, safeInvoices, safePurchaseBills, safePaymentsIn, safePaymentsOut, safeExpenses, safePurchaseReturns, safeSaleReturns, safeCashTransactions, selectedFirm, search]);
+
+  const dayBookMoneyInTotal = useMemo(() => {
+    return dayBookTransactions.reduce((sum, t) => sum + (t.moneyIn || 0), 0);
+  }, [dayBookTransactions]);
+
+  const dayBookMoneyOutTotal = useMemo(() => {
+    return dayBookTransactions.reduce((sum, t) => sum + (t.moneyOut || 0), 0);
+  }, [dayBookTransactions]);
+
+  const dayBookNetBalance = useMemo(() => {
+    return dayBookMoneyInTotal - dayBookMoneyOutTotal;
+  }, [dayBookMoneyInTotal, dayBookMoneyOutTotal]);
+
+  const handleExportDayBookCSV = () => {
+    if (dayBookTransactions.length === 0) {
+      alert(`No financial transactions logged for ${formatDateDisplay(dayBookDate)}.`);
+      return;
+    }
+
+    const headers = ['NAME', 'REF NO.', 'TYPE', 'PAYMENT TYPE', 'TOTAL (Rs)', 'MONEY IN (Rs)', 'MONEY OUT (Rs)'];
+    const rows = dayBookTransactions.map(t => [
+      `"${t.partyName}"`,
+      `"${t.refNo}"`,
+      t.type,
+      t.paymentMode,
+      t.totalAmount.toFixed(2),
+      t.moneyIn !== null ? t.moneyIn.toFixed(2) : '-',
+      t.moneyOut !== null ? t.moneyOut.toFixed(2) : '-'
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `DayBook_${dayBookDate}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1059,8 +1352,212 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
           </>
         )}
 
+        {/* ================= DAY BOOK REPORT ================= */}
+        {activeTab === 'day-book' && (
+          <>
+            {/* Filter Bar Controls matching Reference UI */}
+            <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Date Picker Input Badge matching Reference UI */}
+                <div className="flex items-center bg-white border border-slate-300 rounded-lg overflow-hidden shadow-2xs">
+                  <span className="bg-slate-500 text-white text-xs font-bold px-3 py-2">Date</span>
+                  <input
+                    type="date"
+                    value={dayBookDate}
+                    onChange={e => setDayBookDate(e.target.value)}
+                    className="px-3 py-1.5 text-xs font-mono font-bold text-slate-800 outline-none cursor-pointer"
+                  />
+                </div>
+
+                {/* Day Navigation Shortcuts */}
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={handlePrevDay}
+                    title="Previous Day"
+                    className="h-8 px-2.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Prev</span>
+                  </button>
+                  <button
+                    onClick={handleToday}
+                    title="Today"
+                    className="h-8 px-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-black transition-colors cursor-pointer"
+                  >
+                    Today
+                  </button>
+                  <button
+                    onClick={handleNextDay}
+                    title="Next Day"
+                    className="h-8 px-2.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <span>Next</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Action Utilities (Excel & Print matching reference UI) */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleExportDayBookCSV}
+                  title="Excel Report"
+                  className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span>Excel Report</span>
+                </button>
+
+                <button
+                  onClick={handlePrintReport}
+                  title="Print"
+                  className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-slate-600" />
+                  <span>Print</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Day Book Table Section matching Reference UI */}
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden">
+              <div className="p-3.5 border-b border-slate-200 flex items-center">
+                <div className="relative w-full max-w-sm">
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    aria-label="Search day book transactions"
+                    placeholder="Search..."
+                    className="h-8 pl-8 pr-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold outline-none focus:border-blue-500 w-full"
+                  />
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="vyapar-table w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/80 text-slate-500 text-[11px] font-extrabold uppercase tracking-wider border-b border-slate-200">
+                      <th className="py-3 px-4">NAME</th>
+                      <th className="py-3 px-4">REF NO.</th>
+                      <th className="py-3 px-4">TYPE</th>
+                      <th className="py-3 px-4">PAYMENT TYPE</th>
+                      <th className="py-3 px-4 text-right">TOTAL</th>
+                      <th className="py-3 px-4 text-right">MONEY IN</th>
+                      <th className="py-3 px-4 text-right">MONEY OUT</th>
+                      <th className="py-3 px-4 text-center">PRINT / SHARE</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                    {dayBookTransactions.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="text-center py-12 text-slate-400 font-semibold">
+                          No transactions found for {formatDateDisplay(dayBookDate)}.
+                        </td>
+                      </tr>
+                    ) : (
+                      dayBookTransactions.map(t => (
+                        <tr key={t.id} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="py-3 px-4 font-bold text-slate-800">
+                            {t.partyName}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-bold text-slate-700 whitespace-nowrap">
+                            {t.refNo || ''}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span
+                              className={`px-2 py-0.5 text-[10px] font-extrabold rounded border ${
+                                t.type === 'Sale'
+                                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                  : t.type === 'Purchase'
+                                  ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                  : t.type === 'Payment-In'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : t.type === 'Payment-Out'
+                                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                  : t.type === 'Expense'
+                                  ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                  : t.type === 'Cash Increase'
+                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                  : t.type === 'Cash Reduce'
+                                  ? 'bg-rose-100 text-rose-800 border-rose-300'
+                                  : 'bg-slate-100 text-slate-700 border-slate-200'
+                              }`}
+                            >
+                              {t.type}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-mono font-bold text-slate-700">
+                            {t.paymentMode ? (
+                              <span className="px-2 py-0.5 text-[10px] rounded bg-slate-100 border border-slate-200">
+                                {t.paymentMode}
+                              </span>
+                            ) : ''}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-black text-slate-900 text-right whitespace-nowrap">
+                            Rs {t.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-black text-emerald-600 text-right whitespace-nowrap">
+                            {t.moneyIn !== null && t.moneyIn > 0 ? `Rs ${t.moneyIn.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : (t.moneyIn === 0 ? 'Rs 0.00' : '')}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-black text-rose-600 text-right whitespace-nowrap">
+                            {t.moneyOut !== null && t.moneyOut > 0 ? `Rs ${t.moneyOut.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : (t.moneyOut === 0 ? 'Rs 0.00' : '')}
+                          </td>
+                          <td className="py-3 px-4 text-center whitespace-nowrap">
+                            <div className="flex items-center justify-center gap-2 text-slate-400">
+                              <button
+                                onClick={handlePrintReport}
+                                title="Print Details"
+                                className="p-1 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const shareText = `${t.type} #${t.refNo} - ${t.partyName} - Total: Rs ${t.totalAmount}`;
+                                  navigator.clipboard?.writeText(shareText);
+                                  alert('Transaction details copied to clipboard!');
+                                }}
+                                title="Share / Copy"
+                                className="p-1 hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors cursor-pointer"
+                              >
+                                <Share2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => alert(`Details for ${t.type} #${t.refNo}`)}
+                                title="More options"
+                                className="p-1 hover:text-slate-700 hover:bg-slate-100 rounded transition-colors cursor-pointer"
+                              >
+                                <MoreVertical className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Exact Bottom Summary Footer Bar from Reference Screenshot */}
+              <div className="bg-slate-50 border-t border-slate-200 px-5 py-3 flex flex-wrap items-center justify-between gap-4 text-xs font-mono font-extrabold border-b border-slate-200 rounded-b-xl shadow-2xs">
+                <div className="text-emerald-600">
+                  Total Money-In: Rs {dayBookMoneyInTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-rose-600">
+                  Total Money-Out: Rs {dayBookMoneyOutTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-teal-600">
+                  Total Money In - Total Money Out: Rs {dayBookNetBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
         {/* ================= OTHER REPORT TABS PLACEHOLDER ================= */}
-        {activeTab !== 'sale' && activeTab !== 'purchase' && (
+        {activeTab !== 'sale' && activeTab !== 'purchase' && activeTab !== 'day-book' && (
           <div className="bg-white border border-slate-200 rounded-xl p-8 shadow-sm flex flex-col items-center justify-center text-center my-auto min-h-[400px]">
             <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 mb-4">
               <FileText className="w-7 h-7 stroke-[2]" />
