@@ -82,17 +82,202 @@ export async function deduplicateLocalCashTransactions() {
 }
 
 /**
+ * Aggregates all physical cash movements across Dexie tables for the specified tenantId
+ */
+export async function getAllAggregatedCashTransactions(tenantId: string): Promise<CashTransaction[]> {
+  const activeTenantId = tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+
+  const [
+    invoices,
+    purchaseBills,
+    paymentsIn,
+    paymentsOut,
+    expenses,
+    purchaseReturns,
+    saleReturns,
+    manualCashTxns
+  ] = await Promise.all([
+    db.invoices.filter(i => (i.tenantId || 'default-tenant') === activeTenantId).toArray(),
+    db.purchaseBills.filter(b => (b.tenantId || 'default-tenant') === activeTenantId).toArray(),
+    db.paymentIn.filter(p => (p.tenantId || 'default-tenant') === activeTenantId).toArray(),
+    db.paymentOut.filter(p => (p.tenantId || 'default-tenant') === activeTenantId).toArray(),
+    db.expenses.filter(e => (e.tenantId || 'default-tenant') === activeTenantId).toArray(),
+    db.purchaseReturns.filter(pr => (pr.tenantId || 'default-tenant') === activeTenantId).toArray(),
+    db.saleReturns.filter(sr => (sr.tenantId || 'default-tenant') === activeTenantId).toArray(),
+    db.cashTransactions.filter(ct => (ct.tenantId || 'default-tenant') === activeTenantId).toArray()
+  ]);
+
+  const items: CashTransaction[] = [];
+
+  // 1. Sales (Cash Sales & Cash Payments Received Upfront)
+  for (const inv of invoices) {
+    const isCredit = (inv.paymentMethod || '').toUpperCase() === 'CREDIT' || inv.paymentStatus === 'UNPAID';
+    const grand = Number(inv.grandTotal || 0);
+    const rec = isCredit ? 0 : Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? grand : 0));
+    if (rec > 0) {
+      items.push({
+        id: `cash-sale-${inv.id || inv.invoiceNumber}`,
+        cashAccountId: 1,
+        tenantId: activeTenantId,
+        type: 'IN',
+        amount: roundCurrency(rec),
+        source: 'POS_SALE' as CashTransactionSource,
+        referenceId: inv.invoiceNumber || '',
+        description: `POS Cash Sale - ${inv.partyName || 'Retail Customer'}`,
+        transactionDate: inv.invoiceDate || inv.createdAt || new Date().toISOString()
+      });
+    }
+  }
+
+  // 2. Payment-In (Cash Receipts)
+  for (const p of paymentsIn) {
+    const mode = (p.paymentMethod || 'CASH').toUpperCase();
+    const amt = Number(p.amount || 0);
+    if (mode === 'CASH' && amt > 0) {
+      items.push({
+        id: `cash-payin-${p.id || p.receiptNumber}`,
+        cashAccountId: 1,
+        tenantId: activeTenantId,
+        type: 'IN',
+        amount: roundCurrency(amt),
+        source: 'PAYMENT_IN' as CashTransactionSource,
+        referenceId: p.receiptNumber || '',
+        description: `Payment-In from ${p.partyName || 'Customer'}`,
+        transactionDate: p.paymentDate || p.createdAt || new Date().toISOString()
+      });
+    }
+  }
+
+  // 3. Purchase Bills (Cash Purchases)
+  for (const b of purchaseBills) {
+    const paid = Number(b.paidAmount ?? (b.paymentMethod === 'CASH' ? b.grandTotal : 0));
+    if (paid > 0) {
+      items.push({
+        id: `cash-pur-${b.id || b.billNumber}`,
+        cashAccountId: 1,
+        tenantId: activeTenantId,
+        type: 'OUT',
+        amount: roundCurrency(paid),
+        source: 'PURCHASE_BILL' as CashTransactionSource,
+        referenceId: b.billNumber || '',
+        description: `Cash Purchase - ${b.supplierName || 'Supplier'}`,
+        transactionDate: b.billDate || b.createdAt || new Date().toISOString()
+      });
+    }
+  }
+
+  // 4. Payment-Out (Cash Payments)
+  for (const po of paymentsOut) {
+    const mode = (po.paymentMethod || 'CASH').toUpperCase();
+    const amt = Number(po.amount || 0);
+    if (mode === 'CASH' && amt > 0) {
+      items.push({
+        id: `cash-payout-${po.id || po.receiptNumber}`,
+        cashAccountId: 1,
+        tenantId: activeTenantId,
+        type: 'OUT',
+        amount: roundCurrency(amt),
+        source: 'PAYMENT_OUT' as CashTransactionSource,
+        referenceId: po.receiptNumber || '',
+        description: `Payment-Out to ${po.partyName || 'Supplier'}`,
+        transactionDate: po.paymentDate || po.createdAt || new Date().toISOString()
+      });
+    }
+  }
+
+  // 5. Expenses (Cash Expenses)
+  for (const e of expenses) {
+    const mode = (e.paymentMode || 'CASH').toUpperCase();
+    const amt = Number(e.amount || 0);
+    if (mode === 'CASH' && amt > 0) {
+      items.push({
+        id: `cash-exp-${e.id || e.expenseNumber}`,
+        cashAccountId: 1,
+        tenantId: activeTenantId,
+        type: 'OUT',
+        amount: roundCurrency(amt),
+        source: 'EXPENSE' as CashTransactionSource,
+        referenceId: e.expenseNumber || '',
+        description: `Cash Expense - ${e.categoryName || 'Miscellaneous'}`,
+        transactionDate: e.expenseDate || e.createdAt || new Date().toISOString()
+      });
+    }
+  }
+
+  // 6. Purchase Returns (Cash Refund Received)
+  for (const pr of purchaseReturns) {
+    const amt = Number(pr.grandTotal || 0);
+    if (amt > 0) {
+      items.push({
+        id: `cash-pur-ret-${pr.id || pr.debitNoteNumber}`,
+        cashAccountId: 1,
+        tenantId: activeTenantId,
+        type: 'IN',
+        amount: roundCurrency(amt),
+        source: 'PURCHASE_BILL' as CashTransactionSource,
+        referenceId: pr.debitNoteNumber || '',
+        description: `Purchase Return Refund - ${pr.supplierName || 'Supplier'}`,
+        transactionDate: pr.returnDate || pr.createdAt || new Date().toISOString()
+      });
+    }
+  }
+
+  // 7. Sale Returns (Cash Refund Paid Out)
+  for (const sr of saleReturns) {
+    const amt = Number(sr.refundAmount ?? sr.grandTotal ?? 0);
+    if (amt > 0) {
+      items.push({
+        id: `cash-sale-ret-${sr.id || sr.creditNoteNumber}`,
+        cashAccountId: 1,
+        tenantId: activeTenantId,
+        type: 'OUT',
+        amount: roundCurrency(amt),
+        source: 'POS_SALE' as CashTransactionSource,
+        referenceId: sr.creditNoteNumber || '',
+        description: `Sale Return Cash Refund - ${sr.partyName || 'Customer'}`,
+        transactionDate: sr.returnDate || sr.createdAt || new Date().toISOString()
+      });
+    }
+  }
+
+  // 8. Manual Cash Adjustments
+  for (const ct of manualCashTxns) {
+    const isLinkedSource =
+      ct.source === 'POS_SALE' ||
+      ct.source === 'EXPENSE' ||
+      ct.source === 'PAYMENT_IN' ||
+      ct.source === 'PAYMENT_OUT' ||
+      ct.source === 'PURCHASE_BILL';
+
+    if (isLinkedSource) continue;
+
+    items.push({
+      id: `cash-tx-${ct.id}`,
+      cashAccountId: ct.cashAccountId || 1,
+      tenantId: activeTenantId,
+      type: ct.type,
+      amount: roundCurrency(ct.amount),
+      source: ct.source || 'MANUAL_ADJUSTMENT',
+      referenceId: ct.referenceId || '',
+      description: ct.description || (ct.type === 'IN' ? 'Cash Increase' : 'Cash Reduction'),
+      transactionDate: ct.transactionDate || ct.createdAt || new Date().toISOString()
+    });
+  }
+
+  return items;
+}
+
+/**
  * Calculates current cash balance dynamically (Opening + IN - OUT)
  */
 export async function fetchCashBalance(tenantId: string) {
+  const activeTenantId = tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
   await deduplicateLocalCashTransactions();
 
-  const cashAcc = await getOrCreateLocalCashAccount(tenantId);
+  const cashAcc = await getOrCreateLocalCashAccount(activeTenantId);
   const openingBalance = roundCurrency(cashAcc.openingBalance || 0);
 
-  const txns = await db.cashTransactions
-    .filter(t => t.tenantId === tenantId)
-    .toArray();
+  const txns = await getAllAggregatedCashTransactions(activeTenantId);
 
   let totalIn = 0;
   let totalOut = 0;
@@ -119,12 +304,11 @@ export async function fetchCashBalance(tenantId: string) {
  * Fetches transaction history with calculated running balances strictly from local Dexie IndexedDB
  */
 export async function fetchCashTransactions(tenantId: string, filters: any = {}) {
-  const cashAcc = await getOrCreateLocalCashAccount(tenantId);
+  const activeTenantId = tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+  const cashAcc = await getOrCreateLocalCashAccount(activeTenantId);
   const openingBal = roundCurrency(cashAcc.openingBalance || 0);
 
-  let txns = await db.cashTransactions
-    .filter(t => (t.tenantId || 'default-tenant') === tenantId)
-    .toArray();
+  let txns = await getAllAggregatedCashTransactions(activeTenantId);
 
   // Sort ascending to calculate running balances correctly
   txns.sort((a, b) => new Date(a.transactionDate || a.createdAt || '').getTime() - new Date(b.transactionDate || b.createdAt || '').getTime());
@@ -149,7 +333,7 @@ export async function fetchCashTransactions(tenantId: string, filters: any = {})
 
   const filtered = latestFirst.filter(t => {
     if (filters.type && filters.type !== 'ALL' && t.type !== filters.type) return false;
-    if (filters.source && t.source !== filters.source) return false;
+    if (filters.source && filters.source !== 'ALL' && t.source !== filters.source) return false;
     if (filters.startDate && filters.endDate) {
       const txTime = new Date(t.transactionDate || t.createdAt || 0).getTime();
       const sTime = new Date(String(filters.startDate)).getTime();
@@ -193,7 +377,7 @@ export async function recordCashEntry(data: {
   const safeAmt = roundCurrency(data.amount);
   if (safeAmt <= 0) return { success: false, error: 'Amount must be greater than 0' };
 
-  const tenantId = data.tenantId || 'default-tenant';
+  const tenantId = data.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
   const cashAcc = await getOrCreateLocalCashAccount(tenantId);
 
   const txRecord: CashTransaction = {

@@ -305,6 +305,7 @@ export interface PurchaseBill {
   paidAmount?: number;
   dueAmount?: number;
   paymentStatus?: 'PAID' | 'UNPAID' | 'PARTIAL';
+  paymentMethod?: string;
   notes?: string;
   createdAt?: string;
   updatedAt?: string;

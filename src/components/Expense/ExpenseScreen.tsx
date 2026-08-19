@@ -41,7 +41,7 @@ export const ExpenseScreen: React.FC<ExpenseScreenProps> = ({
   business,
   onExpenseRecorded
 }) => {
-  const activeTenantId = business.tenantId || 'default-tenant';
+  const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
   const { showToast, showConfirm } = useToast();
 
   const [searchTerm, setSearchTerm] = useState('');

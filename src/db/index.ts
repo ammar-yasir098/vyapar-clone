@@ -113,24 +113,30 @@ export async function seedWalkInCustomerForTenant(tenantId: string) {
 }
 
 /**
- * Initializes clean Chart of Accounts & default Walk-in customer with ZERO pre-loaded products or bills.
+ * Seeds default Main Cash Drawer for a specific store tenant if not present.
+ */
+export async function seedCashAccountForTenant(tenantId: string) {
+  if (!tenantId) return;
+  const existing = await db.cashAccounts.filter(a => a.tenantId === tenantId).first();
+  if (!existing) {
+    await db.cashAccounts.add({
+      tenantId,
+      name: 'Main Cash Drawer',
+      openingBalance: 0.00,
+      createdAt: new Date().toISOString()
+    });
+  }
+}
+
+/**
+ * Initializes structural necessities: Chart of Accounts, Walk-in customer, and Main Cash Drawer with ZERO pre-loaded items or suppliers.
  */
 export async function seedDatabaseIfEmpty(tenantId?: string) {
-  if (tenantId) {
-    await seedLedgerAccountsForTenant(tenantId);
-    await seedWalkInCustomerForTenant(tenantId);
-  }
+  const tId = tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
 
-  // Clean up any dummy basmati items or test customers from local Dexie IndexedDB
-  const basmatiItems = await db.items.filter(i => (i.name || '').toLowerCase().includes('basmati')).toArray();
-  for (const item of basmatiItems) {
-    if (item.id) await db.items.delete(item.id);
-  }
-
-  const testCustomers = await db.parties.filter(p => (p.name || '').toLowerCase().includes('test customer')).toArray();
-  for (const party of testCustomers) {
-    if (party.id) await db.parties.delete(party.id);
-  }
+  await seedLedgerAccountsForTenant(tId);
+  await seedWalkInCustomerForTenant(tId);
+  await seedCashAccountForTenant(tId);
 
   // Deduplicate any duplicate ledger accounts by accountCode
   const allLedgerAccs = await db.ledgerAccounts.toArray();

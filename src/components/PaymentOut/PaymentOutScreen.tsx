@@ -40,7 +40,7 @@ export const PaymentOutScreen: React.FC<PaymentOutScreenProps> = ({
   selectedPartyFromParties,
   onClearSelectedParty
 }) => {
-  const activeTenantId = business.tenantId || 'default-tenant';
+  const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
   const { showToast, showConfirm } = useToast();
 
   const [activeSubTab, setActiveSubTab] = useState<'pending' | 'history'>('pending');

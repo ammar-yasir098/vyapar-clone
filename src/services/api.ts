@@ -543,3 +543,16 @@ export async function deleteServerSaleReturn(id: number | string) {
   }
 }
 
+// CASH TRANSACTIONS
+export async function fetchServerCashTransactions(tenantId?: string) {
+  try {
+    const url = tenantId ? `${API_BASE_URL}/cash/transactions?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/cash/transactions`;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data?.transactions || [];
+  } catch (err) {
+    return [];
+  }
+}
+

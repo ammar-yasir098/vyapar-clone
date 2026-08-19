@@ -2088,9 +2088,9 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
                           <td className="py-3 px-4 font-mono font-bold text-slate-700 whitespace-nowrap">
                             {t.refNo || ''}
                           </td>
-                          <td className="py-3 px-4">
+                          <td className="py-3 px-4 whitespace-nowrap">
                             <span
-                              className={`px-2 py-0.5 text-[10px] font-extrabold rounded border ${
+                              className={`inline-block whitespace-nowrap px-2 py-0.5 text-[10px] font-extrabold rounded border ${
                                 t.type === 'Sale'
                                   ? 'bg-blue-50 text-blue-700 border-blue-200'
                                   : t.type === 'Purchase'
@@ -2334,9 +2334,9 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
                           <td className="py-3 px-4 font-medium text-slate-600">
                             {t.categoryName || ''}
                           </td>
-                          <td className="py-3 px-4">
+                          <td className="py-3 px-4 whitespace-nowrap">
                             <span
-                              className={`px-2 py-0.5 text-[10px] font-extrabold rounded border ${
+                              className={`inline-block whitespace-nowrap px-2 py-0.5 text-[10px] font-extrabold rounded border ${
                                 t.type === 'Sale'
                                   ? 'bg-blue-50 text-blue-700 border-blue-200'
                                   : t.type === 'Purchase'

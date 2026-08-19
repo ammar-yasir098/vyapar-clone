@@ -50,6 +50,7 @@ import {
   fetchServerExpenses,
   fetchServerPurchaseReturns,
   fetchServerSaleReturns,
+  fetchServerCashTransactions,
   deleteServerCompanyProfile
 } from './services/api';
 import { syncLedgerAccountBalances } from './services/ledger';
@@ -103,14 +104,23 @@ export function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, [activeTab]);
 
+  // Helper to check if an entity has pending unsynced local mutations in syncJournal
+  async function hasPendingLocalMutation(entityType: string, entityId?: string | number): Promise<boolean> {
+    if (!entityId) return false;
+    const strId = String(entityId);
+    const pending = await db.syncJournal
+      .filter(record => !record.synced && record.entityType === entityType && record.entityId === strId)
+      .first();
+    return !!pending;
+  }
+
   // Initialize & Sync with PostgreSQL Backend
   useEffect(() => {
     async function syncPostgresToClient() {
-      await seedDatabaseIfEmpty();
-      await seedLedgerAccountsForTenant(currentTenantId);
-      await seedWalkInCustomerForTenant(currentTenantId);
-      // 1. Read local Dexie companyProfiles FIRST for 0ms instant offline startup
+      // 1. Read local Dexie companyProfiles FIRST for 0ms instant startup & tenant resolution
       const localDexieProfiles = await db.companyProfiles.toArray();
+      let activeTenantId = currentTenantId || localStorage.getItem('vyapar_current_tenant') || '';
+
       if (localDexieProfiles && localDexieProfiles.length > 0) {
         const mappedLocal = localDexieProfiles.map(c => ({
           tenantId: c.tenantId,
@@ -126,30 +136,33 @@ export function App() {
           signatureUrl: c.signatureUrl || null
         }));
         setCompanies(mappedLocal);
-        const activeComp = mappedLocal.find(c => c.tenantId === currentTenantId) || mappedLocal[0];
-        if (activeComp) {
-          setBusinessDetails(activeComp);
-          if (!currentTenantId) {
-            setCurrentTenantId(activeComp.tenantId);
-            localStorage.setItem('vyapar_current_tenant', activeComp.tenantId);
+
+        // Ensure active company profile does not silently default to 'default-tenant' if other active companies exist
+        const validActive = mappedLocal.find(c => c.tenantId && c.tenantId === activeTenantId)
+          || mappedLocal.find(c => c.tenantId && c.tenantId !== 'default-tenant')
+          || mappedLocal[0];
+
+        if (validActive && validActive.tenantId) {
+          activeTenantId = validActive.tenantId;
+          setBusinessDetails(validActive);
+          if (activeTenantId !== currentTenantId) {
+            setCurrentTenantId(activeTenantId);
+            localStorage.setItem('vyapar_current_tenant', activeTenantId);
           }
         }
       } else {
         const localSaved = getInitialBusiness();
-        const defaultTenant = localSaved.tenantId || currentTenantId || 'default-tenant';
-        const defaultProfile: BusinessDetails = {
-          ...localSaved,
-          tenantId: defaultTenant
-        };
+        activeTenantId = localSaved.tenantId || activeTenantId || 'default-tenant';
+        const defaultProfile: BusinessDetails = { ...localSaved, tenantId: activeTenantId };
         setBusinessDetails(defaultProfile);
         setCompanies([defaultProfile]);
-        if (!currentTenantId) {
-          setCurrentTenantId(defaultTenant);
-          localStorage.setItem('vyapar_current_tenant', defaultTenant);
+        if (activeTenantId !== currentTenantId) {
+          setCurrentTenantId(activeTenantId);
+          localStorage.setItem('vyapar_current_tenant', activeTenantId);
         }
         try {
           await db.companyProfiles.put({
-            tenantId: defaultTenant,
+            tenantId: activeTenantId,
             name: defaultProfile.name,
             phone: defaultProfile.phone,
             address: defaultProfile.address,
@@ -163,16 +176,30 @@ export function App() {
         } catch { }
       }
 
+      console.log(`[Sync] Active Tenant ID: ${activeTenantId}`);
+
+      // Seed tenant ledger accounts & walk-in party
+      await seedLedgerAccountsForTenant(activeTenantId);
+      await seedWalkInCustomerForTenant(activeTenantId);
+
+      // Log startup local records count
+      const localItemCount = await db.items.filter(i => (i.tenantId || 'default-tenant') === activeTenantId).count();
+      const localPartyCount = await db.parties.filter(p => (p.tenantId || 'default-tenant') === activeTenantId).count();
+      const localInvoiceCount = await db.invoices.filter(i => (i.tenantId || 'default-tenant') === activeTenantId).count();
+
+      console.log(`[Sync] Local records loaded: ${localItemCount} items, ${localPartyCount} parties, ${localInvoiceCount} invoices`);
+
       setIsDbLoaded(true);
 
-      // 2. Fast health check: if backend server is offline, skip network calls to prevent UI delays
+      // Fast health check: if backend server is offline, skip network calls to prevent UI delays
       const isOnline = await checkServerHealth(1500);
       if (!isOnline) {
+        if (localItemCount === 0) {
+          await seedDatabaseIfEmpty(activeTenantId);
+        }
         console.warn('Backend server offline or unreachable. Operating in 100% local Dexie offline mode.');
         return;
       }
-
-      let activeTenantId = currentTenantId;
 
       try {
         // Fetch all company profiles (Multi-Store / Multi-Branch)
@@ -193,7 +220,6 @@ export function App() {
           }));
           setCompanies(mappedCompanies);
 
-          // Save/Sync into Dexie Local IndexedDB
           for (const c of mappedCompanies) {
             const existing = await db.companyProfiles.where('tenantId').equals(c.tenantId).first();
             if (existing) {
@@ -203,55 +229,13 @@ export function App() {
             }
           }
 
-          // Find active company profile & auto-cache logo for 100% offline display
-          const activeCompany = mappedCompanies.find((c: any) => c.tenantId === currentTenantId) || mappedCompanies[0];
+          const activeCompany = mappedCompanies.find((c: any) => c.tenantId === activeTenantId) || mappedCompanies[0];
           if (activeCompany) {
-            activeTenantId = activeCompany.tenantId || currentTenantId;
+            activeTenantId = activeCompany.tenantId || activeTenantId;
+            setBusinessDetails(activeCompany);
             if (activeTenantId !== currentTenantId) {
               setCurrentTenantId(activeTenantId);
               localStorage.setItem('vyapar_current_tenant', activeTenantId);
-            }
-            if (activeCompany.logoUrl && activeCompany.logoUrl.startsWith('/uploads/')) {
-              try {
-                const fullUrl = `http://localhost:5000${activeCompany.logoUrl}`;
-                fetch(fullUrl).then(res => res.blob()).then(blob => {
-                  const reader = new FileReader();
-                  reader.onloadend = () => {
-                    const base64 = reader.result as string;
-                    if (base64 && base64.startsWith('data:image/')) {
-                      localStorage.setItem('vyapar_offline_logo', base64);
-                    }
-                  };
-                  reader.readAsDataURL(blob);
-                }).catch(() => { });
-              } catch { }
-            }
-            setBusinessDetails(activeCompany);
-          }
-        } else {
-          const serverCompany = await fetchServerCompanyProfile(currentTenantId);
-          if (serverCompany && serverCompany.name) {
-            activeTenantId = serverCompany.tenantId || currentTenantId;
-            const comp = {
-              tenantId: activeTenantId,
-              name: serverCompany.name,
-              phone: serverCompany.phone || '+92 300 xxxxxxx',
-              address: serverCompany.address || '',
-              gstin: serverCompany.gstin || 'NTN: 7654321-0',
-              state: 'Punjab, Pakistan',
-              tagline: 'Quality Products at Everyday Low Prices',
-              email: serverCompany.email || '',
-              logoUrl: serverCompany.logoUrl || null,
-              signatureUrl: serverCompany.signatureUrl || null
-            };
-            setBusinessDetails(comp);
-            setCompanies([comp]);
-
-            const existing = await db.companyProfiles.where('tenantId').equals(comp.tenantId).first();
-            if (existing) {
-              await db.companyProfiles.update(existing.id!, comp);
-            } else {
-              await db.companyProfiles.add(comp);
             }
           }
         }
@@ -270,7 +254,8 @@ export function App() {
           serverPaymentsOut,
           serverExpenses,
           serverReturns,
-          serverSaleReturns
+          serverSaleReturns,
+          serverCashTxns
         ] = await Promise.all([
           fetchServerItems(activeTenantId),
           fetchServerParties(activeTenantId),
@@ -284,14 +269,26 @@ export function App() {
           fetchServerPaymentsOut(activeTenantId),
           fetchServerExpenses(activeTenantId),
           fetchServerPurchaseReturns(activeTenantId),
-          fetchServerSaleReturns(activeTenantId)
+          fetchServerSaleReturns(activeTenantId),
+          fetchServerCashTransactions(activeTenantId)
         ]);
 
+        const pulledCount = (serverItems?.length || 0) + (serverParties?.length || 0) + (serverInvoices?.length || 0) + (serverEstimates?.length || 0) + (serverPaymentsIn?.length || 0) + (serverPOs?.length || 0) + (serverPBills?.length || 0) + (serverPaymentsOut?.length || 0) + (serverExpenses?.length || 0) + (serverReturns?.length || 0) + (serverSaleReturns?.length || 0) + (serverCashTxns?.length || 0);
+
+        console.log(`[Sync] Pulled from Postgres: ${pulledCount} records`);
+
+        // Only seed sample database if local tables AND cloud fetched items are completely empty
+        if (localItemCount === 0 && (!serverItems || serverItems.length === 0)) {
+          await seedDatabaseIfEmpty(activeTenantId);
+        }
+
+        // 1. Items Sync with pending mutation protection
         if (serverItems && serverItems.length > 0) {
           for (const sItem of serverItems) {
             const existing = await db.items.where('name').equalsIgnoreCase(sItem.name).first();
             const itemData = { ...sItem, tenantId: sItem.tenantId || activeTenantId };
             if (existing && existing.id) {
+              if (await hasPendingLocalMutation('ITEM', existing.id)) continue;
               await db.items.update(existing.id, itemData);
             } else {
               await db.items.add(itemData);
@@ -299,11 +296,13 @@ export function App() {
           }
         }
 
+        // 2. Parties Sync with pending mutation protection
         if (serverParties && serverParties.length > 0) {
           for (const sParty of serverParties) {
             const existing = await db.parties.where('name').equalsIgnoreCase(sParty.name).first();
             const partyData = { ...sParty, tenantId: sParty.tenantId || activeTenantId };
             if (existing && existing.id) {
+              if (await hasPendingLocalMutation('PARTY', existing.id)) continue;
               await db.parties.update(existing.id, partyData);
             } else {
               await db.parties.add(partyData);
@@ -311,6 +310,7 @@ export function App() {
           }
         }
 
+        // 3. Invoices Sync with child array reconstruction & pending mutation protection
         if (serverInvoices && serverInvoices.length > 0) {
           for (const sInv of serverInvoices) {
             const rawInv = sInv.dataValues || sInv;
@@ -325,10 +325,12 @@ export function App() {
               ...rawInv,
               invoiceId: invId || `inv-${Date.now()}-${Math.random()}`,
               invoiceNumber: invNum || `INV-${Date.now()}`,
+              items: rawInv.items || rawInv.invoice_items || [],
               tenantId: rawInv.tenantId || rawInv.tenant_id || activeTenantId
             };
 
             if (existing && existing.id) {
+              if (await hasPendingLocalMutation('INVOICE', existing.id) || await hasPendingLocalMutation('INVOICE', existing.invoiceId)) continue;
               await db.invoices.update(existing.id, invData);
             } else {
               await db.invoices.add(invData);
@@ -336,6 +338,7 @@ export function App() {
           }
         }
 
+        // 4. Ledger Accounts Sync
         if (serverAccounts && serverAccounts.length > 0) {
           for (const sAcc of serverAccounts) {
             const existing = await db.ledgerAccounts
@@ -350,6 +353,7 @@ export function App() {
           }
         }
 
+        // 5. Journal Entries Sync
         if (serverJournals && serverJournals.length > 0) {
           for (const sJe of serverJournals) {
             const existing = await db.journalEntries
@@ -364,11 +368,17 @@ export function App() {
           }
         }
 
+        // 6. Estimates Sync
         if (serverEstimates && serverEstimates.length > 0) {
           for (const sEst of serverEstimates) {
             const existing = await db.estimates.where('estimateId').equals(sEst.estimateId).first();
-            const estData = { ...sEst, tenantId: sEst.tenantId || activeTenantId };
+            const estData = {
+              ...sEst,
+              items: sEst.items || sEst.estimate_items || [],
+              tenantId: sEst.tenantId || activeTenantId
+            };
             if (existing && existing.id) {
+              if (await hasPendingLocalMutation('ESTIMATE', existing.id) || await hasPendingLocalMutation('ESTIMATE', existing.estimateId)) continue;
               await db.estimates.update(existing.id, estData);
             } else {
               await db.estimates.add(estData);
@@ -376,11 +386,13 @@ export function App() {
           }
         }
 
+        // 7. Payment-In Sync
         if (serverPaymentsIn && serverPaymentsIn.length > 0) {
           for (const sPay of serverPaymentsIn) {
             const existing = await db.paymentIn.where('receiptNumber').equals(sPay.receiptNumber).first();
             const payData = { ...sPay, tenantId: sPay.tenantId || activeTenantId };
             if (existing && existing.id) {
+              if (await hasPendingLocalMutation('PAYMENT_IN', existing.id) || await hasPendingLocalMutation('PAYMENT_IN', existing.receiptNumber)) continue;
               await db.paymentIn.update(existing.id, payData);
             } else {
               await db.paymentIn.add(payData);
@@ -388,11 +400,17 @@ export function App() {
           }
         }
 
+        // 8. Purchase Orders Sync
         if (serverPOs && serverPOs.length > 0) {
           for (const sPo of serverPOs) {
             const existing = await db.purchaseOrders.where('poId').equals(sPo.poId).first();
-            const poData = { ...sPo, tenantId: sPo.tenantId || activeTenantId };
+            const poData = {
+              ...sPo,
+              items: sPo.items || sPo.purchase_order_items || [],
+              tenantId: sPo.tenantId || activeTenantId
+            };
             if (existing && existing.id) {
+              if (await hasPendingLocalMutation('PURCHASE_ORDER', existing.id) || await hasPendingLocalMutation('PURCHASE_ORDER', existing.poId)) continue;
               await db.purchaseOrders.update(existing.id, poData);
             } else {
               await db.purchaseOrders.add(poData);
@@ -400,6 +418,7 @@ export function App() {
           }
         }
 
+        // 9. Purchase Bills Sync
         if (serverPBills && serverPBills.length > 0) {
           for (const sBill of serverPBills) {
             const rawBill = sBill.dataValues || sBill;
@@ -410,9 +429,11 @@ export function App() {
               ...rawBill,
               billId: bId || `pur-${Date.now()}`,
               billNumber: bNum || `PUR-${Date.now()}`,
+              items: rawBill.items || rawBill.purchase_bill_items || [],
               tenantId: rawBill.tenantId || rawBill.tenant_id || activeTenantId
             };
             if (existing && existing.id) {
+              if (await hasPendingLocalMutation('PURCHASE_BILL', existing.id) || await hasPendingLocalMutation('PURCHASE_BILL', existing.billId)) continue;
               await db.purchaseBills.update(existing.id, billData);
             } else {
               await db.purchaseBills.add(billData);
@@ -420,11 +441,13 @@ export function App() {
           }
         }
 
+        // 10. Payment-Out Sync
         if (serverPaymentsOut && serverPaymentsOut.length > 0) {
           for (const sPay of serverPaymentsOut) {
             const existing = await db.paymentOut.where('receiptNumber').equals(sPay.receiptNumber).first();
             const payData = { ...sPay, tenantId: sPay.tenantId || activeTenantId };
             if (existing && existing.id) {
+              if (await hasPendingLocalMutation('PAYMENT_OUT', existing.id) || await hasPendingLocalMutation('PAYMENT_OUT', existing.receiptNumber)) continue;
               await db.paymentOut.update(existing.id, payData);
             } else {
               await db.paymentOut.add(payData);
@@ -432,11 +455,13 @@ export function App() {
           }
         }
 
+        // 11. Expenses Sync
         if (serverExpenses && serverExpenses.length > 0) {
           for (const sExp of serverExpenses) {
             const existing = await db.expenses.where('expenseNumber').equals(sExp.expenseNumber).first();
             const expData = { ...sExp, tenantId: sExp.tenantId || activeTenantId };
             if (existing && existing.id) {
+              if (await hasPendingLocalMutation('EXPENSE', existing.id) || await hasPendingLocalMutation('EXPENSE', existing.expenseNumber)) continue;
               await db.expenses.update(existing.id, expData);
             } else {
               await db.expenses.add(expData);
@@ -444,6 +469,7 @@ export function App() {
           }
         }
 
+        // 12. Purchase Returns Sync
         if (serverReturns && serverReturns.length > 0) {
           for (const sRet of serverReturns) {
             const rawRet = sRet.dataValues || sRet;
@@ -454,9 +480,11 @@ export function App() {
               ...rawRet,
               returnId: rId || `dn-${Date.now()}`,
               debitNoteNumber: dnNum || `DN-${Date.now()}`,
+              items: rawRet.items || rawRet.purchase_return_items || [],
               tenantId: rawRet.tenantId || rawRet.tenant_id || activeTenantId
             };
             if (existing && existing.id) {
+              if (await hasPendingLocalMutation('PURCHASE_RETURN', existing.id) || await hasPendingLocalMutation('PURCHASE_RETURN', existing.returnId)) continue;
               await db.purchaseReturns.update(existing.id, retData);
             } else {
               await db.purchaseReturns.add(retData);
@@ -464,6 +492,7 @@ export function App() {
           }
         }
 
+        // 13. Sale Returns Sync
         if (serverSaleReturns && serverSaleReturns.length > 0) {
           for (const sRet of serverSaleReturns) {
             const rawRet = sRet.dataValues || sRet;
@@ -474,12 +503,36 @@ export function App() {
               ...rawRet,
               returnId: rId || `cr-${Date.now()}`,
               creditNoteNumber: crNum || `CR-${Date.now()}`,
+              items: rawRet.items || rawRet.sale_return_items || [],
               tenantId: rawRet.tenantId || rawRet.tenant_id || activeTenantId
             };
             if (existing && existing.id) {
+              if (await hasPendingLocalMutation('SALE_RETURN', existing.id) || await hasPendingLocalMutation('SALE_RETURN', existing.returnId)) continue;
               await db.saleReturns.update(existing.id, retData);
             } else {
               await db.saleReturns.add(retData);
+            }
+          }
+        }
+
+        // 14. Cash Transactions Sync
+        if (serverCashTxns && serverCashTxns.length > 0) {
+          for (const sTx of serverCashTxns) {
+            const rawTx = sTx.dataValues || sTx;
+            const refId = rawTx.referenceId || rawTx.reference_id;
+            const existing = await db.cashTransactions
+              .filter(ct => (refId && ct.referenceId === refId) || (rawTx.id && String(ct.id) === String(rawTx.id)))
+              .first();
+            const txData = {
+              ...rawTx,
+              referenceId: refId || `TXN-${Date.now()}`,
+              tenantId: rawTx.tenantId || rawTx.tenant_id || activeTenantId
+            };
+            if (existing && existing.id) {
+              if (await hasPendingLocalMutation('CASH_TRANSACTION', existing.id) || await hasPendingLocalMutation('CASH_TRANSACTION', existing.referenceId)) continue;
+              await db.cashTransactions.update(Number(existing.id), txData);
+            } else {
+              await db.cashTransactions.add(txData);
             }
           }
         }
@@ -497,38 +550,6 @@ export function App() {
           const orphanedInvoices = await db.invoices.filter(i => !i.tenantId || i.tenantId === 'default-tenant').toArray();
           for (const inv of orphanedInvoices) {
             if (inv.id) await db.invoices.update(inv.id, { tenantId: activeTenantId });
-          }
-          const orphanedSaleReturns = await db.saleReturns.filter(r => !r.tenantId || r.tenantId === 'default-tenant').toArray();
-          for (const ret of orphanedSaleReturns) {
-            if (ret.id) await db.saleReturns.update(ret.id, { tenantId: activeTenantId });
-          }
-          const orphanedPOs = await db.purchaseOrders.filter(po => !po.tenantId || po.tenantId === 'default-tenant').toArray();
-          for (const po of orphanedPOs) {
-            if (po.id) await db.purchaseOrders.update(po.id, { tenantId: activeTenantId });
-          }
-          const orphanedPBills = await db.purchaseBills.filter(pb => !pb.tenantId || pb.tenantId === 'default-tenant').toArray();
-          for (const pb of orphanedPBills) {
-            if (pb.id) await db.purchaseBills.update(pb.id, { tenantId: activeTenantId });
-          }
-          const orphanedPReturns = await db.purchaseReturns.filter(pr => !pr.tenantId || pr.tenantId === 'default-tenant').toArray();
-          for (const pr of orphanedPReturns) {
-            if (pr.id) await db.purchaseReturns.update(pr.id, { tenantId: activeTenantId });
-          }
-          const orphanedExpenses = await db.expenses.filter(e => !e.tenantId || e.tenantId === 'default-tenant').toArray();
-          for (const e of orphanedExpenses) {
-            if (e.id) await db.expenses.update(e.id, { tenantId: activeTenantId });
-          }
-          const orphanedPayIn = await db.paymentIn.filter(p => !p.tenantId || p.tenantId === 'default-tenant').toArray();
-          for (const p of orphanedPayIn) {
-            if (p.id) await db.paymentIn.update(p.id, { tenantId: activeTenantId });
-          }
-          const orphanedPayOut = await db.paymentOut.filter(p => !p.tenantId || p.tenantId === 'default-tenant').toArray();
-          for (const p of orphanedPayOut) {
-            if (p.id) await db.paymentOut.update(p.id, { tenantId: activeTenantId });
-          }
-          const orphanedEstimates = await db.estimates.filter(e => !e.tenantId || e.tenantId === 'default-tenant').toArray();
-          for (const e of orphanedEstimates) {
-            if (e.id) await db.estimates.update(e.id, { tenantId: activeTenantId });
           }
         }
 

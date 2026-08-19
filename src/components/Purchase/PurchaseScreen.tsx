@@ -122,7 +122,7 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       return;
     }
 
-    const currentTenantId = business?.tenantId || 'default-tenant';
+    const currentTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
     const totalAmount = totalBillAmount;
 
     // 0. Save persistent PurchaseBill record in Dexie IndexedDB

@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '../../db';
 import { 
   Wallet, 
   ArrowDownLeft, 
@@ -30,7 +32,16 @@ interface CashInHandScreenProps {
 
 export const CashInHandScreen: React.FC<CashInHandScreenProps> = ({ business }) => {
   const { showToast } = useToast();
-  const tenantId = business?.tenantId || '';
+  const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || '';
+  const tenantId = activeTenantId;
+
+  // Live Dexie query listeners to reactively trigger reload on any transaction mutation
+  const liveInvoices = useLiveQuery(() => db.invoices.toArray(), []);
+  const livePaymentIn = useLiveQuery(() => db.paymentIn.toArray(), []);
+  const livePaymentOut = useLiveQuery(() => db.paymentOut.toArray(), []);
+  const liveExpenses = useLiveQuery(() => db.expenses.toArray(), []);
+  const livePurchaseBills = useLiveQuery(() => db.purchaseBills.toArray(), []);
+  const liveCashTxns = useLiveQuery(() => db.cashTransactions.toArray(), []);
 
   // Data States
   const [balanceInfo, setBalanceInfo] = useState({
@@ -95,7 +106,7 @@ export const CashInHandScreen: React.FC<CashInHandScreenProps> = ({ business }) 
 
   useEffect(() => {
     loadData();
-  }, [tenantId, filterType, filterSource, searchTerm]);
+  }, [tenantId, filterType, filterSource, searchTerm, liveInvoices, livePaymentIn, livePaymentOut, liveExpenses, livePurchaseBills, liveCashTxns]);
 
   // Handle Add Cash Entry
   const handleSaveEntry = async (e: React.FormEvent) => {
@@ -192,21 +203,21 @@ export const CashInHandScreen: React.FC<CashInHandScreenProps> = ({ business }) 
     switch (source) {
       case 'POS_SALE':
       case 'SALE_INVOICE':
-        return <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-100 text-emerald-800">POS SALE</span>;
+        return <span className="inline-block whitespace-nowrap px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-100 text-emerald-800">POS SALE</span>;
       case 'PAYMENT_IN':
-        return <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-blue-100 text-blue-800">PAYMENT IN</span>;
+        return <span className="inline-block whitespace-nowrap px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-blue-100 text-blue-800">PAYMENT IN</span>;
       case 'PURCHASE_BILL':
       case 'PAYMENT_OUT':
-        return <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-purple-100 text-purple-800">PURCHASE / PAYOUT</span>;
+        return <span className="inline-block whitespace-nowrap px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-purple-100 text-purple-800">PURCHASE / PAYOUT</span>;
       case 'EXPENSE':
-        return <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-100 text-amber-800">EXPENSE</span>;
+        return <span className="inline-block whitespace-nowrap px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-100 text-amber-800">EXPENSE</span>;
       case 'BANK_DEPOSIT':
       case 'BANK_WITHDRAWAL':
-        return <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-sky-100 text-sky-800">BANK TRANSFER</span>;
+        return <span className="inline-block whitespace-nowrap px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-sky-100 text-sky-800">BANK TRANSFER</span>;
       case 'MANUAL_ADJUSTMENT':
-        return <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-slate-100 text-slate-700">ADJUSTMENT</span>;
+        return <span className="inline-block whitespace-nowrap px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-slate-100 text-slate-700">ADJUSTMENT</span>;
       default:
-        return <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-slate-100 text-slate-700">{source}</span>;
+        return <span className="inline-block whitespace-nowrap px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-slate-100 text-slate-700">{source}</span>;
     }
   };
 

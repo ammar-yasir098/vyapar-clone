@@ -142,7 +142,7 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
     setIsSaving(true);
 
     try {
-      const activeTenant = business.tenantId || 'default-tenant';
+      const activeTenant = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
       const uniqueReturnId = `cr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
       const newReturn: SaleReturn = {

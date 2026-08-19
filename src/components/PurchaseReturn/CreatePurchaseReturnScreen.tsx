@@ -22,7 +22,7 @@ export const CreatePurchaseReturnScreen: React.FC<CreatePurchaseReturnScreenProp
   onReturnSaved,
   onCancel
 }) => {
-  const activeTenantId = business.tenantId || 'default-tenant';
+  const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
   const { showToast } = useToast();
 
   const suppliers = parties.filter(p => p.type === 'SUPPLIER' || p.type === 'BOTH');

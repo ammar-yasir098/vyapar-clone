@@ -230,7 +230,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   const handleSaveAndPrint = async () => {
     if (cartItems.length === 0) return;
 
-    const activeTenantId = business.tenantId || 'default-tenant';
+    const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
     const defaultWalkIn = await db.parties.filter(p => (p.tenantId || 'default-tenant') === activeTenantId && p.name === 'Walk-in Retail Customer').first();
     const effectiveParty = selectedParty || defaultWalkIn;
 
