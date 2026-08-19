@@ -950,7 +950,14 @@ export function App() {
             <GSTComplianceScreen invoices={invoices} business={businessDetails} />
           )}
 
-          {activeTab === 'reports' && <ReportsScreen invoices={invoices} />}
+          {activeTab === 'reports' && (
+            <ReportsScreen
+              invoices={allInvoices}
+              business={businessDetails}
+              companies={companies}
+              onAddSale={() => setActiveTab('pos')}
+            />
+          )}
 
           {activeTab === 'settings' && <PrinterModal business={businessDetails} />}
 

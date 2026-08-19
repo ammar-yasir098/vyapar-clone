@@ -1,12 +1,11 @@
 import Dexie, { Table } from 'dexie';
-import { Item, Party, Invoice, SyncJournal, BusinessDetails, ItemBatch, LedgerAccount, JournalEntry, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock, PurchaseOrder, PurchaseBill, PaymentOut, Expense, PurchaseReturn, SaleReturn, CashAccount, CashTransaction } from '../types';
+import { Item, Party, Invoice, SyncJournal, BusinessDetails, LedgerAccount, JournalEntry, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock, PurchaseOrder, PurchaseBill, PaymentOut, Expense, PurchaseReturn, SaleReturn, CashAccount, CashTransaction } from '../types';
 
 export class VyaparDatabase extends Dexie {
   items!: Table<Item, number>;
   parties!: Table<Party, number>;
   invoices!: Table<Invoice, number>;
   syncJournal!: Table<SyncJournal, number>;
-  itemBatches!: Table<ItemBatch, number>;
   ledgerAccounts!: Table<LedgerAccount, number>;
   journalEntries!: Table<JournalEntry, number>;
   companyProfiles!: Table<CompanyProfileEntity, number>;
@@ -30,7 +29,6 @@ export class VyaparDatabase extends Dexie {
       parties: '++id, name, phone, type, tenantId',
       invoices: '++id, invoiceId, invoiceNumber, invoiceDate, paymentStatus, partyId, syncStatus, tenantId',
       syncJournal: '++id, versionId, clientSequence, entityType, timestamp, synced',
-      itemBatches: '++id, itemId, batchNumber, expiryDate',
       ledgerAccounts: '++id, accountCode, accountName, accountType, tenantId',
       journalEntries: '++id, entryNumber, referenceId, transactionDate, tenantId',
       companyProfiles: '++id, &tenantId, name',
@@ -154,7 +152,6 @@ export async function clearAllDatabaseData() {
   await db.parties.clear();
   await db.invoices.clear();
   await db.syncJournal.clear();
-  await db.itemBatches.clear();
   await db.journalEntries.clear();
   await db.estimates.clear();
   await db.paymentIn.clear();

@@ -23,18 +23,6 @@ export interface Tenant {
   pincode: string;
 }
 
-export interface ItemBatch {
-  id?: number;
-  itemId: number;
-  batchNumber: string;
-  mrp: number;
-  expiryDate: string; // YYYY-MM-DD
-  purchasePrice: number;
-  salesPrice: number;
-  currentStock: number;
-  updatedAt: string;
-}
-
 export interface Item {
   id?: number;
   tenantId: string;
