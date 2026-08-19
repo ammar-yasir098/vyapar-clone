@@ -73,7 +73,7 @@ const REPORT_SECTIONS = [
   }
 ];
 
-// Helper to format date string as YYYY-MM-DD
+// Helper to format date string as YYYY-MM-DD in local time
 function formatDateISO(d: Date): string {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -89,6 +89,44 @@ function formatDateDisplay(dateStr?: string): string {
     return `${parts[2]}/${parts[1]}/${parts[0]}`;
   }
   return dateStr;
+}
+
+// Helper to extract YYYY-MM-DD & HH:MM in LOCAL TIMEZONE avoiding UTC offset shifts
+function parseLocalDate(dateStr?: string, createdAtStr?: string): { dateISO: string; timeStr: string } {
+  if (dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    let timeStr = '12:00';
+    if (createdAtStr) {
+      const d = new Date(createdAtStr);
+      if (!isNaN(d.getTime())) {
+        const hours = String(d.getHours()).padStart(2, '0');
+        const minutes = String(d.getMinutes()).padStart(2, '0');
+        timeStr = `${hours}:${minutes}`;
+      }
+    }
+    return { dateISO: dateStr, timeStr };
+  }
+
+  const target = createdAtStr || dateStr;
+  if (target) {
+    const d = new Date(target);
+    if (!isNaN(d.getTime())) {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const hours = String(d.getHours()).padStart(2, '0');
+      const minutes = String(d.getMinutes()).padStart(2, '0');
+      return {
+        dateISO: `${year}-${month}-${day}`,
+        timeStr: `${hours}:${minutes}`
+      };
+    }
+  }
+
+  const now = new Date();
+  return {
+    dateISO: formatDateISO(now),
+    timeStr: '12:00'
+  };
 }
 
 // Helper to calculate date range based on preset
@@ -179,6 +217,10 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   // Day Book Single Date State (Defaults to Today)
   const [dayBookDate, setDayBookDate] = useState<string>(formatDateISO(new Date()));
 
+  // All Transactions Filters State
+  const [allTxnsFirmFilter, setAllTxnsFirmFilter] = useState<string>('all');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all');
+
   const activeTenantId = business?.tenantId || 'default-tenant';
   const [selectedFirm, setSelectedFirm] = useState<string>(activeTenantId || 'all');
   const [search, setSearch] = useState<string>('');
@@ -228,63 +270,120 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   };
 
   // ----------------- SALE REPORT DATA -----------------
-  const filteredInvoices = useMemo(() => {
-    return safeInvoices.filter(inv => {
-      if (!inv) return false;
+  // 1. Unified Normalization for Sales
+  const normalizedSales = useMemo(() => {
+    return safeInvoices.map(inv => {
+      const grand = Number(inv.grandTotal || 0);
+      const rec = Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? grand : 0));
+      const due = Number(inv.dueAmount ?? (grand - rec));
+      const { dateISO } = parseLocalDate(inv.invoiceDate, inv.createdAt);
 
-      const invTenant = inv.tenantId || 'default-tenant';
-      if (selectedFirm !== 'all' && invTenant !== selectedFirm) {
-        return false;
-      }
-
-      const invDate = inv.invoiceDate || (inv.createdAt ? inv.createdAt.split('T')[0] : '');
-      if (startDate && invDate < startDate) return false;
-      if (endDate && invDate > endDate) return false;
-
+      return {
+        id: `sale-${inv.id || inv.invoiceNumber}`,
+        date: dateISO,
+        invoiceNumber: inv.invoiceNumber || 'INV-000',
+        partyName: inv.partyName || 'Walk-in Retail Customer',
+        type: 'Sale' as const,
+        paymentMethod: inv.paymentMethod || 'CASH',
+        grandTotal: grand,
+        receivedAmount: rec,
+        dueAmount: due,
+        paymentStatus: inv.paymentStatus || (due <= 0 ? 'PAID' : (rec > 0 ? 'PARTIAL' : 'UNPAID')),
+        tenantId: inv.tenantId || 'default-tenant',
+        rawInvoice: inv
+      };
+    }).filter(inv => {
+      if (selectedFirm !== 'all' && inv.tenantId !== selectedFirm) return false;
+      if (startDate && inv.date < startDate) return false;
+      if (endDate && inv.date > endDate) return false;
       if (search.trim()) {
         const q = search.toLowerCase().trim();
-        const invNum = (inv.invoiceNumber || '').toLowerCase();
-        const party = (inv.partyName || '').toLowerCase();
-        const pMethod = (inv.paymentMethod || '').toLowerCase();
-        return invNum.includes(q) || party.includes(q) || pMethod.includes(q);
+        return (
+          inv.invoiceNumber.toLowerCase().includes(q) ||
+          inv.partyName.toLowerCase().includes(q) ||
+          inv.paymentMethod.toLowerCase().includes(q)
+        );
       }
-
       return true;
     });
   }, [safeInvoices, selectedFirm, startDate, endDate, search]);
 
+  // 2. Integration of Sale Returns (Credit Notes) into Sale Report
+  const normalizedSaleReturns = useMemo(() => {
+    return safeSaleReturns.map(sr => {
+      const grand = Number(sr.grandTotal || 0);
+      const refund = Number(sr.refundAmount ?? grand);
+      const { dateISO } = parseLocalDate(sr.returnDate, sr.createdAt);
+
+      return {
+        id: `ret-${sr.id || sr.creditNoteNumber}`,
+        date: dateISO,
+        invoiceNumber: sr.creditNoteNumber || 'CN-000',
+        partyName: sr.partyName || 'Retail Customer',
+        type: 'Credit Note' as const,
+        paymentMethod: 'CASH',
+        grandTotal: grand,
+        receivedAmount: refund,
+        dueAmount: 0,
+        paymentStatus: 'REFUNDED',
+        tenantId: sr.tenantId || 'default-tenant',
+        rawInvoice: undefined
+      };
+    }).filter(sr => {
+      if (selectedFirm !== 'all' && sr.tenantId !== selectedFirm) return false;
+      if (startDate && sr.date < startDate) return false;
+      if (endDate && sr.date > endDate) return false;
+      if (search.trim()) {
+        const q = search.toLowerCase().trim();
+        return (
+          sr.invoiceNumber.toLowerCase().includes(q) ||
+          sr.partyName.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [safeSaleReturns, selectedFirm, startDate, endDate, search]);
+
+  // All Sale Items (Invoices + Credit Notes) for Table Render
+  const filteredInvoices = useMemo(() => {
+    return [...normalizedSales, ...normalizedSaleReturns].sort((a, b) => (b.date > a.date ? 1 : -1));
+  }, [normalizedSales, normalizedSaleReturns]);
+
+  // Net Sales Computations (Gross Sales - Sale Returns)
+  const grossSalesTotal = useMemo(() => {
+    return normalizedSales.reduce((sum, inv) => sum + inv.grandTotal, 0);
+  }, [normalizedSales]);
+
+  const saleReturnsTotal = useMemo(() => {
+    return normalizedSaleReturns.reduce((sum, sr) => sum + sr.grandTotal, 0);
+  }, [normalizedSaleReturns]);
+
   const totalSalesAmount = useMemo(() => {
-    return filteredInvoices.reduce((sum, inv) => sum + Number(inv.grandTotal || 0), 0);
-  }, [filteredInvoices]);
+    return grossSalesTotal - saleReturnsTotal;
+  }, [grossSalesTotal, saleReturnsTotal]);
 
   const totalReceivedAmount = useMemo(() => {
-    return filteredInvoices.reduce((sum, inv) => sum + Number(inv.receivedAmount || 0), 0);
-  }, [filteredInvoices]);
+    const invRec = normalizedSales.reduce((sum, inv) => sum + inv.receivedAmount, 0);
+    const retRef = normalizedSaleReturns.reduce((sum, sr) => sum + sr.receivedAmount, 0);
+    return invRec - retRef;
+  }, [normalizedSales, normalizedSaleReturns]);
 
   const totalBalanceAmount = useMemo(() => {
-    return filteredInvoices.reduce((sum, inv) => {
-      const due = inv.dueAmount !== undefined ? Number(inv.dueAmount) : (inv.paymentStatus === 'PAID' ? 0 : Number(inv.grandTotal || 0));
-      return sum + due;
-    }, 0);
-  }, [filteredInvoices]);
+    return normalizedSales.reduce((sum, inv) => sum + inv.dueAmount, 0);
+  }, [normalizedSales]);
 
-  // Accurate Payment Breakdown Calculations for Sales
-  const collectedSalesTotal = useMemo(() => {
-    return totalReceivedAmount;
-  }, [totalReceivedAmount]);
+  const collectedSalesTotal = useMemo(() => totalReceivedAmount, [totalReceivedAmount]);
 
   const digitalSalesTotal = useMemo(() => {
-    return filteredInvoices
+    return normalizedSales
       .filter(i => {
         const pm = (i.paymentMethod || '').toUpperCase();
         return pm === 'UPI' || pm === 'CARD' || pm === 'DIGITAL / APP' || pm === 'CHEQUE' || pm === 'BANK' || pm === 'ONLINE';
       })
-      .reduce((sum, i) => sum + Number(i.grandTotal || 0), 0);
-  }, [filteredInvoices]);
+      .reduce((sum, i) => sum + i.grandTotal, 0);
+  }, [normalizedSales]);
 
-  const creditUnpaidDuesTotal = useMemo(() => {
-    return totalBalanceAmount;
-  }, [totalBalanceAmount]);
+  const creditUnpaidDuesTotal = useMemo(() => totalBalanceAmount, [totalBalanceAmount]);
 
   const previousMonthSalesTotal = useMemo(() => {
     const prevDates = getPresetDates('last_month');
@@ -292,11 +391,9 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
       .filter(inv => {
         if (!inv) return false;
         const invTenant = inv.tenantId || 'default-tenant';
-        if (selectedFirm !== 'all' && invTenant !== selectedFirm) {
-          return false;
-        }
-        const invDate = inv.invoiceDate || (inv.createdAt ? inv.createdAt.split('T')[0] : '');
-        return invDate >= prevDates.startDate && invDate <= prevDates.endDate;
+        if (selectedFirm !== 'all' && invTenant !== selectedFirm) return false;
+        const { dateISO } = parseLocalDate(inv.invoiceDate, inv.createdAt);
+        return dateISO >= prevDates.startDate && dateISO <= prevDates.endDate;
       })
       .reduce((sum, inv) => sum + Number(inv.grandTotal || 0), 0);
   }, [safeInvoices, selectedFirm]);
@@ -314,19 +411,16 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     }
 
     const headers = ['Date', 'Invoice No', 'Party Name', 'Transaction', 'Payment Type', 'Total Amount (Rs)', 'Balance Due (Rs)', 'Status'];
-    const rows = filteredInvoices.map(inv => {
-      const due = inv.dueAmount !== undefined ? Number(inv.dueAmount) : (inv.paymentStatus === 'PAID' ? 0 : Number(inv.grandTotal || 0));
-      return [
-        inv.invoiceDate || '-',
-        `"${inv.invoiceNumber || '-'}"`,
-        `"${inv.partyName || 'Walk-in Customer'}"`,
-        'Sale',
-        inv.paymentMethod || 'CASH',
-        Number(inv.grandTotal || 0).toFixed(2),
-        due.toFixed(2),
-        inv.paymentStatus || 'PAID'
-      ];
-    });
+    const rows = filteredInvoices.map(inv => [
+      formatDateDisplay(inv.date),
+      `"${inv.invoiceNumber}"`,
+      `"${inv.partyName}"`,
+      inv.type,
+      inv.paymentMethod,
+      inv.grandTotal.toFixed(2),
+      inv.dueAmount.toFixed(2),
+      inv.paymentStatus
+    ]);
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
     const encodedUri = encodeURI(csvContent);
@@ -339,46 +433,53 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   };
 
   // ----------------- PURCHASE REPORT DATA -----------------
+  // Dynamic Payment Type & Debit Note Return Accounting
   const filteredPurchases = useMemo(() => {
-    const billsMapped = safePurchaseBills.map(b => ({
-      id: b.id || b.billNumber,
-      date: b.billDate || (b.createdAt ? b.createdAt.split('T')[0] : ''),
-      invoiceNo: b.billNumber || '-',
-      partyName: b.supplierName || 'Vendor / Supplier',
-      type: 'Purchase',
-      paymentType: 'CASH',
-      amount: Number(b.grandTotal || 0),
-      balanceDue: 0,
-      paidAmount: Number(b.grandTotal || 0),
-      tenantId: b.tenantId || 'default-tenant'
-    }));
+    const billsMapped = safePurchaseBills.map(b => {
+      const { dateISO } = parseLocalDate(b.billDate, b.createdAt);
+      const grand = Number(b.grandTotal || 0);
+      const paid = Number(b.paidAmount ?? (b.paymentStatus === 'PAID' ? grand : 0));
+      const due = Number(b.dueAmount ?? (grand - paid));
+      const pm = (b as any).paymentMethod || (paid >= grand ? 'CASH' : (paid > 0 ? 'PARTIAL' : 'CREDIT'));
 
-    const returnsMapped = safePurchaseReturns.map(r => ({
-      id: r.id || r.debitNoteNumber,
-      date: r.returnDate || (r.createdAt ? r.createdAt.split('T')[0] : ''),
-      invoiceNo: r.debitNoteNumber || r.purchaseBillNumber || '-',
-      partyName: r.supplierName || 'Vendor / Supplier',
-      type: 'Debit Note',
-      paymentType: 'CASH',
-      amount: Number(r.grandTotal || 0),
-      balanceDue: 0,
-      paidAmount: Number(r.grandTotal || 0),
-      tenantId: r.tenantId || 'default-tenant'
-    }));
+      return {
+        id: b.id || b.billNumber,
+        date: dateISO,
+        invoiceNo: b.billNumber || '-',
+        partyName: b.supplierName || 'Vendor / Supplier',
+        type: 'Purchase' as const,
+        paymentType: pm,
+        amount: grand,
+        paidAmount: paid,
+        balanceDue: due,
+        tenantId: b.tenantId || 'default-tenant'
+      };
+    });
+
+    const returnsMapped = safePurchaseReturns.map(r => {
+      const { dateISO } = parseLocalDate(r.returnDate, r.createdAt);
+      const grand = Number(r.grandTotal || 0);
+      return {
+        id: r.id || r.debitNoteNumber,
+        date: dateISO,
+        invoiceNo: r.debitNoteNumber || r.purchaseBillNumber || '-',
+        partyName: r.supplierName || 'Vendor / Supplier',
+        type: 'Debit Note' as const,
+        paymentType: 'CASH',
+        amount: grand,
+        paidAmount: grand,
+        balanceDue: 0,
+        tenantId: r.tenantId || 'default-tenant'
+      };
+    });
 
     const allTxns = [...billsMapped, ...returnsMapped];
 
     return allTxns.filter(t => {
-      // Tenant Isolation
-      if (selectedFirm !== 'all' && t.tenantId !== selectedFirm) {
-        return false;
-      }
-
-      // Date Filter
+      if (selectedFirm !== 'all' && t.tenantId !== selectedFirm) return false;
       if (startDate && t.date < startDate) return false;
       if (endDate && t.date > endDate) return false;
 
-      // Search Query Filter
       if (search.trim()) {
         const q = search.toLowerCase().trim();
         return (
@@ -393,40 +494,54 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     }).sort((a, b) => (b.date > a.date ? 1 : -1));
   }, [safePurchaseBills, safePurchaseReturns, selectedFirm, startDate, endDate, search]);
 
-  const purchasePaidTotal = useMemo(() => {
-    return filteredPurchases.reduce((sum, t) => sum + t.paidAmount, 0);
+  const grossPurchaseBillsTotal = useMemo(() => {
+    return filteredPurchases
+      .filter(p => p.type === 'Purchase')
+      .reduce((sum, p) => sum + p.amount, 0);
   }, [filteredPurchases]);
 
-  const purchaseUnpaidTotal = useMemo(() => {
-    return filteredPurchases.reduce((sum, t) => sum + t.balanceDue, 0);
+  const debitNotesTotal = useMemo(() => {
+    return filteredPurchases
+      .filter(p => p.type === 'Debit Note')
+      .reduce((sum, p) => sum + p.amount, 0);
   }, [filteredPurchases]);
 
   const purchaseTotalAmount = useMemo(() => {
-    return purchasePaidTotal + purchaseUnpaidTotal;
-  }, [purchasePaidTotal, purchaseUnpaidTotal]);
+    return grossPurchaseBillsTotal - debitNotesTotal;
+  }, [grossPurchaseBillsTotal, debitNotesTotal]);
+
+  const purchasePaidTotal = useMemo(() => {
+    const billsPaid = filteredPurchases
+      .filter(p => p.type === 'Purchase')
+      .reduce((sum, p) => sum + p.paidAmount, 0);
+    return billsPaid - debitNotesTotal;
+  }, [filteredPurchases, debitNotesTotal]);
+
+  const purchaseUnpaidTotal = useMemo(() => {
+    return filteredPurchases
+      .filter(p => p.type === 'Purchase')
+      .reduce((sum, p) => sum + p.balanceDue, 0);
+  }, [filteredPurchases]);
 
   const cashPurchasesTotal = useMemo(() => {
     return filteredPurchases
-      .filter(p => (p.paymentType || 'CASH').toUpperCase() === 'CASH')
-      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      .filter(p => p.type === 'Purchase' && (p.paymentType || 'CASH').toUpperCase() === 'CASH')
+      .reduce((sum, p) => sum + p.amount, 0);
   }, [filteredPurchases]);
 
   const digitalPurchasesTotal = useMemo(() => {
     return filteredPurchases
       .filter(p => {
         const pm = (p.paymentType || '').toUpperCase();
-        return pm === 'UPI' || pm === 'CARD' || pm === 'BANK' || pm === 'DIGITAL';
+        return p.type === 'Purchase' && (pm === 'UPI' || pm === 'CARD' || pm === 'BANK' || pm === 'DIGITAL');
       })
-      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      .reduce((sum, p) => sum + p.amount, 0);
   }, [filteredPurchases]);
 
   const creditPurchasesTotal = useMemo(() => {
     return filteredPurchases
-      .filter(p => {
-        const pm = (p.paymentType || '').toUpperCase();
-        return pm === 'CREDIT' || p.balanceDue > 0;
-      })
-      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      .filter(p => p.type === 'Purchase' && ((p.paymentType || '').toUpperCase() === 'CREDIT' || p.balanceDue > 0))
+      .reduce((sum, p) => sum + p.amount, 0);
   }, [filteredPurchases]);
 
   const previousMonthPurchaseTotal = useMemo(() => {
@@ -435,19 +550,19 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
       if (!b) return false;
       const bTenant = b.tenantId || 'default-tenant';
       if (selectedFirm !== 'all' && bTenant !== selectedFirm) return false;
-      const bDate = b.billDate || (b.createdAt ? b.createdAt.split('T')[0] : '');
-      return bDate >= prevDates.startDate && bDate <= prevDates.endDate;
+      const { dateISO } = parseLocalDate(b.billDate, b.createdAt);
+      return dateISO >= prevDates.startDate && dateISO <= prevDates.endDate;
     }).reduce((sum, b) => sum + Number(b.grandTotal || 0), 0);
 
     const prevReturns = safePurchaseReturns.filter(r => {
       if (!r) return false;
       const rTenant = r.tenantId || 'default-tenant';
       if (selectedFirm !== 'all' && rTenant !== selectedFirm) return false;
-      const rDate = r.returnDate || (r.createdAt ? r.createdAt.split('T')[0] : '');
-      return rDate >= prevDates.startDate && rDate <= prevDates.endDate;
+      const { dateISO } = parseLocalDate(r.returnDate, r.createdAt);
+      return dateISO >= prevDates.startDate && dateISO <= prevDates.endDate;
     }).reduce((sum, r) => sum + Number(r.grandTotal || 0), 0);
 
-    return prevBills + prevReturns;
+    return prevBills - prevReturns;
   }, [safePurchaseBills, safePurchaseReturns, selectedFirm]);
 
   const purchaseGrowthPercent = useMemo(() => {
@@ -464,7 +579,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
 
     const headers = ['Date', 'Invoice No', 'Party Name', 'Transaction', 'Payment Type', 'Total Amount (Rs)', 'Balance Due (Rs)'];
     const rows = filteredPurchases.map(p => [
-      p.date || '-',
+      formatDateDisplay(p.date),
       `"${p.invoiceNo}"`,
       `"${p.partyName}"`,
       p.type,
@@ -484,22 +599,19 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   };
 
   // ----------------- DAY BOOK REPORT AGGREGATION DATA -----------------
-  // Normalized Day Book transactions adhering strictly to accounting business rules & reference UI layout:
-  // Columns: NAME | REF NO. | TYPE | PAYMENT TYPE | TOTAL | MONEY IN | MONEY OUT | PRINT / SHARE
   const dayBookTransactions = useMemo(() => {
     const targetDate = dayBookDate;
 
     // 1. Sales / Invoices
     const sales = safeInvoices.map(inv => {
-      const d = inv.invoiceDate || (inv.createdAt ? inv.createdAt.split('T')[0] : '');
-      const t = inv.createdAt ? inv.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+      const { dateISO, timeStr } = parseLocalDate(inv.invoiceDate, inv.createdAt);
       const tot = Number(inv.grandTotal || 0);
-      const rec = Number(inv.receivedAmount !== undefined ? inv.receivedAmount : (inv.paymentStatus === 'PAID' ? inv.grandTotal : 0));
+      const rec = Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? inv.grandTotal : 0));
 
       return {
         id: `sale-${inv.id || inv.invoiceNumber}`,
-        date: d,
-        time: t,
+        date: dateISO,
+        time: timeStr,
         partyName: inv.partyName || 'Walk-in Retail Customer',
         refNo: inv.invoiceNumber || 'INV-000',
         type: 'Sale',
@@ -513,19 +625,18 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
 
     // 2. Purchases / Bills
     const purchases = safePurchaseBills.map(b => {
-      const d = b.billDate || (b.createdAt ? b.createdAt.split('T')[0] : '');
-      const t = b.createdAt ? b.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+      const { dateISO, timeStr } = parseLocalDate(b.billDate, b.createdAt);
       const tot = Number(b.grandTotal || 0);
-      const paid = b.paidAmount !== undefined ? Number(b.paidAmount) : tot;
+      const paid = Number(b.paidAmount || 0);
 
       return {
         id: `pur-${b.id || b.billNumber}`,
-        date: d,
-        time: t,
+        date: dateISO,
+        time: timeStr,
         partyName: b.supplierName || 'Vendor / Supplier',
         refNo: b.billNumber || '',
         type: 'Purchase',
-        paymentMode: 'Cash',
+        paymentMode: (b as any).paymentMethod || (paid >= tot ? 'Cash' : (paid > 0 ? 'Partial' : 'Credit')),
         totalAmount: tot,
         moneyIn: null as number | null,
         moneyOut: paid,
@@ -535,14 +646,13 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
 
     // 3. Customer Receipts (Payment-In)
     const payIns = safePaymentsIn.map(p => {
-      const d = p.paymentDate || (p.createdAt ? p.createdAt.split('T')[0] : '');
-      const t = p.createdAt ? p.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+      const { dateISO, timeStr } = parseLocalDate(p.paymentDate, p.createdAt);
       const amt = Number(p.amount || 0);
 
       return {
         id: `payin-${p.id || p.receiptNumber}`,
-        date: d,
-        time: t,
+        date: dateISO,
+        time: timeStr,
         partyName: p.partyName || 'Customer Receipt',
         refNo: p.receiptNumber || '',
         type: 'Payment-In',
@@ -556,14 +666,13 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
 
     // 4. Vendor Payments (Payment-Out)
     const payOuts = safePaymentsOut.map(po => {
-      const d = po.paymentDate || (po.createdAt ? po.createdAt.split('T')[0] : '');
-      const t = po.createdAt ? po.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+      const { dateISO, timeStr } = parseLocalDate(po.paymentDate, po.createdAt);
       const amt = Number(po.amount || 0);
 
       return {
         id: `payout-${po.id || po.receiptNumber}`,
-        date: d,
-        time: t,
+        date: dateISO,
+        time: timeStr,
         partyName: po.partyName || 'Supplier Payment',
         refNo: po.receiptNumber || '',
         type: 'Payment-Out',
@@ -577,14 +686,13 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
 
     // 5. Expenses
     const exps = safeExpenses.map(e => {
-      const d = e.expenseDate || (e.createdAt ? e.createdAt.split('T')[0] : '');
-      const t = e.createdAt ? e.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+      const { dateISO, timeStr } = parseLocalDate(e.expenseDate, e.createdAt);
       const amt = Number(e.amount || 0);
 
       return {
         id: `exp-${e.id || e.expenseNumber}`,
-        date: d,
-        time: t,
+        date: dateISO,
+        time: timeStr,
         partyName: e.categoryName || e.notes || 'Business Expense',
         refNo: e.expenseNumber || '',
         type: 'Expense',
@@ -598,14 +706,13 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
 
     // 6. Debit Notes (Purchase Returns)
     const purReturns = safePurchaseReturns.map(pr => {
-      const d = pr.returnDate || (pr.createdAt ? pr.createdAt.split('T')[0] : '');
-      const t = pr.createdAt ? pr.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+      const { dateISO, timeStr } = parseLocalDate(pr.returnDate, pr.createdAt);
       const amt = Number(pr.grandTotal || 0);
 
       return {
         id: `pur-ret-${pr.id || pr.debitNoteNumber}`,
-        date: d,
-        time: t,
+        date: dateISO,
+        time: timeStr,
         partyName: pr.supplierName || 'Vendor / Supplier',
         refNo: pr.debitNoteNumber || '1',
         type: 'Debit Note',
@@ -619,15 +726,14 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
 
     // 7. Credit Notes (Sale Returns)
     const slReturns = safeSaleReturns.map(sr => {
-      const d = sr.returnDate || (sr.createdAt ? sr.createdAt.split('T')[0] : '');
-      const t = sr.createdAt ? sr.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+      const { dateISO, timeStr } = parseLocalDate(sr.returnDate, sr.createdAt);
       const amt = Number(sr.grandTotal || 0);
       const refund = sr.refundAmount !== undefined ? Number(sr.refundAmount) : amt;
 
       return {
         id: `sale-ret-${sr.id || sr.creditNoteNumber}`,
-        date: d,
-        time: t,
+        date: dateISO,
+        time: timeStr,
         partyName: sr.partyName || 'Retail Customer',
         refNo: sr.creditNoteNumber || '',
         type: 'Sale Return',
@@ -650,15 +756,14 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
         );
       })
       .map(ct => {
-        const d = ct.transactionDate || (ct.createdAt ? ct.createdAt.split('T')[0] : '');
-        const t = ct.createdAt ? ct.createdAt.split('T')[1]?.slice(0, 5) || '12:00' : '12:00';
+        const { dateISO, timeStr } = parseLocalDate(ct.transactionDate, ct.createdAt);
         const amt = Number(ct.amount || 0);
         const isIncrease = ct.type === 'IN';
 
         return {
           id: `cash-adj-${ct.id}`,
-          date: d,
-          time: t,
+          date: dateISO,
+          time: timeStr,
           partyName: 'Cash Adjustment',
           refNo: '',
           type: isIncrease ? 'Cash Increase' : 'Cash Reduce',
@@ -734,6 +839,258 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
     link.setAttribute('download', `DayBook_${dayBookDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // ----------------- ALL TRANSACTIONS AGGREGATION & DATA -----------------
+  // Schema: # | DATE | REF NO. | PARTY NAME | CATEGORY NAME | TYPE | TOTAL | RECEIVED / PAID | BALANCE | ACTIONS
+  const allTransactionsData = useMemo(() => {
+    // 1. Sales
+    const sales = safeInvoices.map(inv => {
+      const { dateISO, timeStr } = parseLocalDate(inv.invoiceDate, inv.createdAt);
+      const grand = Number(inv.grandTotal || 0);
+      const rec = Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? grand : 0));
+      const due = Number(inv.dueAmount ?? (grand - rec));
+
+      return {
+        id: `sale-${inv.id || inv.invoiceNumber}`,
+        date: dateISO,
+        time: timeStr,
+        refNo: inv.invoiceNumber || '',
+        partyName: inv.partyName || 'Walk-in Retail Customer',
+        categoryName: '',
+        type: 'Sale',
+        paymentMode: inv.paymentMethod || 'Cash',
+        totalAmount: grand,
+        receivedPaidAmount: rec,
+        balanceAmount: due,
+        tenantId: inv.tenantId || 'default-tenant'
+      };
+    });
+
+    // 2. Purchases
+    const purchases = safePurchaseBills.map(b => {
+      const { dateISO, timeStr } = parseLocalDate(b.billDate, b.createdAt);
+      const grand = Number(b.grandTotal || 0);
+      const paid = Number(b.paidAmount || 0);
+      const due = Number(b.dueAmount ?? (grand - paid));
+      const pm = (b as any).paymentMethod || (paid >= grand ? 'Cash' : (paid > 0 ? 'Partial' : 'Credit'));
+
+      return {
+        id: `pur-${b.id || b.billNumber}`,
+        date: dateISO,
+        time: timeStr,
+        refNo: b.billNumber || '',
+        partyName: b.supplierName || 'Vendor / Supplier',
+        categoryName: '',
+        type: 'Purchase',
+        paymentMode: pm,
+        totalAmount: grand,
+        receivedPaidAmount: paid,
+        balanceAmount: due,
+        tenantId: b.tenantId || 'default-tenant'
+      };
+    });
+
+    // 3. Payment-In
+    const payIns = safePaymentsIn.map(p => {
+      const { dateISO, timeStr } = parseLocalDate(p.paymentDate, p.createdAt);
+      const amt = Number(p.amount || 0);
+
+      return {
+        id: `payin-${p.id || p.receiptNumber}`,
+        date: dateISO,
+        time: timeStr,
+        refNo: p.receiptNumber || '',
+        partyName: p.partyName || 'Customer Receipt',
+        categoryName: '',
+        type: 'Payment-In',
+        paymentMode: p.paymentMethod || 'Cash',
+        totalAmount: amt,
+        receivedPaidAmount: amt,
+        balanceAmount: 0,
+        tenantId: p.tenantId || 'default-tenant'
+      };
+    });
+
+    // 4. Payment-Out
+    const payOuts = safePaymentsOut.map(po => {
+      const { dateISO, timeStr } = parseLocalDate(po.paymentDate, po.createdAt);
+      const amt = Number(po.amount || 0);
+
+      return {
+        id: `payout-${po.id || po.receiptNumber}`,
+        date: dateISO,
+        time: timeStr,
+        refNo: po.receiptNumber || '',
+        partyName: po.partyName || 'Supplier Payment',
+        categoryName: '',
+        type: 'Payment-Out',
+        paymentMode: po.paymentMethod || 'Cash',
+        totalAmount: amt,
+        receivedPaidAmount: amt,
+        balanceAmount: 0,
+        tenantId: po.tenantId || 'default-tenant'
+      };
+    });
+
+    // 5. Expenses
+    const exps = safeExpenses.map(e => {
+      const { dateISO, timeStr } = parseLocalDate(e.expenseDate, e.createdAt);
+      const amt = Number(e.amount || 0);
+
+      return {
+        id: `exp-${e.id || e.expenseNumber}`,
+        date: dateISO,
+        time: timeStr,
+        refNo: e.expenseNumber || '',
+        partyName: '',
+        categoryName: e.categoryName || e.notes || 'Rent / Expense',
+        type: 'Expense',
+        paymentMode: e.paymentMode || 'Cash',
+        totalAmount: amt,
+        receivedPaidAmount: amt,
+        balanceAmount: 0,
+        tenantId: e.tenantId || 'default-tenant'
+      };
+    });
+
+    // 6. Debit Notes (Purchase Returns)
+    const purReturns = safePurchaseReturns.map(pr => {
+      const { dateISO, timeStr } = parseLocalDate(pr.returnDate, pr.createdAt);
+      const grand = Number(pr.grandTotal || 0);
+
+      return {
+        id: `pur-ret-${pr.id || pr.debitNoteNumber}`,
+        date: dateISO,
+        time: timeStr,
+        refNo: pr.debitNoteNumber || '1',
+        partyName: pr.supplierName || 'Vendor / Supplier',
+        categoryName: '',
+        type: 'Debit Note',
+        paymentMode: 'Cash',
+        totalAmount: grand,
+        receivedPaidAmount: grand,
+        balanceAmount: 0,
+        tenantId: pr.tenantId || 'default-tenant'
+      };
+    });
+
+    // 7. Credit Notes (Sale Returns)
+    const slReturns = safeSaleReturns.map(sr => {
+      const { dateISO, timeStr } = parseLocalDate(sr.returnDate, sr.createdAt);
+      const grand = Number(sr.grandTotal || 0);
+      const refund = sr.refundAmount !== undefined ? Number(sr.refundAmount) : grand;
+
+      return {
+        id: `sale-ret-${sr.id || sr.creditNoteNumber}`,
+        date: dateISO,
+        time: timeStr,
+        refNo: sr.creditNoteNumber || '',
+        partyName: sr.partyName || 'Retail Customer',
+        categoryName: '',
+        type: 'Sale Return',
+        paymentMode: 'Cash',
+        totalAmount: grand,
+        receivedPaidAmount: refund,
+        balanceAmount: 0,
+        tenantId: sr.tenantId || 'default-tenant'
+      };
+    });
+
+    // 8. Cash Adjustments
+    const manualCashAdjustments = safeCashTransactions
+      .filter(ct => {
+        const src = ct.source;
+        return (
+          src === 'MANUAL_ADJUSTMENT' ||
+          src === 'BANK_DEPOSIT' ||
+          src === 'BANK_WITHDRAWAL'
+        );
+      })
+      .map(ct => {
+        const { dateISO, timeStr } = parseLocalDate(ct.transactionDate, ct.createdAt);
+        const amt = Number(ct.amount || 0);
+        const isIncrease = ct.type === 'IN';
+
+        return {
+          id: `cash-adj-${ct.id}`,
+          date: dateISO,
+          time: timeStr,
+          refNo: '',
+          partyName: ct.description || (isIncrease ? 'Cash Increase' : 'Cash Reduce'),
+          categoryName: 'Cash Adjustment',
+          type: isIncrease ? 'Cash Increase' : 'Cash Reduce',
+          paymentMode: 'Cash',
+          totalAmount: amt,
+          receivedPaidAmount: amt,
+          balanceAmount: 0,
+          tenantId: ct.tenantId || 'default-tenant'
+        };
+      });
+
+    const combined = [
+      ...sales,
+      ...purchases,
+      ...payIns,
+      ...payOuts,
+      ...exps,
+      ...purReturns,
+      ...slReturns,
+      ...manualCashAdjustments
+    ];
+
+    const filtered = combined.filter(item => {
+      if (allTxnsFirmFilter !== 'all' && item.tenantId !== allTxnsFirmFilter) return false;
+      if (startDate && item.date < startDate) return false;
+      if (endDate && item.date > endDate) return false;
+      if (selectedTypeFilter !== 'all' && item.type.toLowerCase() !== selectedTypeFilter.toLowerCase()) {
+        return false;
+      }
+      if (search.trim()) {
+        const q = search.toLowerCase().trim();
+        return (
+          item.refNo.toLowerCase().includes(q) ||
+          item.partyName.toLowerCase().includes(q) ||
+          item.categoryName.toLowerCase().includes(q) ||
+          item.type.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+
+    return filtered.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return a.time.localeCompare(b.time);
+    });
+  }, [safeInvoices, safePurchaseBills, safePaymentsIn, safePaymentsOut, safeExpenses, safePurchaseReturns, safeSaleReturns, safeCashTransactions, allTxnsFirmFilter, startDate, endDate, selectedTypeFilter, search]);
+
+  const handleExportAllTxnsCSV = () => {
+    if (allTransactionsData.length === 0) {
+      alert('No transactions available to export for the selected date range.');
+      return;
+    }
+
+    const headers = ['#', 'DATE', 'REF NO.', 'PARTY NAME', 'CATEGORY NAME', 'TYPE', 'TOTAL (Rs)', 'RECEIVED / PAID (Rs)', 'BALANCE (Rs)'];
+    const rows = allTransactionsData.map((t, idx) => [
+      idx + 1,
+      formatDateDisplay(t.date),
+      `"${t.refNo}"`,
+      `"${t.partyName}"`,
+      `"${t.categoryName}"`,
+      t.type,
+      t.totalAmount.toFixed(2),
+      t.receivedPaidAmount.toFixed(2),
+      t.balanceAmount.toFixed(2)
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `All_Transactions_${startDate}_to_${endDate}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -864,7 +1221,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-xs font-extrabold text-slate-500 uppercase tracking-wider">
-                    Total Sales Amount
+                    Total Sales Amount (Net)
                   </div>
                   <div className="text-3xl font-mono font-black text-slate-900 mt-1">
                     Rs {totalSalesAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -881,7 +1238,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
 
               <div className="flex flex-wrap items-center gap-6 pt-2 border-t border-slate-200 text-xs font-semibold">
                 <div className="flex items-center gap-1.5 text-slate-600">
-                  <span>Received:</span>
+                  <span>Received (Net):</span>
                   <span className="font-mono font-black text-emerald-600">
                     Rs {totalReceivedAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
@@ -1002,62 +1359,67 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
                         </td>
                       </tr>
                     ) : (
-                      filteredInvoices.map(inv => {
-                        const dueAmt = inv.dueAmount !== undefined ? Number(inv.dueAmount) : (inv.paymentStatus === 'PAID' ? 0 : Number(inv.grandTotal || 0));
-                        return (
-                          <tr key={inv.id || inv.invoiceNumber} className="hover:bg-slate-50/60 transition-colors">
-                            <td className="py-3 px-4 font-mono text-slate-600 whitespace-nowrap">
-                              {formatDateDisplay(inv.invoiceDate || (inv.createdAt ? inv.createdAt.split('T')[0] : ''))}
-                            </td>
-                            <td className="py-3 px-4 font-mono font-extrabold text-blue-600 whitespace-nowrap">
-                              {inv.invoiceNumber || 'INV-000'}
-                            </td>
-                            <td className="py-3 px-4 font-bold text-slate-800">
-                              {inv.partyName || 'Walk-in Retail Customer'}
-                            </td>
-                            <td className="py-3 px-4">
-                              <span className="px-2 py-0.5 text-[10px] font-extrabold bg-blue-50 text-blue-700 rounded border border-blue-200">
-                                Sale
-                              </span>
-                            </td>
-                            <td className="py-3 px-4 font-mono font-bold text-slate-700">
-                              <span className="px-2 py-0.5 text-[10px] rounded bg-slate-100 border border-slate-200">
-                                {inv.paymentMethod || 'CASH'}
-                              </span>
-                            </td>
-                            <td className="py-3 px-4 font-mono font-black text-slate-900 text-right whitespace-nowrap">
-                              Rs {Number(inv.grandTotal || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="py-3 px-4 font-mono font-black text-right whitespace-nowrap">
-                              <span className={dueAmt > 0 ? 'text-amber-600 font-extrabold' : 'text-slate-500'}>
-                                Rs {dueAmt.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                              </span>
-                            </td>
-                            <td className="py-3 px-4 text-center whitespace-nowrap">
-                              <div className="flex items-center justify-center gap-1.5 text-slate-400">
+                      filteredInvoices.map(inv => (
+                        <tr key={`${inv.type}-${inv.id}`} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="py-3 px-4 font-mono text-slate-600 whitespace-nowrap">
+                            {formatDateDisplay(inv.date)}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-extrabold text-blue-600 whitespace-nowrap">
+                            {inv.invoiceNumber}
+                          </td>
+                          <td className="py-3 px-4 font-bold text-slate-800">
+                            {inv.partyName}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span
+                              className={`px-2 py-0.5 text-[10px] font-extrabold rounded border ${
+                                inv.type === 'Sale'
+                                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                  : 'bg-purple-50 text-purple-700 border-purple-200'
+                              }`}
+                            >
+                              {inv.type}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-mono font-bold text-slate-700">
+                            <span className="px-2 py-0.5 text-[10px] rounded bg-slate-100 border border-slate-200">
+                              {inv.paymentMethod}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-mono font-black text-slate-900 text-right whitespace-nowrap">
+                            Rs {inv.grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-black text-right whitespace-nowrap">
+                            <span className={inv.dueAmount > 0 ? 'text-amber-600 font-extrabold' : 'text-slate-500'}>
+                              Rs {inv.dueAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-center whitespace-nowrap">
+                            <div className="flex items-center justify-center gap-1.5 text-slate-400">
+                              {inv.rawInvoice && (
                                 <button
-                                  onClick={() => triggerThermalPrint(inv, business)}
+                                  onClick={() => triggerThermalPrint(inv.rawInvoice!, business)}
                                   title="Print Receipt"
                                   className="p-1 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer"
                                 >
                                   <Printer className="w-3.5 h-3.5" />
                                 </button>
-                                <button
-                                  onClick={() => {
-                                    const shareText = `Invoice #${inv.invoiceNumber} - ${inv.partyName} - Amount: Rs ${inv.grandTotal}`;
-                                    navigator.clipboard?.writeText(shareText);
-                                    alert('Invoice details copied to clipboard!');
-                                  }}
-                                  title="Share / Copy"
-                                  className="p-1 hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors cursor-pointer"
-                                >
-                                  <Share2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
+                              )}
+                              <button
+                                onClick={() => {
+                                  const shareText = `${inv.type} #${inv.invoiceNumber} - ${inv.partyName} - Amount: Rs ${inv.grandTotal}`;
+                                  navigator.clipboard?.writeText(shareText);
+                                  alert('Transaction details copied to clipboard!');
+                                }}
+                                title="Share / Copy"
+                                className="p-1 hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors cursor-pointer"
+                              >
+                                <Share2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
                     )}
                   </tbody>
                 </table>
@@ -1147,7 +1509,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-xs font-extrabold text-slate-500 uppercase tracking-wider">
-                    Total Purchase Amount
+                    Total Purchase Amount (Net)
                   </div>
                   <div className="text-3xl font-mono font-black text-slate-900 mt-1">
                     Rs {purchaseTotalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -1164,7 +1526,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
 
               <div className="flex flex-wrap items-center gap-6 pt-2 border-t border-slate-200 text-xs font-semibold">
                 <div className="flex items-center gap-1.5 text-slate-600">
-                  <span>Paid:</span>
+                  <span>Paid (Net):</span>
                   <span className="font-mono font-black text-emerald-600">
                     Rs {purchasePaidTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
@@ -1331,7 +1693,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
                               </button>
                               <button
                                 onClick={() => {
-                                  const shareText = `Purchase Bill #${txn.invoiceNo} - ${txn.partyName} - Amount: Rs ${txn.amount}`;
+                                  const shareText = `${txn.type} #${txn.invoiceNo} - ${txn.partyName} - Amount: Rs ${txn.amount}`;
                                   navigator.clipboard?.writeText(shareText);
                                   alert('Purchase bill details copied to clipboard!');
                                 }}
@@ -1556,8 +1918,251 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
           </>
         )}
 
+        {/* ================= ALL TRANSACTIONS REPORT ================= */}
+        {activeTab === 'all-transactions' && (
+          <>
+            {/* Top Filter Controls matching Reference Screenshot */}
+            <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm space-y-3 text-xs">
+              {/* Row 1: Date Preset, Date Range Input, Firm Selector, Utilities */}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Date Preset Dropdown */}
+                  <select
+                    value={datePreset}
+                    onChange={e => handlePresetChange(e.target.value as DatePreset)}
+                    aria-label="Filter date range preset"
+                    className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                  >
+                    <option value="this_month">This Month</option>
+                    <option value="today">Today</option>
+                    <option value="yesterday">Yesterday</option>
+                    <option value="this_week">This Week</option>
+                    <option value="last_month">Last Month</option>
+                    <option value="this_quarter">This Quarter</option>
+                    <option value="this_year">This Year</option>
+                    <option value="custom">Custom Date</option>
+                  </select>
+
+                  {/* Date Range Badge (Between ... To ...) */}
+                  <div className="flex items-center bg-white border border-slate-300 rounded-lg overflow-hidden shadow-2xs">
+                    <span className="bg-slate-400 text-white text-xs font-bold px-3 py-2">Between</span>
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={e => {
+                        setStartDate(e.target.value);
+                        setDatePreset('custom');
+                      }}
+                      aria-label="Start date"
+                      className="px-2 py-1 text-xs font-mono font-bold text-slate-800 outline-none"
+                    />
+                    <span className="text-slate-500 font-bold px-1.5">To</span>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={e => {
+                        setEndDate(e.target.value);
+                        setDatePreset('custom');
+                      }}
+                      aria-label="End date"
+                      className="px-2 py-1 text-xs font-mono font-bold text-slate-800 outline-none"
+                    />
+                  </div>
+
+                  {/* Firm Filter Dropdown (ALL FIRMS matching reference image) */}
+                  <select
+                    value={allTxnsFirmFilter}
+                    onChange={e => setAllTxnsFirmFilter(e.target.value)}
+                    aria-label="Select Firm"
+                    className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs min-w-[130px]"
+                  >
+                    <option value="all">ALL FIRMS</option>
+                    {companies.map((c, idx) => (
+                      <option key={c.tenantId || idx} value={c.tenantId}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Right Top Action Utilities */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleExportAllTxnsCSV}
+                    title="Excel Report"
+                    className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                    <span>Excel Report</span>
+                  </button>
+
+                  <button
+                    onClick={handlePrintReport}
+                    title="Print"
+                    className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4 text-slate-600" />
+                    <span>Print</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Row 2: Type Filter Dropdown */}
+              <div className="flex items-center gap-3 pt-1 border-t border-slate-100">
+                <select
+                  value={selectedTypeFilter}
+                  onChange={e => setSelectedTypeFilter(e.target.value)}
+                  aria-label="Filter Transaction Type"
+                  className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs min-w-[160px]"
+                >
+                  <option value="all">All Transaction</option>
+                  <option value="Sale">Sale</option>
+                  <option value="Purchase">Purchase</option>
+                  <option value="Payment-In">Payment-In</option>
+                  <option value="Payment-Out">Payment-Out</option>
+                  <option value="Expense">Expense</option>
+                  <option value="Debit Note">Debit Note</option>
+                  <option value="Sale Return">Sale Return</option>
+                  <option value="Cash Increase">Cash Increase</option>
+                  <option value="Cash Reduce">Cash Reduce</option>
+                </select>
+              </div>
+            </div>
+
+            {/* All Transactions Table Section matching Reference UI */}
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden">
+              {/* Search Bar Input */}
+              <div className="p-3.5 border-b border-slate-200 flex items-center">
+                <div className="relative w-full max-w-sm">
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    aria-label="Search all transactions"
+                    placeholder="Search party, ref no, category..."
+                    className="h-8 pl-8 pr-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold outline-none focus:border-blue-500 w-full"
+                  />
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                </div>
+              </div>
+
+              {/* Table Render (Row index starting from 1 with index + 1) */}
+              <div className="overflow-x-auto">
+                <table className="vyapar-table w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/80 text-slate-500 text-[11px] font-extrabold uppercase tracking-wider border-b border-slate-200">
+                      <th className="py-3 px-3 w-10">#</th>
+                      <th className="py-3 px-4">DATE</th>
+                      <th className="py-3 px-4">REF NO.</th>
+                      <th className="py-3 px-4">PARTY NAME</th>
+                      <th className="py-3 px-4">CATEGORY NAME</th>
+                      <th className="py-3 px-4">TYPE</th>
+                      <th className="py-3 px-4 text-right">TOTAL</th>
+                      <th className="py-3 px-4 text-right">RECEIVED / PAID</th>
+                      <th className="py-3 px-4 text-right">BALANCE</th>
+                      <th className="py-3 px-4 text-center">PRINT / SHARE</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                    {allTransactionsData.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} className="text-center py-12 text-slate-400 font-semibold">
+                          No transactions found matching the selected criteria.
+                        </td>
+                      </tr>
+                    ) : (
+                      allTransactionsData.map((t, idx) => (
+                        <tr key={t.id} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="py-3 px-3 font-mono font-bold text-slate-500">
+                            {idx + 1}
+                          </td>
+                          <td className="py-3 px-4 font-mono text-slate-700 whitespace-nowrap">
+                            {formatDateDisplay(t.date)}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-bold text-slate-800 whitespace-nowrap">
+                            {t.refNo || ''}
+                          </td>
+                          <td className="py-3 px-4 font-bold text-slate-800">
+                            {t.partyName || ''}
+                          </td>
+                          <td className="py-3 px-4 font-medium text-slate-600">
+                            {t.categoryName || ''}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span
+                              className={`px-2 py-0.5 text-[10px] font-extrabold rounded border ${
+                                t.type === 'Sale'
+                                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                  : t.type === 'Purchase'
+                                  ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                  : t.type === 'Payment-In'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : t.type === 'Payment-Out'
+                                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                  : t.type === 'Expense'
+                                  ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                  : t.type === 'Debit Note'
+                                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                  : t.type === 'Sale Return'
+                                  ? 'bg-pink-50 text-pink-700 border-pink-200'
+                                  : 'bg-slate-100 text-slate-700 border-slate-200'
+                              }`}
+                            >
+                              {t.type}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-mono font-black text-slate-900 text-right whitespace-nowrap">
+                            Rs {t.totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-black text-emerald-600 text-right whitespace-nowrap">
+                            Rs {t.receivedPaidAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-black text-right whitespace-nowrap">
+                            <span className={t.balanceAmount > 0 ? 'text-amber-600 font-extrabold' : 'text-slate-500'}>
+                              Rs {t.balanceAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-center whitespace-nowrap">
+                            <div className="flex items-center justify-center gap-2 text-slate-400">
+                              <button
+                                onClick={handlePrintReport}
+                                title="Print Details"
+                                className="p-1 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const shareText = `${t.type} #${t.refNo} - ${t.partyName || t.categoryName} - Total: Rs ${t.totalAmount}`;
+                                  navigator.clipboard?.writeText(shareText);
+                                  alert('Transaction details copied to clipboard!');
+                                }}
+                                title="Share / Copy"
+                                className="p-1 hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors cursor-pointer"
+                              >
+                                <Share2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => alert(`Details for ${t.type} #${t.refNo}`)}
+                                title="More options"
+                                className="p-1 hover:text-slate-700 hover:bg-slate-100 rounded transition-colors cursor-pointer"
+                              >
+                                <MoreVertical className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
         {/* ================= OTHER REPORT TABS PLACEHOLDER ================= */}
-        {activeTab !== 'sale' && activeTab !== 'purchase' && activeTab !== 'day-book' && (
+        {activeTab !== 'sale' && activeTab !== 'purchase' && activeTab !== 'day-book' && activeTab !== 'all-transactions' && (
           <div className="bg-white border border-slate-200 rounded-xl p-8 shadow-sm flex flex-col items-center justify-center text-center my-auto min-h-[400px]">
             <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 mb-4">
               <FileText className="w-7 h-7 stroke-[2]" />
