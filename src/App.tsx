@@ -954,9 +954,12 @@ export function App() {
           {activeTab === 'reports' && (
             <ReportsScreen
               invoices={allInvoices}
+              purchaseBills={allPurchaseBills}
+              purchaseReturns={allPurchaseReturns}
               business={businessDetails}
               companies={companies}
               onAddSale={() => setActiveTab('pos')}
+              onAddPurchase={() => setActiveTab('purchase')}
             />
           )}
 
