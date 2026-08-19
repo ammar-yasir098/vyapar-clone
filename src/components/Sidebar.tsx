@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   Home, 
   Users, 
@@ -21,22 +21,9 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
-  const [isSaleOpen, setIsSaleOpen] = useState(true);
-  const [isPurchaseOpen, setIsPurchaseOpen] = useState(true);
-  const [isCashBankOpen, setIsCashBankOpen] = useState(true);
-
-  // Automatically expand Sale, Purchase, or Cash & Bank groups based on active tab
-  useEffect(() => {
-    if (activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices' || activeTab === 'sale-returns' || activeTab === 'create-sale-return') {
-      setIsSaleOpen(true);
-    }
-    if (activeTab === 'purchase' || activeTab === 'purchase-orders' || activeTab === 'create-po' || activeTab === 'payment-out' || activeTab === 'expenses' || activeTab === 'purchase-returns' || activeTab === 'create-purchase-return') {
-      setIsPurchaseOpen(true);
-    }
-    if (activeTab === 'cash-in-hand' || activeTab === 'ledger' || activeTab === 'cash-bank') {
-      setIsCashBankOpen(true);
-    }
-  }, [activeTab]);
+  const [isSaleOpen, setIsSaleOpen] = useState(false);
+  const [isPurchaseOpen, setIsPurchaseOpen] = useState(false);
+  const [isCashBankOpen, setIsCashBankOpen] = useState(false);
 
   const isSaleActive = activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices' || activeTab === 'sale-returns' || activeTab === 'create-sale-return';
   const isPurchaseActive = activeTab === 'purchase' || activeTab === 'purchase-orders' || activeTab === 'create-po' || activeTab === 'payment-out' || activeTab === 'expenses' || activeTab === 'purchase-returns' || activeTab === 'create-purchase-return';

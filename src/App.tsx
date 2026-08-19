@@ -578,19 +578,20 @@ export function App() {
   const allPurchaseReturns = useLiveQuery(() => db.purchaseReturns.reverse().toArray(), []) || [];
   const allSaleReturns = useLiveQuery(() => db.saleReturns.reverse().toArray(), []) || [];
 
-  const items = allItems.filter(item => item.tenantId === currentTenantId);
-  const parties = allParties.filter(party => party.tenantId === currentTenantId);
-  const invoices = allInvoices.filter(inv => inv.tenantId === currentTenantId);
-  const accounts = allAccounts.filter(acc => acc.tenantId === currentTenantId);
-  const journalEntries = allJournalEntries.filter(je => je.tenantId === currentTenantId);
-  const estimates = allEstimates.filter(est => est.tenantId === currentTenantId);
-  const paymentsIn = allPaymentsIn.filter(p => p.tenantId === currentTenantId);
-  const purchaseOrders = allPurchaseOrders.filter(po => po.tenantId === currentTenantId);
-  const purchaseBills = allPurchaseBills.filter(pb => pb.tenantId === currentTenantId);
-  const paymentsOut = allPaymentsOut.filter(po => po.tenantId === currentTenantId);
-  const expenses = allExpenses.filter(e => e.tenantId === currentTenantId);
-  const purchaseReturns = allPurchaseReturns.filter(pr => pr.tenantId === currentTenantId);
-  const saleReturns = allSaleReturns.filter(sr => sr.tenantId === currentTenantId);
+  const activeTenantId = currentTenantId || 'default-tenant';
+  const items = allItems.filter(item => (item.tenantId || 'default-tenant') === activeTenantId);
+  const parties = allParties.filter(party => (party.tenantId || 'default-tenant') === activeTenantId);
+  const invoices = allInvoices.filter(inv => (inv.tenantId || 'default-tenant') === activeTenantId);
+  const accounts = allAccounts.filter(acc => (acc.tenantId || 'default-tenant') === activeTenantId);
+  const journalEntries = allJournalEntries.filter(je => (je.tenantId || 'default-tenant') === activeTenantId);
+  const estimates = allEstimates.filter(est => (est.tenantId || 'default-tenant') === activeTenantId);
+  const paymentsIn = allPaymentsIn.filter(p => (p.tenantId || 'default-tenant') === activeTenantId);
+  const purchaseOrders = allPurchaseOrders.filter(po => (po.tenantId || 'default-tenant') === activeTenantId);
+  const purchaseBills = allPurchaseBills.filter(pb => (pb.tenantId || 'default-tenant') === activeTenantId);
+  const paymentsOut = allPaymentsOut.filter(po => (po.tenantId || 'default-tenant') === activeTenantId);
+  const expenses = allExpenses.filter(e => (e.tenantId || 'default-tenant') === activeTenantId);
+  const purchaseReturns = allPurchaseReturns.filter(pr => (pr.tenantId || 'default-tenant') === activeTenantId);
+  const saleReturns = allSaleReturns.filter(sr => (sr.tenantId || 'default-tenant') === activeTenantId);
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');

@@ -165,6 +165,13 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const [search, setSearch] = useState<string>('');
   const [showChart, setShowChart] = useState<boolean>(false);
 
+  // Auto-sync selectedFirm whenever active tenant is changed from top-left store selector
+  React.useEffect(() => {
+    if (activeTenantId) {
+      setSelectedFirm(activeTenantId);
+    }
+  }, [activeTenantId]);
+
   const safeInvoices = Array.isArray(invoices) ? invoices : [];
 
   // Handle Preset Change
@@ -408,12 +415,12 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
                 >
                   <option value="all">All Firms</option>
                   {companies.map(c => (
-                    <option key={c.tenantId || c.name} value={c.tenantId}>
+                    <option key={c.tenantId || c.name} value={c.tenantId || 'default-tenant'}>
                       {c.name}
                     </option>
                   ))}
-                  {!companies.some(c => c.name === business.name) && (
-                    <option value="default-tenant">{business.name}</option>
+                  {!companies.some(c => (c.tenantId || 'default-tenant') === activeTenantId) && (
+                    <option value={activeTenantId}>{business.name || 'Current Store'}</option>
                   )}
                 </select>
               </div>
