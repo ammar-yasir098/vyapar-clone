@@ -219,13 +219,13 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
     ? 0
     : (receivedAmount !== '' && !isNaN(parseFloat(receivedAmount))
         ? Math.max(0, parseFloat(receivedAmount))
-        : 0);
+        : grandTotal);
 
   const changeToReturn = Math.max(0, recAmtNum - grandTotal);
   const dueAmount = paymentMethod === 'CREDIT'
     ? grandTotal
     : Math.max(0, grandTotal - recAmtNum);
-  const paymentStatus = dueAmount === 0 ? 'PAID' : (dueAmount === grandTotal ? 'UNPAID' : 'PARTIAL');
+  const paymentStatus = paymentMethod === 'CREDIT' ? 'UNPAID' : (dueAmount === 0 ? 'PAID' : (dueAmount === grandTotal ? 'UNPAID' : 'PARTIAL'));
 
   const handleSaveAndPrint = async () => {
     if (cartItems.length === 0) return;
@@ -252,8 +252,8 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
       discountTotal,
       grandTotal,
       receivedAmount: paymentMethod === 'CREDIT' ? 0 : recAmtNum,
-      dueAmount,
-      paymentStatus,
+      dueAmount: paymentMethod === 'CREDIT' ? grandTotal : dueAmount,
+      paymentStatus: paymentMethod === 'CREDIT' ? 'UNPAID' : paymentStatus,
       paymentMethod,
       notes,
       createdAt: new Date().toISOString(),

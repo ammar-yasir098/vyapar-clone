@@ -83,9 +83,10 @@ invoicesRouter.post('/', async (req: Request, res: Response) => {
     const subtotal = round2(rawSubtotal);
     const taxTotal = round2(rawTaxTotal);
     const grandTotal = round2(subtotal + taxTotal);
-    const safeReceivedAmount = Math.max(0, Math.min(grandTotal, round2(receivedAmount)));
-    const dueAmount = round2(Math.max(0, grandTotal - safeReceivedAmount));
-    const paymentStatus = dueAmount === 0 ? 'PAID' : safeReceivedAmount > 0 ? 'PARTIAL' : 'UNPAID';
+    const isCredit = (paymentMethod || '').toUpperCase() === 'CREDIT';
+    const safeReceivedAmount = isCredit ? 0 : Math.max(0, Math.min(grandTotal, round2(receivedAmount)));
+    const dueAmount = isCredit ? grandTotal : round2(Math.max(0, grandTotal - safeReceivedAmount));
+    const paymentStatus = isCredit ? 'UNPAID' : (dueAmount === 0 ? 'PAID' : safeReceivedAmount > 0 ? 'PARTIAL' : 'UNPAID');
     const invoiceId = `INV-TXN-${Date.now()}`;
 
     if (isDbConnected()) {

@@ -15,12 +15,14 @@ import {
   PieChart,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   MoreVertical
 } from 'lucide-react';
-import { Invoice, BusinessDetails, PurchaseBill, PurchaseReturn, PaymentIn, PaymentOut, Expense, SaleReturn, CashTransaction } from '../../types';
+import { Invoice, BusinessDetails, PurchaseBill, PurchaseReturn, PaymentIn, PaymentOut, Expense, SaleReturn, CashTransaction, Item } from '../../types';
 import { triggerThermalPrint } from '../../services/printer';
 
 interface ReportsScreenProps {
+  items?: Item[];
   invoices?: Invoice[];
   purchaseBills?: PurchaseBill[];
   purchaseReturns?: PurchaseReturn[];
@@ -185,7 +187,40 @@ function getPresetDates(preset: DatePreset): { startDate: string; endDate: strin
   return { startDate: formatDateISO(first), endDate: formatDateISO(last) };
 }
 
+// Helper to compute individual invoice total cost, profit, and margin %
+function calculateInvoiceCostAndProfit(inv: Invoice, itemsList: Item[] = []) {
+  const grandTotal = Number(inv.grandTotal || 0);
+  let totalCost = 0;
+
+  if (Array.isArray(inv.items) && inv.items.length > 0) {
+    totalCost = inv.items.reduce((sum, item: any) => {
+      const qty = Number(item.quantity || 1);
+      let cost = Number(item.purchasePrice || item.costPrice || 0);
+
+      if (cost <= 0 && itemsList.length > 0) {
+        const found = itemsList.find(i => (item.itemId && i.id === item.itemId) || (item.itemName && i.name.toLowerCase() === item.itemName.toLowerCase()));
+        if (found && found.purchasePrice > 0) {
+          cost = Number(found.purchasePrice);
+        }
+      }
+
+      if (cost <= 0) {
+        cost = Number(item.unitPrice || 0) * 0.7;
+      }
+      return sum + (qty * cost);
+    }, 0);
+  } else {
+    totalCost = grandTotal * 0.7;
+  }
+
+  const profit = grandTotal - totalCost;
+  const marginPercent = grandTotal > 0 ? (profit / grandTotal) * 100 : 0;
+
+  return { grandTotal, totalCost, profit, marginPercent };
+}
+
 export const ReportsScreen: React.FC<ReportsScreenProps> = ({
+  items = [],
   invoices = [],
   purchaseBills = [],
   purchaseReturns = [],
@@ -221,6 +256,12 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const [allTxnsFirmFilter, setAllTxnsFirmFilter] = useState<string>('all');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all');
 
+  // Profit and Loss State
+  const [pnlView, setPnlView] = useState<'vyapar' | 'accounting'>('vyapar');
+  const [expandedIncomes, setExpandedIncomes] = useState<boolean>(true);
+  const [expandedExpenses, setExpandedExpenses] = useState<boolean>(true);
+  const [expandedCogs, setExpandedCogs] = useState<boolean>(true);
+
   const activeTenantId = business?.tenantId || 'default-tenant';
   const [selectedFirm, setSelectedFirm] = useState<string>(activeTenantId || 'all');
   const [search, setSearch] = useState<string>('');
@@ -233,6 +274,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     }
   }, [activeTenantId]);
 
+  const safeItems = Array.isArray(items) ? items : [];
   const safeInvoices = Array.isArray(invoices) ? invoices : [];
   const safePurchaseBills = Array.isArray(purchaseBills) ? purchaseBills : [];
   const safePurchaseReturns = Array.isArray(purchaseReturns) ? purchaseReturns : [];
@@ -274,8 +316,9 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const normalizedSales = useMemo(() => {
     return safeInvoices.map(inv => {
       const grand = Number(inv.grandTotal || 0);
-      const rec = Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? grand : 0));
-      const due = Number(inv.dueAmount ?? (grand - rec));
+      const isCredit = (inv.paymentMethod || '').toUpperCase() === 'CREDIT' || inv.paymentStatus === 'UNPAID';
+      const rec = isCredit ? 0 : Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? grand : 0));
+      const due = grand - rec;
       const { dateISO } = parseLocalDate(inv.invoiceDate, inv.createdAt);
 
       return {
@@ -288,7 +331,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
         grandTotal: grand,
         receivedAmount: rec,
         dueAmount: due,
-        paymentStatus: inv.paymentStatus || (due <= 0 ? 'PAID' : (rec > 0 ? 'PARTIAL' : 'UNPAID')),
+        paymentStatus: isCredit ? 'UNPAID' : (inv.paymentStatus || (due <= 0 ? 'PAID' : (rec > 0 ? 'PARTIAL' : 'UNPAID'))),
         tenantId: inv.tenantId || 'default-tenant',
         rawInvoice: inv
       };
@@ -606,7 +649,8 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     const sales = safeInvoices.map(inv => {
       const { dateISO, timeStr } = parseLocalDate(inv.invoiceDate, inv.createdAt);
       const tot = Number(inv.grandTotal || 0);
-      const rec = Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? inv.grandTotal : 0));
+      const isCredit = (inv.paymentMethod || '').toUpperCase() === 'CREDIT' || inv.paymentStatus === 'UNPAID';
+      const rec = isCredit ? 0 : Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? tot : 0));
 
       return {
         id: `sale-${inv.id || inv.invoiceNumber}`,
@@ -617,7 +661,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
         type: 'Sale',
         paymentMode: inv.paymentMethod || 'Cash',
         totalAmount: tot,
-        moneyIn: rec,
+        moneyIn: rec > 0 ? rec : null,
         moneyOut: null as number | null,
         tenantId: inv.tenantId || 'default-tenant'
       };
@@ -851,8 +895,9 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     const sales = safeInvoices.map(inv => {
       const { dateISO, timeStr } = parseLocalDate(inv.invoiceDate, inv.createdAt);
       const grand = Number(inv.grandTotal || 0);
-      const rec = Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? grand : 0));
-      const due = Number(inv.dueAmount ?? (grand - rec));
+      const isCredit = (inv.paymentMethod || '').toUpperCase() === 'CREDIT' || inv.paymentStatus === 'UNPAID';
+      const rec = isCredit ? 0 : Math.max(0, grand - Number(inv.dueAmount || 0));
+      const due = grand - rec;
 
       return {
         id: `sale-${inv.id || inv.invoiceNumber}`,
@@ -1043,7 +1088,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     ];
 
     const filtered = combined.filter(item => {
-      if (allTxnsFirmFilter !== 'all' && item.tenantId !== allTxnsFirmFilter) return false;
+      if (selectedFirm !== 'all' && item.tenantId !== selectedFirm) return false;
       if (startDate && item.date < startDate) return false;
       if (endDate && item.date > endDate) return false;
       if (selectedTypeFilter !== 'all' && item.type.toLowerCase() !== selectedTypeFilter.toLowerCase()) {
@@ -1065,7 +1110,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
       if (a.date !== b.date) return a.date.localeCompare(b.date);
       return a.time.localeCompare(b.time);
     });
-  }, [safeInvoices, safePurchaseBills, safePaymentsIn, safePaymentsOut, safeExpenses, safePurchaseReturns, safeSaleReturns, safeCashTransactions, allTxnsFirmFilter, startDate, endDate, selectedTypeFilter, search]);
+  }, [safeInvoices, safePurchaseBills, safePaymentsIn, safePaymentsOut, safeExpenses, safePurchaseReturns, safeSaleReturns, safeCashTransactions, selectedFirm, startDate, endDate, selectedTypeFilter, search]);
 
   const handleExportAllTxnsCSV = () => {
     if (allTransactionsData.length === 0) {
@@ -1091,6 +1136,222 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
     link.setAttribute('download', `All_Transactions_${startDate}_to_${endDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // ----------------- PROFIT AND LOSS AGGREGATION & METRICS -----------------
+  const pnlMetrics = useMemo(() => {
+    // 1. Gross Sales from Invoices
+    const grossSales = safeInvoices
+      .filter(inv => {
+        if (!inv) return false;
+        const invTenant = inv.tenantId || 'default-tenant';
+        if (selectedFirm !== 'all' && invTenant !== selectedFirm) return false;
+        const { dateISO } = parseLocalDate(inv.invoiceDate, inv.createdAt);
+        return (!startDate || dateISO >= startDate) && (!endDate || dateISO <= endDate);
+      })
+      .reduce((sum, inv) => sum + Number(inv.grandTotal || 0), 0);
+
+    // 2. Credit Notes (Sale Returns)
+    const creditNotes = safeSaleReturns
+      .filter(sr => {
+        if (!sr) return false;
+        const srTenant = sr.tenantId || 'default-tenant';
+        if (selectedFirm !== 'all' && srTenant !== selectedFirm) return false;
+        const { dateISO } = parseLocalDate(sr.returnDate, sr.createdAt);
+        return (!startDate || dateISO >= startDate) && (!endDate || dateISO <= endDate);
+      })
+      .reduce((sum, sr) => sum + Number(sr.grandTotal || 0), 0);
+
+    const netSales = grossSales - creditNotes;
+
+    // 3. Gross Purchases from Purchase Bills
+    const grossPurchases = safePurchaseBills
+      .filter(pb => {
+        if (!pb) return false;
+        const pbTenant = pb.tenantId || 'default-tenant';
+        if (selectedFirm !== 'all' && pbTenant !== selectedFirm) return false;
+        const { dateISO } = parseLocalDate(pb.billDate, pb.createdAt);
+        return (!startDate || dateISO >= startDate) && (!endDate || dateISO <= endDate);
+      })
+      .reduce((sum, pb) => sum + Number(pb.grandTotal || 0), 0);
+
+    // 4. Debit Notes (Purchase Returns)
+    const debitNotes = safePurchaseReturns
+      .filter(pr => {
+        if (!pr) return false;
+        const prTenant = pr.tenantId || 'default-tenant';
+        if (selectedFirm !== 'all' && prTenant !== selectedFirm) return false;
+        const { dateISO } = parseLocalDate(pr.returnDate, pr.createdAt);
+        return (!startDate || dateISO >= startDate) && (!endDate || dateISO <= endDate);
+      })
+      .reduce((sum, pr) => sum + Number(pr.grandTotal || 0), 0);
+
+    const netPurchases = grossPurchases - debitNotes;
+
+    // 5. Operating Expenses (Indirect Expenses)
+    const indirectExpenses = safeExpenses
+      .filter(e => {
+        if (!e) return false;
+        const eTenant = e.tenantId || 'default-tenant';
+        if (selectedFirm !== 'all' && eTenant !== selectedFirm) return false;
+        const { dateISO } = parseLocalDate(e.expenseDate, e.createdAt);
+        return (!startDate || dateISO >= startDate) && (!endDate || dateISO <= endDate);
+      })
+      .reduce((sum, e) => sum + Number(e.amount || 0), 0);
+
+    const saleFA = 0;
+    const purchaseFA = 0;
+    const directExpenses = 0;
+    const otherDirectExpenses = 0;
+    const paymentInDiscount = 0;
+    const taxPayable = 0;
+    const tcsPayable = 0;
+    const tdsPayable = 0;
+    const taxReceivable = 0;
+    const tcsReceivable = 0;
+    const openingStock = 0;
+    const closingStock = 0;
+
+    const cogs = openingStock + netPurchases - closingStock;
+    const grossProfit = netSales - cogs;
+    const netProfit = grossProfit - directExpenses - indirectExpenses;
+
+    return {
+      grossSales,
+      creditNotes,
+      netSales,
+      saleFA,
+      grossPurchases,
+      debitNotes,
+      netPurchases,
+      purchaseFA,
+      directExpenses,
+      otherDirectExpenses,
+      paymentInDiscount,
+      taxPayable,
+      tcsPayable,
+      tdsPayable,
+      taxReceivable,
+      tcsReceivable,
+      indirectExpenses,
+      openingStock,
+      closingStock,
+      cogs,
+      grossProfit,
+      netProfit
+    };
+  }, [safeInvoices, safeSaleReturns, safePurchaseBills, safePurchaseReturns, safeExpenses, selectedFirm, startDate, endDate]);
+
+  const handleExportPnlCSV = () => {
+    const headers = ['Particulars', 'Amount (Rs)'];
+    let rows: (string | number)[][] = [];
+
+    if (pnlView === 'vyapar') {
+      rows = [
+        ['Sale (+)', pnlMetrics.grossSales.toFixed(2)],
+        ['Credit Note (-)', pnlMetrics.creditNotes.toFixed(2)],
+        ['Sale FA (+)', pnlMetrics.saleFA.toFixed(2)],
+        ['Purchase (-)', pnlMetrics.grossPurchases.toFixed(2)],
+        ['Debit Note (+)', pnlMetrics.debitNotes.toFixed(2)],
+        ['Purchase FA (-)', pnlMetrics.purchaseFA.toFixed(2)],
+        ['Direct Expenses (-)', pnlMetrics.directExpenses.toFixed(2)],
+        ['Indirect Expenses (-)', pnlMetrics.indirectExpenses.toFixed(2)],
+        ['Net Profit / (Loss)', pnlMetrics.netProfit.toFixed(2)]
+      ];
+    } else {
+      rows = [
+        ['Incomes - Sale Accounts', pnlMetrics.netSales.toFixed(2)],
+        ['Expenses - Cost of Goods Sold', pnlMetrics.cogs.toFixed(2)],
+        ['Expenses - Indirect Expenses', pnlMetrics.indirectExpenses.toFixed(2)],
+        ['Net Profit / (Loss)', pnlMetrics.netProfit.toFixed(2)]
+      ];
+    }
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Profit_And_Loss_${startDate}_to_${endDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // ----------------- BILL WISE PROFIT AGGREGATION & DATA -----------------
+  const billWiseProfitData = useMemo(() => {
+    return safeInvoices.map(inv => {
+      const { dateISO } = parseLocalDate(inv.invoiceDate, inv.createdAt);
+      const { grandTotal, totalCost, profit, marginPercent } = calculateInvoiceCostAndProfit(inv, safeItems);
+
+      return {
+        id: `bill-profit-${inv.id || inv.invoiceNumber}`,
+        date: dateISO,
+        invoiceNumber: inv.invoiceNumber || 'INV-000',
+        partyName: inv.partyName || 'Walk-in Retail Customer',
+        grandTotal,
+        totalCost,
+        profit,
+        marginPercent,
+        tenantId: inv.tenantId || 'default-tenant',
+        rawInvoice: inv
+      };
+    }).filter(item => {
+      if (selectedFirm !== 'all' && item.tenantId !== selectedFirm) return false;
+      if (startDate && item.date < startDate) return false;
+      if (endDate && item.date > endDate) return false;
+
+      if (search.trim()) {
+        const q = search.toLowerCase().trim();
+        return (
+          item.invoiceNumber.toLowerCase().includes(q) ||
+          item.partyName.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    }).sort((a, b) => (b.date > a.date ? 1 : -1));
+  }, [safeInvoices, safeItems, selectedFirm, startDate, endDate, search]);
+
+  const billWiseTotalSales = useMemo(() => {
+    return billWiseProfitData.reduce((sum, b) => sum + b.grandTotal, 0);
+  }, [billWiseProfitData]);
+
+  const billWiseTotalCost = useMemo(() => {
+    return billWiseProfitData.reduce((sum, b) => sum + b.totalCost, 0);
+  }, [billWiseProfitData]);
+
+  const billWiseTotalProfit = useMemo(() => {
+    return billWiseTotalSales - billWiseTotalCost;
+  }, [billWiseTotalSales, billWiseTotalCost]);
+
+  const billWiseAvgMargin = useMemo(() => {
+    return billWiseTotalSales > 0 ? (billWiseTotalProfit / billWiseTotalSales) * 100 : 0;
+  }, [billWiseTotalSales, billWiseTotalProfit]);
+
+  const handleExportBillWiseProfitCSV = () => {
+    if (billWiseProfitData.length === 0) {
+      alert('No bill-wise profit records available to export for the selected date range.');
+      return;
+    }
+
+    const headers = ['Date', 'Invoice No', 'Customer Name', 'Total Amount (Rs)', 'Total Cost (Rs)', 'Profit Amount (Rs)', 'Margin (%)'];
+    const rows = billWiseProfitData.map(b => [
+      formatDateDisplay(b.date),
+      `"${b.invoiceNumber}"`,
+      `"${b.partyName}"`,
+      b.grandTotal.toFixed(2),
+      b.totalCost.toFixed(2),
+      b.profit.toFixed(2),
+      `${b.marginPercent.toFixed(2)}%`
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Bill_Wise_Profit_${startDate}_to_${endDate}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1139,7 +1400,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
       </div>
 
       {/* ----------------- RIGHT MAIN CONTENT AREA ----------------- */}
-      <div className="flex-1 flex flex-col overflow-y-auto p-5 sm:p-6 gap-5">
+      <div className="flex-1 flex flex-col overflow-y-auto p-5 sm:p-6 pb-20 gap-5">
         {/* ================= SALE REPORT ================= */}
         {activeTab === 'sale' && (
           <>
@@ -1968,21 +2229,6 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
                       className="px-2 py-1 text-xs font-mono font-bold text-slate-800 outline-none"
                     />
                   </div>
-
-                  {/* Firm Filter Dropdown (ALL FIRMS matching reference image) */}
-                  <select
-                    value={allTxnsFirmFilter}
-                    onChange={e => setAllTxnsFirmFilter(e.target.value)}
-                    aria-label="Select Firm"
-                    className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs min-w-[130px]"
-                  >
-                    <option value="all">ALL FIRMS</option>
-                    {companies.map((c, idx) => (
-                      <option key={c.tenantId || idx} value={c.tenantId}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
                 </div>
 
                 {/* Right Top Action Utilities */}
@@ -2161,8 +2407,628 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
           </>
         )}
 
+        {/* ================= PROFIT AND LOSS REPORT ================= */}
+        {activeTab === 'profit-loss' && (
+          <>
+            {/* Top Header & Filter Controls matching Reference Image */}
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-xl font-black text-slate-900 flex items-center gap-2 uppercase tracking-tight">
+                    PROFIT AND LOSS REPORT
+                  </h1>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleExportPnlCSV}
+                    title="Excel Report"
+                    className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                    <span>Excel Report</span>
+                  </button>
+
+                  <button
+                    onClick={handlePrintReport}
+                    title="Print"
+                    className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4 text-slate-600" />
+                    <span>Print</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Date Filter & View Radio Selector Row */}
+              <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm space-y-3 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  {/* Date Range Badge (From ... To ...) */}
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center bg-white border border-slate-300 rounded-lg overflow-hidden shadow-2xs">
+                      <span className="bg-slate-100 text-slate-600 text-xs font-bold px-3 py-2 border-r border-slate-300">From</span>
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={e => {
+                          setStartDate(e.target.value);
+                          setDatePreset('custom');
+                        }}
+                        aria-label="Start date"
+                        className="px-2.5 py-1 text-xs font-mono font-bold text-slate-800 outline-none"
+                      />
+                      <span className="bg-slate-100 text-slate-600 text-xs font-bold px-3 py-2 border-l border-r border-slate-300">To</span>
+                      <input
+                        type="date"
+                        value={endDate}
+                        onChange={e => {
+                          setEndDate(e.target.value);
+                          setDatePreset('custom');
+                        }}
+                        aria-label="End date"
+                        className="px-2.5 py-1 text-xs font-mono font-bold text-slate-800 outline-none"
+                      />
+                    </div>
+
+                    <select
+                      value={datePreset}
+                      onChange={e => handlePresetChange(e.target.value as DatePreset)}
+                      aria-label="Filter date range preset"
+                      className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                    >
+                      <option value="this_month">This Month</option>
+                      <option value="today">Today</option>
+                      <option value="yesterday">Yesterday</option>
+                      <option value="this_week">This Week</option>
+                      <option value="last_month">Last Month</option>
+                      <option value="this_quarter">This Quarter</option>
+                      <option value="this_year">This Year</option>
+                      <option value="custom">Custom Date</option>
+                    </select>
+                  </div>
+
+                  {/* View Radio Buttons (Vyapar vs Accounting) */}
+                  <div className="flex items-center gap-4 text-xs font-bold text-slate-800">
+                    <span className="text-slate-500 font-bold">View :</span>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="pnlView"
+                        value="vyapar"
+                        checked={pnlView === 'vyapar'}
+                        onChange={() => setPnlView('vyapar')}
+                        className="w-3.5 h-3.5 text-blue-600 accent-blue-600 cursor-pointer"
+                      />
+                      <span>Vyapar</span>
+                    </label>
+
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="pnlView"
+                        value="accounting"
+                        checked={pnlView === 'accounting'}
+                        onChange={() => setPnlView('accounting')}
+                        className="w-3.5 h-3.5 text-blue-600 accent-blue-600 cursor-pointer"
+                      />
+                      <span>Accounting</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Main P&L View Table Container */}
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden relative">
+              {/* Accounting View Top Utility Bar (Expand/Collapse All) */}
+              {pnlView === 'accounting' && (
+                <div className="p-3 bg-slate-50/70 border-b border-slate-200 flex items-center justify-between text-xs font-bold text-slate-700">
+                  <span>Particulars Breakdown</span>
+                  <button
+                    onClick={() => {
+                      const nextState = !(expandedIncomes && expandedExpenses && expandedCogs);
+                      setExpandedIncomes(nextState);
+                      setExpandedExpenses(nextState);
+                      setExpandedCogs(nextState);
+                    }}
+                    className="text-blue-600 hover:text-blue-700 flex items-center gap-1 font-extrabold cursor-pointer"
+                  >
+                    <span>{expandedIncomes && expandedExpenses ? '▲ Collapse all accounts' : '▼ Expand all accounts'}</span>
+                  </button>
+                </div>
+              )}
+
+              {/* View 1: VYAPAR VIEW (Flat Ledger Calculation List matching Ref Image 1) */}
+              {pnlView === 'vyapar' && (
+                <div className="overflow-x-auto pb-12">
+                  <table className="vyapar-table w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100/80 text-slate-500 text-[11px] font-extrabold uppercase tracking-wider border-b border-slate-200">
+                        <th className="py-3 px-5">Particulars</th>
+                        <th className="py-3 px-5 text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-800">
+                      {/* Sale (+) */}
+                      <tr className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3 px-5 font-bold">Sale (+)</td>
+                        <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">
+                          Rs {pnlMetrics.grossSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+
+                      {/* Credit Note (-) */}
+                      <tr className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3 px-5 font-bold">Credit Note (-)</td>
+                        <td className="py-3 px-5 text-right font-mono font-medium text-rose-600">
+                          Rs {pnlMetrics.creditNotes.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+
+                      {/* Sale FA (+) */}
+                      <tr className="hover:bg-slate-50/60 transition-colors text-slate-500">
+                        <td className="py-3 px-5 font-bold">Sale FA (+)</td>
+                        <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">
+                          Rs 0.00
+                        </td>
+                      </tr>
+
+                      {/* Purchase (-) */}
+                      <tr className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3 px-5 font-bold">Purchase (-)</td>
+                        <td className="py-3 px-5 text-right font-mono font-medium text-rose-600">
+                          Rs {pnlMetrics.grossPurchases.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+
+                      {/* Debit Note (+) */}
+                      <tr className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3 px-5 font-bold">Debit Note (+)</td>
+                        <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">
+                          Rs {pnlMetrics.debitNotes.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+
+                      {/* Purchase FA (-) */}
+                      <tr className="hover:bg-slate-50/60 transition-colors text-slate-500">
+                        <td className="py-3 px-5 font-bold">Purchase FA (-)</td>
+                        <td className="py-3 px-5 text-right font-mono font-medium text-rose-600">
+                          Rs 0.00
+                        </td>
+                      </tr>
+
+                      {/* Direct Expenses (-) */}
+                      <tr className="bg-slate-50/50">
+                        <td className="py-2.5 px-5 font-extrabold text-slate-700">Direct Expenses(-)</td>
+                        <td className="py-2.5 px-5 text-right font-mono font-medium text-rose-600">
+                          Rs 0.00
+                        </td>
+                      </tr>
+                      <tr className="text-slate-500">
+                        <td className="py-2 px-9 text-[11px] font-semibold">Other Direct Expenses (-)</td>
+                        <td className="py-2 px-5 text-right font-mono font-medium text-rose-600">Rs 0.00</td>
+                      </tr>
+                      <tr className="text-slate-500 border-b border-slate-100">
+                        <td className="py-2 px-9 text-[11px] font-semibold">Payment-in Discount (-)</td>
+                        <td className="py-2 px-5 text-right font-mono font-medium text-rose-600">Rs 0.00</td>
+                      </tr>
+
+                      {/* Tax Payable (-) */}
+                      <tr className="bg-slate-50/50">
+                        <td className="py-2.5 px-5 font-extrabold text-slate-700">Tax Payable (-)</td>
+                        <td className="py-2.5 px-5 text-right font-mono font-medium text-rose-600">Rs 0.00</td>
+                      </tr>
+                      <tr className="text-slate-500">
+                        <td className="py-2 px-9 text-[11px] font-semibold">Tax Payable (-)</td>
+                        <td className="py-2 px-5 text-right font-mono font-medium text-rose-600">Rs 0.00</td>
+                      </tr>
+                      <tr className="text-slate-500">
+                        <td className="py-2 px-9 text-[11px] font-semibold">TCS Payable (-)</td>
+                        <td className="py-2 px-5 text-right font-mono font-medium text-rose-600">Rs 0.00</td>
+                      </tr>
+                      <tr className="text-slate-500 border-b border-slate-100">
+                        <td className="py-2 px-9 text-[11px] font-semibold">TDS Payable (-)</td>
+                        <td className="py-2 px-5 text-right font-mono font-medium text-rose-600">Rs 0.00</td>
+                      </tr>
+
+                      {/* Tax Receivable (+) */}
+                      <tr className="bg-slate-50/50">
+                        <td className="py-2.5 px-5 font-extrabold text-slate-700">Tax Receivable (+)</td>
+                        <td className="py-2.5 px-5 text-right font-mono font-medium text-emerald-600">Rs 0.00</td>
+                      </tr>
+                      <tr className="text-slate-500">
+                        <td className="py-2 px-9 text-[11px] font-semibold">Tax Receivable (+)</td>
+                        <td className="py-2 px-5 text-right font-mono font-medium text-emerald-600">Rs 0.00</td>
+                      </tr>
+                      <tr className="text-slate-500 border-b border-slate-100">
+                        <td className="py-2 px-9 text-[11px] font-semibold">TCS Receivable (+)</td>
+                        <td className="py-2 px-5 text-right font-mono font-medium text-emerald-600">Rs 0.00</td>
+                      </tr>
+
+                      {/* Indirect Expenses (-) */}
+                      <tr className="hover:bg-slate-50/60 transition-colors border-b border-slate-200">
+                        <td className="py-3 px-5 font-bold">Indirect Expenses (-)</td>
+                        <td className="py-3 px-5 text-right font-mono font-medium text-rose-600">
+                          Rs {pnlMetrics.indirectExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div className="h-12" />
+                </div>
+              )}
+
+              {/* View 2: ACCOUNTING VIEW (Hierarchical Tree View matching Ref Image 2) */}
+              {pnlView === 'accounting' && (
+                <div className="overflow-x-auto pb-12">
+                  <table className="vyapar-table w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100/80 text-slate-500 text-[11px] font-extrabold uppercase tracking-wider border-b border-slate-200">
+                        <th className="py-3 px-5">Particulars</th>
+                        <th className="py-3 px-5 text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-800">
+                      {/* ^ Incomes Node */}
+                      <tr className="bg-slate-50/80">
+                        <td className="py-3 px-5 font-extrabold text-blue-700 flex items-center gap-1.5 cursor-pointer" onClick={() => setExpandedIncomes(!expandedIncomes)}>
+                          <span>{expandedIncomes ? '▲' : '▼'}</span>
+                          <span>Incomes</span>
+                        </td>
+                        <td className="py-3 px-5 text-right font-mono font-black text-emerald-600">
+                          Rs {pnlMetrics.netSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+
+                      {expandedIncomes && (
+                        <>
+                          <tr className="hover:bg-slate-50/60 transition-colors">
+                            <td className="py-2.5 px-10 text-slate-700 font-bold flex items-center gap-1">
+                              <span className="text-blue-500">v</span>
+                              <span>Sale Accounts</span>
+                            </td>
+                            <td className="py-2.5 px-5 text-right font-mono font-bold text-emerald-600">
+                              Rs {pnlMetrics.netSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                          <tr className="hover:bg-slate-50/60 transition-colors text-slate-500">
+                            <td className="py-2.5 px-10 font-semibold flex items-center gap-1">
+                              <span className="text-blue-500">v</span>
+                              <span>Other Incomes (Direct)</span>
+                            </td>
+                            <td className="py-2.5 px-5 text-right font-mono font-bold text-emerald-600">Rs 0.00</td>
+                          </tr>
+                          <tr className="hover:bg-slate-50/60 transition-colors text-slate-500 border-b border-slate-100">
+                            <td className="py-2.5 px-10 font-semibold flex items-center gap-1">
+                              <span className="text-blue-500">v</span>
+                              <span>Other Incomes (Indirect)</span>
+                            </td>
+                            <td className="py-2.5 px-5 text-right font-mono font-bold text-emerald-600">Rs 0.00</td>
+                          </tr>
+                        </>
+                      )}
+
+                      {/* ^ Expenses Node */}
+                      <tr className="bg-slate-50/80">
+                        <td className="py-3 px-5 font-extrabold text-blue-700 flex items-center gap-1.5 cursor-pointer" onClick={() => setExpandedExpenses(!expandedExpenses)}>
+                          <span>{expandedExpenses ? '▲' : '▼'}</span>
+                          <span>Expenses</span>
+                        </td>
+                        <td className="py-3 px-5 text-right font-mono font-black text-rose-600">
+                          Rs {(pnlMetrics.cogs + pnlMetrics.indirectExpenses).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+
+                      {expandedExpenses && (
+                        <>
+                          {/* Cost of Goods Sold Child Group */}
+                          <tr className="bg-slate-50/40">
+                            <td className="py-2.5 px-9 font-extrabold text-slate-800 flex items-center gap-1 cursor-pointer" onClick={() => setExpandedCogs(!expandedCogs)}>
+                              <span className="text-blue-600">{expandedCogs ? '▲' : '▼'}</span>
+                              <span>Cost of Goods Sold</span>
+                            </td>
+                            <td className="py-2.5 px-5 text-right font-mono font-bold text-rose-600">
+                              Rs {pnlMetrics.cogs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+
+                          {expandedCogs && (
+                            <>
+                              <tr className="hover:bg-slate-50/60 transition-colors">
+                                <td className="py-2 px-14 text-slate-700 font-bold flex items-center gap-1">
+                                  <span className="text-blue-500">v</span>
+                                  <span>Purchase Accounts</span>
+                                </td>
+                                <td className="py-2 px-5 text-right font-mono font-bold text-rose-600">
+                                  Rs {pnlMetrics.netPurchases.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                              <tr className="text-slate-500">
+                                <td className="py-2 px-14 font-semibold flex items-center gap-1">
+                                  <span>•</span>
+                                  <span>Opening Stock</span>
+                                </td>
+                                <td className="py-2 px-5 text-right font-mono text-emerald-600">Rs 0.00</td>
+                              </tr>
+                              <tr className="text-slate-500 border-b border-slate-100">
+                                <td className="py-2 px-14 font-semibold flex items-center gap-1">
+                                  <span>•</span>
+                                  <span>Closing Stock</span>
+                                </td>
+                                <td className="py-2 px-5 text-right font-mono text-emerald-600">Rs 0.00</td>
+                              </tr>
+                            </>
+                          )}
+
+                          <tr className="hover:bg-slate-50/60 transition-colors text-slate-500">
+                            <td className="py-2.5 px-10 font-semibold flex items-center gap-1">
+                              <span className="text-blue-500">v</span>
+                              <span>Direct Expenses</span>
+                            </td>
+                            <td className="py-2.5 px-5 text-right font-mono font-bold text-rose-600">Rs 0.00</td>
+                          </tr>
+
+                          <tr className="hover:bg-slate-50/60 transition-colors border-b border-slate-200">
+                            <td className="py-2.5 px-10 font-semibold text-slate-800 flex items-center gap-1">
+                              <span className="text-blue-500">v</span>
+                              <span>Indirect Expenses</span>
+                            </td>
+                            <td className="py-2.5 px-5 text-right font-mono font-bold text-rose-600">
+                              Rs {pnlMetrics.indirectExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        </>
+                      )}
+                    </tbody>
+                  </table>
+                  <div className="h-12" />
+                </div>
+              )}
+
+              {/* Highlighted Bottom Summary Bar (Net Profit / Net Loss) matching Reference UI */}
+              <div className={`p-4 border-t flex items-center justify-between font-mono text-sm font-black border-b border-slate-200 rounded-b-xl shadow-2xs ${
+                pnlMetrics.netProfit >= 0 ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <span>{pnlMetrics.netProfit >= 0 ? 'Net Profit' : 'Net Loss'}</span>
+                  <span className="text-xs font-semibold text-slate-600 font-sans">
+                    (= Gross Sales - Sale Returns - Net Purchases - Expenses)
+                  </span>
+                </div>
+                <div className="text-base font-black">
+                  Rs {Math.abs(pnlMetrics.netProfit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ================= BILL WISE PROFIT REPORT ================= */}
+        {activeTab === 'bill-wise-profit' && (
+          <>
+            {/* Header Row */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-xl font-black text-slate-900 flex items-center gap-2 uppercase tracking-tight">
+                  <span>BILL WISE PROFIT REPORT</span>
+                </h1>
+                <p className="text-xs text-slate-500 font-semibold mt-0.5">
+                  Calculates net profit amount and profit margin percentage for each sale invoice.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleExportBillWiseProfitCSV}
+                  title="Excel Report"
+                  className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span>Excel Report</span>
+                </button>
+
+                <button
+                  onClick={handlePrintReport}
+                  title="Print"
+                  className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-slate-600" />
+                  <span>Print</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Bar Controls */}
+            <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Date Preset Dropdown */}
+                <select
+                  value={datePreset}
+                  onChange={e => handlePresetChange(e.target.value as DatePreset)}
+                  aria-label="Filter date range preset"
+                  className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                >
+                  <option value="this_month">This Month</option>
+                  <option value="today">Today</option>
+                  <option value="yesterday">Yesterday</option>
+                  <option value="this_week">This Week</option>
+                  <option value="last_month">Last Month</option>
+                  <option value="this_quarter">This Quarter</option>
+                  <option value="this_year">This Year</option>
+                  <option value="custom">Custom Date</option>
+                </select>
+
+                {/* Date Range Badge */}
+                <div className="flex items-center bg-white border border-slate-300 rounded-lg overflow-hidden shadow-2xs">
+                  <span className="bg-slate-400 text-white text-xs font-bold px-3 py-2">Between</span>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={e => {
+                      setStartDate(e.target.value);
+                      setDatePreset('custom');
+                    }}
+                    aria-label="Start date"
+                    className="px-2 py-1 text-xs font-mono font-bold text-slate-800 outline-none"
+                  />
+                  <span className="text-slate-500 font-bold px-1.5">To</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={e => {
+                      setEndDate(e.target.value);
+                      setDatePreset('custom');
+                    }}
+                    aria-label="End date"
+                    className="px-2 py-1 text-xs font-mono font-bold text-slate-800 outline-none"
+                  />
+                </div>
+
+                {/* Firm Filter Dropdown */}
+                <select
+                  value={selectedFirm}
+                  onChange={e => setSelectedFirm(e.target.value)}
+                  aria-label="Select Firm"
+                  className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs min-w-[130px]"
+                >
+                  <option value="all">ALL FIRMS</option>
+                  {companies.map((c, idx) => (
+                    <option key={c.tenantId || idx} value={c.tenantId}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Top Summary KPI Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-1">
+                <div className="text-slate-500 font-extrabold uppercase text-[11px] tracking-wider">Total Sales</div>
+                <div className="text-2xl font-mono font-black text-slate-900">
+                  Rs {billWiseTotalSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-1">
+                <div className="text-slate-500 font-extrabold uppercase text-[11px] tracking-wider">Total Cost</div>
+                <div className="text-2xl font-mono font-black text-slate-700">
+                  Rs {billWiseTotalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-1">
+                <div className="text-slate-500 font-extrabold uppercase text-[11px] tracking-wider">Total Net Profit</div>
+                <div className={`text-2xl font-mono font-black ${billWiseTotalProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  Rs {billWiseTotalProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-1">
+                <div className="text-slate-500 font-extrabold uppercase text-[11px] tracking-wider">Average Margin</div>
+                <div className={`text-2xl font-mono font-black ${billWiseAvgMargin >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  {billWiseAvgMargin.toFixed(2)}%
+                </div>
+              </div>
+            </div>
+
+            {/* Bill Wise Profit Table Section */}
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden">
+              <div className="p-3.5 border-b border-slate-200 flex items-center">
+                <div className="relative w-full max-w-sm">
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    aria-label="Search bill wise profit invoices"
+                    placeholder="Search invoice no, customer name..."
+                    className="h-8 pl-8 pr-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold outline-none focus:border-blue-500 w-full"
+                  />
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="vyapar-table w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/80 text-slate-500 text-[11px] font-extrabold uppercase tracking-wider border-b border-slate-200">
+                      <th className="py-3 px-4">Date</th>
+                      <th className="py-3 px-4">Invoice No</th>
+                      <th className="py-3 px-4">Customer Name</th>
+                      <th className="py-3 px-4 text-right">Total Amount</th>
+                      <th className="py-3 px-4 text-right">Total Cost</th>
+                      <th className="py-3 px-4 text-right">Profit Amount</th>
+                      <th className="py-3 px-4 text-right">Margin (%)</th>
+                      <th className="py-3 px-4 text-center">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                    {billWiseProfitData.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="text-center py-12 text-slate-400 font-semibold">
+                          No invoice profit records found for the selected criteria.
+                        </td>
+                      </tr>
+                    ) : (
+                      billWiseProfitData.map(b => (
+                        <tr key={b.id} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="py-3 px-4 font-mono text-slate-600 whitespace-nowrap">
+                            {formatDateDisplay(b.date)}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-extrabold text-blue-600 whitespace-nowrap">
+                            {b.invoiceNumber}
+                          </td>
+                          <td className="py-3 px-4 font-bold text-slate-800">
+                            {b.partyName}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-black text-slate-900 text-right whitespace-nowrap">
+                            Rs {b.grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-bold text-slate-600 text-right whitespace-nowrap">
+                            Rs {b.totalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className={`py-3 px-4 font-mono font-black text-right whitespace-nowrap ${b.profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            Rs {b.profit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className={`py-3 px-4 font-mono font-extrabold text-right whitespace-nowrap ${b.marginPercent >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {b.marginPercent.toFixed(2)}%
+                          </td>
+                          <td className="py-3 px-4 text-center whitespace-nowrap">
+                            <div className="flex items-center justify-center gap-1.5 text-slate-400">
+                              {b.rawInvoice && (
+                                <button
+                                  onClick={() => triggerThermalPrint(b.rawInvoice, business)}
+                                  title="Print Receipt"
+                                  className="p-1 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer"
+                                >
+                                  <Printer className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              <button
+                                onClick={() => {
+                                  const shareText = `Invoice #${b.invoiceNumber} - ${b.partyName} - Sales: Rs ${b.grandTotal} - Profit: Rs ${b.profit} (${b.marginPercent.toFixed(2)}%)`;
+                                  navigator.clipboard?.writeText(shareText);
+                                  alert('Bill profit details copied to clipboard!');
+                                }}
+                                title="Share / Copy"
+                                className="p-1 hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors cursor-pointer"
+                              >
+                                <Share2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
         {/* ================= OTHER REPORT TABS PLACEHOLDER ================= */}
-        {activeTab !== 'sale' && activeTab !== 'purchase' && activeTab !== 'day-book' && activeTab !== 'all-transactions' && (
+        {activeTab !== 'sale' && activeTab !== 'purchase' && activeTab !== 'day-book' && activeTab !== 'all-transactions' && activeTab !== 'profit-loss' && activeTab !== 'bill-wise-profit' && (
           <div className="bg-white border border-slate-200 rounded-xl p-8 shadow-sm flex flex-col items-center justify-center text-center my-auto min-h-[400px]">
             <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 mb-4">
               <FileText className="w-7 h-7 stroke-[2]" />

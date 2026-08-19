@@ -954,6 +954,7 @@ export function App() {
 
           {activeTab === 'reports' && (
             <ReportsScreen
+              items={allItems}
               invoices={allInvoices}
               purchaseBills={allPurchaseBills}
               purchaseReturns={allPurchaseReturns}
