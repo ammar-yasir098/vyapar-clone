@@ -230,6 +230,24 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     }, 0);
   }, [filteredInvoices]);
 
+  // Accurate Payment Breakdown Calculations for Sales
+  const collectedSalesTotal = useMemo(() => {
+    return totalReceivedAmount;
+  }, [totalReceivedAmount]);
+
+  const digitalSalesTotal = useMemo(() => {
+    return filteredInvoices
+      .filter(i => {
+        const pm = (i.paymentMethod || '').toUpperCase();
+        return pm === 'UPI' || pm === 'CARD' || pm === 'DIGITAL / APP' || pm === 'CHEQUE' || pm === 'BANK' || pm === 'ONLINE';
+      })
+      .reduce((sum, i) => sum + Number(i.grandTotal || 0), 0);
+  }, [filteredInvoices]);
+
+  const creditUnpaidDuesTotal = useMemo(() => {
+    return totalBalanceAmount;
+  }, [totalBalanceAmount]);
+
   const previousMonthSalesTotal = useMemo(() => {
     const prevDates = getPresetDates('last_month');
     return safeInvoices
@@ -348,6 +366,31 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const purchaseTotalAmount = useMemo(() => {
     return purchasePaidTotal + purchaseUnpaidTotal;
   }, [purchasePaidTotal, purchaseUnpaidTotal]);
+
+  // Accurate Payment Breakdown Calculations for Purchases
+  const cashPurchasesTotal = useMemo(() => {
+    return filteredPurchases
+      .filter(p => (p.paymentType || 'CASH').toUpperCase() === 'CASH')
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  }, [filteredPurchases]);
+
+  const digitalPurchasesTotal = useMemo(() => {
+    return filteredPurchases
+      .filter(p => {
+        const pm = (p.paymentType || '').toUpperCase();
+        return pm === 'UPI' || pm === 'CARD' || pm === 'BANK' || pm === 'DIGITAL';
+      })
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  }, [filteredPurchases]);
+
+  const creditPurchasesTotal = useMemo(() => {
+    return filteredPurchases
+      .filter(p => {
+        const pm = (p.paymentType || '').toUpperCase();
+        return pm === 'CREDIT' || p.balanceDue > 0;
+      })
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  }, [filteredPurchases]);
 
   const previousMonthPurchaseTotal = useMemo(() => {
     const prevDates = getPresetDates('last_month');
@@ -575,21 +618,21 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs font-mono">
                   <div className="bg-emerald-50 border border-emerald-200 p-3.5 rounded-xl space-y-1">
-                    <div className="text-emerald-800 font-bold text-[11px] uppercase">Cash Sales</div>
+                    <div className="text-emerald-800 font-bold text-[11px] uppercase">Cash & Paid Sales</div>
                     <div className="text-lg font-black text-emerald-700">
-                      Rs {filteredInvoices.filter(i => (i.paymentMethod || 'CASH') === 'CASH').reduce((sum, i) => sum + Number(i.grandTotal || 0), 0).toLocaleString()}
+                      Rs {collectedSalesTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-blue-50 border border-blue-200 p-3.5 rounded-xl space-y-1">
                     <div className="text-blue-800 font-bold text-[11px] uppercase">Digital / Card / UPI</div>
                     <div className="text-lg font-black text-blue-700">
-                      Rs {filteredInvoices.filter(i => i.paymentMethod === 'UPI' || i.paymentMethod === 'CARD').reduce((sum, i) => sum + Number(i.grandTotal || 0), 0).toLocaleString()}
+                      Rs {digitalSalesTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-xl space-y-1">
                     <div className="text-amber-800 font-bold text-[11px] uppercase">Credit / Unpaid Dues</div>
                     <div className="text-lg font-black text-amber-700">
-                      Rs {totalBalanceAmount.toLocaleString()}
+                      Rs {creditUnpaidDuesTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                 </div>
@@ -858,21 +901,21 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs font-mono">
                   <div className="bg-emerald-50 border border-emerald-200 p-3.5 rounded-xl space-y-1">
-                    <div className="text-emerald-800 font-bold text-[11px] uppercase">Paid Purchases</div>
+                    <div className="text-emerald-800 font-bold text-[11px] uppercase">Cash Purchases</div>
                     <div className="text-lg font-black text-emerald-700">
-                      Rs {purchasePaidTotal.toLocaleString()}
+                      Rs {cashPurchasesTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-blue-50 border border-blue-200 p-3.5 rounded-xl space-y-1">
-                    <div className="text-blue-800 font-bold text-[11px] uppercase">Total Acquisition Cost</div>
+                    <div className="text-blue-800 font-bold text-[11px] uppercase">Digital / Card / Bank</div>
                     <div className="text-lg font-black text-blue-700">
-                      Rs {purchaseTotalAmount.toLocaleString()}
+                      Rs {digitalPurchasesTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-xl space-y-1">
-                    <div className="text-amber-800 font-bold text-[11px] uppercase">Unpaid Vendor Dues</div>
+                    <div className="text-amber-800 font-bold text-[11px] uppercase">Credit / Vendor Dues</div>
                     <div className="text-lg font-black text-amber-700">
-                      Rs {purchaseUnpaidTotal.toLocaleString()}
+                      Rs {creditPurchasesTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                 </div>
