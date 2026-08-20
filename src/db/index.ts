@@ -112,7 +112,7 @@ export async function seedDatabaseIfEmpty(tenantId?: string) {
 }
 
 /**
- * Wipes all local store data and resets to clean slate.
+ * Wipes all local store data and resets to clean slate (EXCEPT users and company profiles).
  */
 export async function clearAllDatabaseData() {
   await db.items.clear();
@@ -131,9 +131,10 @@ export async function clearAllDatabaseData() {
   await db.cashTransactions.clear();
   await db.cashAccounts.clear();
 
-  // Call server API to reset PostgreSQL tables
+  // Call server API to reset PostgreSQL tables using authenticated fetchWithTimeout
   try {
-    await fetch('http://localhost:5000/api/v1/sync/reset', { method: 'POST' });
+    const { fetchWithTimeout, API_BASE_URL } = await import('../services/api');
+    await fetchWithTimeout(`${API_BASE_URL}/sync/reset`, { method: 'POST' });
   } catch (err) {
     console.warn('Server reset notification warning:', err);
   }

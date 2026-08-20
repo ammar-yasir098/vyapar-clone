@@ -18,11 +18,14 @@ import {
   ChevronDown,
   MoreVertical
 } from 'lucide-react';
-import { Invoice, BusinessDetails, PurchaseBill, PurchaseReturn, PaymentIn, PaymentOut, Expense, SaleReturn, CashTransaction, Item } from '../../types';
+import { Invoice, BusinessDetails, PurchaseBill, PurchaseReturn, PaymentIn, PaymentOut, Expense, SaleReturn, CashTransaction, Item, Party } from '../../types';
 import { triggerThermalPrint } from '../../services/printer';
+import { calculateProfitAndLoss, generatePartyLedger, calculateTaxSummary } from '../../services/reportsService';
+import { db } from '../../db';
 
 interface ReportsScreenProps {
   items?: Item[];
+  parties?: Party[];
   invoices?: Invoice[];
   purchaseBills?: PurchaseBill[];
   purchaseReturns?: PurchaseReturn[];
@@ -49,6 +52,7 @@ const REPORT_SECTIONS = [
       { id: 'day-book', label: 'Day book' },
       { id: 'all-transactions', label: 'All Transactions' },
       { id: 'profit-loss', label: 'Profit And Loss' },
+      { id: 'gst-tax-summary', label: 'GST Tax Summary' },
       { id: 'bill-wise-profit', label: 'Bill Wise Profit' },
       { id: 'cash-flow', label: 'Cash flow' },
       { id: 'trial-balance', label: 'Trial Balance Report' },
@@ -221,6 +225,7 @@ function calculateInvoiceCostAndProfit(inv: Invoice, itemsList: Item[] = []) {
 
 export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   items = [],
+  parties = [],
   invoices = [],
   purchaseBills = [],
   purchaseReturns = [],
@@ -256,6 +261,28 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const [allTxnsFirmFilter, setAllTxnsFirmFilter] = useState<string>('all');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('all');
 
+  // Party Statement State
+  const [partiesList, setPartiesList] = useState<Party[]>(parties);
+  const [selectedPartyId, setSelectedPartyId] = useState<number | ''>('');
+
+  useEffect(() => {
+    if (parties && parties.length > 0) {
+      setPartiesList(parties);
+      if (parties[0]?.id) setSelectedPartyId(parties[0].id);
+    } else {
+      db.parties.toArray().then(pList => {
+        setPartiesList(pList);
+        if (pList.length > 0 && pList[0]?.id) {
+          setSelectedPartyId(pList[0].id);
+        }
+      });
+    }
+  }, [parties]);
+
+  const selectedParty = useMemo(() => {
+    return partiesList.find(p => p.id === Number(selectedPartyId)) || partiesList[0] || null;
+  }, [partiesList, selectedPartyId]);
+
   // Profit and Loss State
   const [pnlView, setPnlView] = useState<'vyapar' | 'accounting'>('vyapar');
   const [expandedIncomes, setExpandedIncomes] = useState<boolean>(true);
@@ -283,6 +310,29 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const safeExpenses = Array.isArray(expenses) ? expenses : [];
   const safeSaleReturns = Array.isArray(saleReturns) ? saleReturns : [];
   const safeCashTransactions = Array.isArray(cashTransactions) ? cashTransactions : [];
+
+  // Centralized report calculation hooks via reportsService
+  const pnlReport = useMemo(() => {
+    return calculateProfitAndLoss(safeInvoices, safeSaleReturns, safeExpenses, { startDate, endDate }, items);
+  }, [safeInvoices, safeSaleReturns, safeExpenses, startDate, endDate, items]);
+
+  const partyLedgerReport = useMemo(() => {
+    if (!selectedParty) return null;
+    return generatePartyLedger(
+      selectedParty,
+      safeInvoices,
+      safePaymentsIn,
+      safeSaleReturns,
+      safePurchaseBills,
+      safePaymentsOut,
+      safePurchaseReturns,
+      { startDate, endDate }
+    );
+  }, [selectedParty, safeInvoices, safePaymentsIn, safeSaleReturns, safePurchaseBills, safePaymentsOut, safePurchaseReturns, startDate, endDate]);
+
+  const taxSummaryReport = useMemo(() => {
+    return calculateTaxSummary(safeInvoices, safePurchaseBills, { startDate, endDate });
+  }, [safeInvoices, safePurchaseBills, startDate, endDate]);
 
   // Handle Preset Change
   const handlePresetChange = (preset: DatePreset) => {
@@ -643,12 +693,19 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const dayBookTransactions = useMemo(() => {
     const targetDate = dayBookDate;
 
-    // 1. Sales / Invoices
+    // 1. Sales
     const sales = safeInvoices.map(inv => {
       const { dateISO, timeStr } = parseLocalDate(inv.invoiceDate, inv.createdAt);
       const tot = Number(inv.grandTotal || 0);
-      const isCredit = (inv.paymentMethod || '').toUpperCase() === 'CREDIT' || inv.paymentStatus === 'UNPAID';
-      const rec = isCredit ? 0 : Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? tot : 0));
+      const isCredit = (inv.paymentMethod || '').toUpperCase() === 'CREDIT';
+
+      let moneyIn: number | null = null;
+      if (!isCredit) {
+        const rec = Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? tot : 0));
+        if (rec > 0) {
+          moneyIn = rec;
+        }
+      }
 
       return {
         id: `sale-${inv.id || inv.invoiceNumber}`,
@@ -659,7 +716,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
         type: 'Sale',
         paymentMode: inv.paymentMethod || 'Cash',
         totalAmount: tot,
-        moneyIn: rec > 0 ? rec : null,
+        moneyIn,
         moneyOut: null as number | null,
         tenantId: inv.tenantId || 'default-tenant'
       };
@@ -669,7 +726,15 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     const purchases = safePurchaseBills.map(b => {
       const { dateISO, timeStr } = parseLocalDate(b.billDate, b.createdAt);
       const tot = Number(b.grandTotal || 0);
-      const paid = Number(b.paidAmount || 0);
+      const isCredit = (b.paymentMethod || '').toUpperCase() === 'CREDIT';
+
+      let moneyOut: number | null = null;
+      if (!isCredit) {
+        const paid = Number(b.paidAmount ?? (b.paymentStatus === 'PAID' ? tot : 0));
+        if (paid > 0) {
+          moneyOut = paid;
+        }
+      }
 
       return {
         id: `pur-${b.id || b.billNumber}`,
@@ -678,10 +743,10 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
         partyName: b.supplierName || 'Vendor / Supplier',
         refNo: b.billNumber || '',
         type: 'Purchase',
-        paymentMode: (b as any).paymentMethod || (paid >= tot ? 'Cash' : (paid > 0 ? 'Partial' : 'Credit')),
+        paymentMode: b.paymentMethod || (isCredit ? 'Credit' : 'Cash'),
         totalAmount: tot,
         moneyIn: null as number | null,
-        moneyOut: paid,
+        moneyOut,
         tenantId: b.tenantId || 'default-tenant'
       };
     });
@@ -893,9 +958,14 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     const sales = safeInvoices.map(inv => {
       const { dateISO, timeStr } = parseLocalDate(inv.invoiceDate, inv.createdAt);
       const grand = Number(inv.grandTotal || 0);
-      const isCredit = (inv.paymentMethod || '').toUpperCase() === 'CREDIT' || inv.paymentStatus === 'UNPAID';
-      const rec = isCredit ? 0 : Math.max(0, grand - Number(inv.dueAmount || 0));
-      const due = grand - rec;
+      const isCredit = (inv.paymentMethod || '').toUpperCase() === 'CREDIT';
+
+      let rec = 0;
+      if (!isCredit) {
+        rec = Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? grand : 0));
+      }
+
+      const due = Number(inv.dueAmount !== undefined ? inv.dueAmount : (inv.paymentStatus === 'PAID' ? 0 : Math.max(0, grand - rec)));
 
       return {
         id: `sale-${inv.id || inv.invoiceNumber}`,
@@ -905,7 +975,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
         partyName: inv.partyName || 'Walk-in Retail Customer',
         categoryName: '',
         type: 'Sale',
-        paymentMode: inv.paymentMethod || 'Cash',
+        paymentMode: inv.paymentMethod || (isCredit ? 'Credit' : 'Cash'),
         totalAmount: grand,
         receivedPaidAmount: rec,
         balanceAmount: due,
@@ -917,9 +987,15 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     const purchases = safePurchaseBills.map(b => {
       const { dateISO, timeStr } = parseLocalDate(b.billDate, b.createdAt);
       const grand = Number(b.grandTotal || 0);
-      const paid = Number(b.paidAmount || 0);
-      const due = Number(b.dueAmount ?? (grand - paid));
-      const pm = (b as any).paymentMethod || (paid >= grand ? 'Cash' : (paid > 0 ? 'Partial' : 'Credit'));
+      const isCredit = (b.paymentMethod || '').toUpperCase() === 'CREDIT';
+
+      let paid = 0;
+      if (!isCredit) {
+        paid = Number(b.paidAmount ?? (b.paymentStatus === 'PAID' ? grand : 0));
+      }
+
+      const due = Number(b.dueAmount !== undefined ? b.dueAmount : (b.paymentStatus === 'PAID' ? 0 : Math.max(0, grand - paid)));
+      const pm = b.paymentMethod || (isCredit ? 'Credit' : 'Cash');
 
       return {
         id: `pur-${b.id || b.billNumber}`,
@@ -2536,127 +2612,90 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
                 </div>
               )}
 
-              {/* View 1: VYAPAR VIEW (Flat Ledger Calculation List matching Ref Image 1) */}
+              {/* View 1: VYAPAR VIEW (Tax-Exclusive Revenue, COGS, Expenses & Net Profit) */}
               {pnlView === 'vyapar' && (
                 <div className="overflow-x-auto pb-12">
                   <table className="vyapar-table w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-slate-100/80 text-slate-500 text-[11px] font-extrabold uppercase tracking-wider border-b border-slate-200">
                         <th className="py-3 px-5">Particulars</th>
-                        <th className="py-3 px-5 text-right">Amount</th>
+                        <th className="py-3 px-5 text-right">Amount (Rs)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-800">
-                      {/* Sale (+) */}
+                      {/* Gross Sales (Tax-Exclusive) */}
                       <tr className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3 px-5 font-bold">Sale (+)</td>
+                        <td className="py-3 px-5 font-bold">Gross Sales Revenue (Tax-Exclusive) (+)</td>
                         <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">
-                          Rs {pnlMetrics.grossSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          Rs {pnlReport.grossSalesTaxExclusive.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
 
-                      {/* Credit Note (-) */}
+                      {/* Sale Returns (Tax-Exclusive) */}
                       <tr className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3 px-5 font-bold">Credit Note (-)</td>
+                        <td className="py-3 px-5 font-bold">Sale Returns / Credit Notes (-)</td>
                         <td className="py-3 px-5 text-right font-mono font-medium text-rose-600">
-                          Rs {pnlMetrics.creditNotes.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          Rs {pnlReport.saleReturnsTaxExclusive.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
 
-                      {/* Sale FA (+) */}
-                      <tr className="hover:bg-slate-50/60 transition-colors text-slate-500">
-                        <td className="py-3 px-5 font-bold">Sale FA (+)</td>
-                        <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">
-                          Rs 0.00
-                        </td>
-                      </tr>
-
-                      {/* Purchase (-) */}
+                      {/* Total Discounts */}
                       <tr className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3 px-5 font-bold">Purchase (-)</td>
+                        <td className="py-3 px-5 font-bold">Invoice Discounts (-)</td>
                         <td className="py-3 px-5 text-right font-mono font-medium text-rose-600">
-                          Rs {pnlMetrics.grossPurchases.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          Rs {pnlReport.discountTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
 
-                      {/* Debit Note (+) */}
+                      {/* Net Sales Revenue */}
+                      <tr className="bg-blue-50/60 font-bold border-t border-b border-blue-200 text-blue-900">
+                        <td className="py-3 px-5 font-extrabold">Net Sales Revenue</td>
+                        <td className="py-3 px-5 text-right font-mono font-black text-blue-700">
+                          Rs {pnlReport.netRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+
+                      {/* COGS */}
                       <tr className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3 px-5 font-bold">Debit Note (+)</td>
-                        <td className="py-3 px-5 text-right font-mono font-medium text-emerald-600">
-                          Rs {pnlMetrics.debitNotes.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-
-                      {/* Purchase FA (-) */}
-                      <tr className="hover:bg-slate-50/60 transition-colors text-slate-500">
-                        <td className="py-3 px-5 font-bold">Purchase FA (-)</td>
+                        <td className="py-3 px-5 font-bold">Cost of Goods Sold (COGS) (-)</td>
                         <td className="py-3 px-5 text-right font-mono font-medium text-rose-600">
-                          Rs 0.00
+                          Rs {pnlReport.cogs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
 
-                      {/* Direct Expenses (-) */}
-                      <tr className="bg-slate-50/50">
-                        <td className="py-2.5 px-5 font-extrabold text-slate-700">Direct Expenses(-)</td>
-                        <td className="py-2.5 px-5 text-right font-mono font-medium text-rose-600">
-                          Rs 0.00
+                      {/* Gross Profit */}
+                      <tr className="bg-emerald-50/50 font-bold border-t border-b border-emerald-200 text-emerald-900">
+                        <td className="py-3 px-5 font-extrabold flex items-center justify-between">
+                          <span>Gross Profit</span>
+                          <span className="text-[11px] font-mono px-2 py-0.5 bg-emerald-100 rounded text-emerald-800">Margin: {pnlReport.grossProfitMarginPercent.toFixed(2)}%</span>
+                        </td>
+                        <td className="py-3 px-5 text-right font-mono font-black text-emerald-700">
+                          Rs {pnlReport.grossProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
-                      <tr className="text-slate-500">
-                        <td className="py-2 px-9 text-[11px] font-semibold">Other Direct Expenses (-)</td>
-                        <td className="py-2 px-5 text-right font-mono font-medium text-rose-600">Rs 0.00</td>
-                      </tr>
-                      <tr className="text-slate-500 border-b border-slate-100">
-                        <td className="py-2 px-9 text-[11px] font-semibold">Payment-in Discount (-)</td>
-                        <td className="py-2 px-5 text-right font-mono font-medium text-rose-600">Rs 0.00</td>
-                      </tr>
 
-                      {/* Tax Payable (-) */}
-                      <tr className="bg-slate-50/50">
-                        <td className="py-2.5 px-5 font-extrabold text-slate-700">Tax Payable (-)</td>
-                        <td className="py-2.5 px-5 text-right font-mono font-medium text-rose-600">Rs 0.00</td>
-                      </tr>
-                      <tr className="text-slate-500">
-                        <td className="py-2 px-9 text-[11px] font-semibold">Tax Payable (-)</td>
-                        <td className="py-2 px-5 text-right font-mono font-medium text-rose-600">Rs 0.00</td>
-                      </tr>
-                      <tr className="text-slate-500">
-                        <td className="py-2 px-9 text-[11px] font-semibold">TCS Payable (-)</td>
-                        <td className="py-2 px-5 text-right font-mono font-medium text-rose-600">Rs 0.00</td>
-                      </tr>
-                      <tr className="text-slate-500 border-b border-slate-100">
-                        <td className="py-2 px-9 text-[11px] font-semibold">TDS Payable (-)</td>
-                        <td className="py-2 px-5 text-right font-mono font-medium text-rose-600">Rs 0.00</td>
-                      </tr>
-
-                      {/* Tax Receivable (+) */}
-                      <tr className="bg-slate-50/50">
-                        <td className="py-2.5 px-5 font-extrabold text-slate-700">Tax Receivable (+)</td>
-                        <td className="py-2.5 px-5 text-right font-mono font-medium text-emerald-600">Rs 0.00</td>
-                      </tr>
-                      <tr className="text-slate-500">
-                        <td className="py-2 px-9 text-[11px] font-semibold">Tax Receivable (+)</td>
-                        <td className="py-2 px-5 text-right font-mono font-medium text-emerald-600">Rs 0.00</td>
-                      </tr>
-                      <tr className="text-slate-500 border-b border-slate-100">
-                        <td className="py-2 px-9 text-[11px] font-semibold">TCS Receivable (+)</td>
-                        <td className="py-2 px-5 text-right font-mono font-medium text-emerald-600">Rs 0.00</td>
-                      </tr>
-
-                      {/* Indirect Expenses (-) */}
-                      <tr className="hover:bg-slate-50/60 transition-colors border-b border-slate-200">
-                        <td className="py-3 px-5 font-bold">Indirect Expenses (-)</td>
+                      {/* Operating Expenses */}
+                      <tr className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3 px-5 font-bold">Operating Expenses (-)</td>
                         <td className="py-3 px-5 text-right font-mono font-medium text-rose-600">
-                          Rs {pnlMetrics.indirectExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          Rs {pnlReport.operatingExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
+
+                      {/* Expenses Category Sub-rows */}
+                      {Object.entries(pnlReport.expensesByCategory).map(([cat, amt]) => (
+                        <tr key={cat} className="text-slate-500 hover:bg-slate-50/40">
+                          <td className="py-2 px-9 text-[11px] font-semibold">• {cat}</td>
+                          <td className="py-2 px-5 text-right font-mono text-rose-500">Rs {amt.toFixed(2)}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                   <div className="h-12" />
                 </div>
               )}
 
-              {/* View 2: ACCOUNTING VIEW (Hierarchical Tree View matching Ref Image 2) */}
+              {/* View 2: ACCOUNTING VIEW (Hierarchical Tree View) */}
               {pnlView === 'accounting' && (
                 <div className="overflow-x-auto pb-12">
                   <table className="vyapar-table w-full text-left border-collapse">
@@ -2667,112 +2706,57 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs font-semibold text-slate-800">
-                      {/* ^ Incomes Node */}
+                      {/* Incomes Node */}
                       <tr className="bg-slate-50/80">
                         <td className="py-3 px-5 font-extrabold text-blue-700 flex items-center gap-1.5 cursor-pointer" onClick={() => setExpandedIncomes(!expandedIncomes)}>
                           <span>{expandedIncomes ? '▲' : '▼'}</span>
-                          <span>Incomes</span>
+                          <span>Incomes (Sales Revenue)</span>
                         </td>
                         <td className="py-3 px-5 text-right font-mono font-black text-emerald-600">
-                          Rs {pnlMetrics.netSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          Rs {pnlReport.netRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
 
                       {expandedIncomes && (
                         <>
                           <tr className="hover:bg-slate-50/60 transition-colors">
-                            <td className="py-2.5 px-10 text-slate-700 font-bold flex items-center gap-1">
-                              <span className="text-blue-500">v</span>
-                              <span>Sale Accounts</span>
-                            </td>
+                            <td className="py-2.5 px-10 text-slate-700 font-bold">Gross Sales (Tax-Exclusive)</td>
                             <td className="py-2.5 px-5 text-right font-mono font-bold text-emerald-600">
-                              Rs {pnlMetrics.netSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              Rs {pnlReport.grossSalesTaxExclusive.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
                           </tr>
-                          <tr className="hover:bg-slate-50/60 transition-colors text-slate-500">
-                            <td className="py-2.5 px-10 font-semibold flex items-center gap-1">
-                              <span className="text-blue-500">v</span>
-                              <span>Other Incomes (Direct)</span>
+                          <tr className="hover:bg-slate-50/60 transition-colors">
+                            <td className="py-2.5 px-10 text-slate-700 font-bold">Sale Returns</td>
+                            <td className="py-2.5 px-5 text-right font-mono font-bold text-rose-600">
+                              - Rs {pnlReport.saleReturnsTaxExclusive.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
-                            <td className="py-2.5 px-5 text-right font-mono font-bold text-emerald-600">Rs 0.00</td>
-                          </tr>
-                          <tr className="hover:bg-slate-50/60 transition-colors text-slate-500 border-b border-slate-100">
-                            <td className="py-2.5 px-10 font-semibold flex items-center gap-1">
-                              <span className="text-blue-500">v</span>
-                              <span>Other Incomes (Indirect)</span>
-                            </td>
-                            <td className="py-2.5 px-5 text-right font-mono font-bold text-emerald-600">Rs 0.00</td>
                           </tr>
                         </>
                       )}
 
-                      {/* ^ Expenses Node */}
+                      {/* Expenses Node */}
                       <tr className="bg-slate-50/80">
                         <td className="py-3 px-5 font-extrabold text-blue-700 flex items-center gap-1.5 cursor-pointer" onClick={() => setExpandedExpenses(!expandedExpenses)}>
                           <span>{expandedExpenses ? '▲' : '▼'}</span>
-                          <span>Expenses</span>
+                          <span>Cost & Operating Expenses</span>
                         </td>
                         <td className="py-3 px-5 text-right font-mono font-black text-rose-600">
-                          Rs {(pnlMetrics.cogs + pnlMetrics.indirectExpenses).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          Rs {(pnlReport.cogs + pnlReport.operatingExpenses).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       </tr>
 
                       {expandedExpenses && (
                         <>
-                          {/* Cost of Goods Sold Child Group */}
                           <tr className="bg-slate-50/40">
-                            <td className="py-2.5 px-9 font-extrabold text-slate-800 flex items-center gap-1 cursor-pointer" onClick={() => setExpandedCogs(!expandedCogs)}>
-                              <span className="text-blue-600">{expandedCogs ? '▲' : '▼'}</span>
-                              <span>Cost of Goods Sold</span>
-                            </td>
+                            <td className="py-2.5 px-9 font-extrabold text-slate-800">Cost of Goods Sold (COGS)</td>
                             <td className="py-2.5 px-5 text-right font-mono font-bold text-rose-600">
-                              Rs {pnlMetrics.cogs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              Rs {pnlReport.cogs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
                           </tr>
-
-                          {expandedCogs && (
-                            <>
-                              <tr className="hover:bg-slate-50/60 transition-colors">
-                                <td className="py-2 px-14 text-slate-700 font-bold flex items-center gap-1">
-                                  <span className="text-blue-500">v</span>
-                                  <span>Purchase Accounts</span>
-                                </td>
-                                <td className="py-2 px-5 text-right font-mono font-bold text-rose-600">
-                                  Rs {pnlMetrics.netPurchases.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </td>
-                              </tr>
-                              <tr className="text-slate-500">
-                                <td className="py-2 px-14 font-semibold flex items-center gap-1">
-                                  <span>•</span>
-                                  <span>Opening Stock</span>
-                                </td>
-                                <td className="py-2 px-5 text-right font-mono text-emerald-600">Rs 0.00</td>
-                              </tr>
-                              <tr className="text-slate-500 border-b border-slate-100">
-                                <td className="py-2 px-14 font-semibold flex items-center gap-1">
-                                  <span>•</span>
-                                  <span>Closing Stock</span>
-                                </td>
-                                <td className="py-2 px-5 text-right font-mono text-emerald-600">Rs 0.00</td>
-                              </tr>
-                            </>
-                          )}
-
-                          <tr className="hover:bg-slate-50/60 transition-colors text-slate-500">
-                            <td className="py-2.5 px-10 font-semibold flex items-center gap-1">
-                              <span className="text-blue-500">v</span>
-                              <span>Direct Expenses</span>
-                            </td>
-                            <td className="py-2.5 px-5 text-right font-mono font-bold text-rose-600">Rs 0.00</td>
-                          </tr>
-
-                          <tr className="hover:bg-slate-50/60 transition-colors border-b border-slate-200">
-                            <td className="py-2.5 px-10 font-semibold text-slate-800 flex items-center gap-1">
-                              <span className="text-blue-500">v</span>
-                              <span>Indirect Expenses</span>
-                            </td>
+                          <tr className="bg-slate-50/40">
+                            <td className="py-2.5 px-9 font-extrabold text-slate-800">Operating Expenses</td>
                             <td className="py-2.5 px-5 text-right font-mono font-bold text-rose-600">
-                              Rs {pnlMetrics.indirectExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              Rs {pnlReport.operatingExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
                           </tr>
                         </>
@@ -2783,18 +2767,18 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
                 </div>
               )}
 
-              {/* Highlighted Bottom Summary Bar (Net Profit / Net Loss) matching Reference UI */}
+              {/* Highlighted Bottom Summary Bar (Net Profit / Net Loss) */}
               <div className={`p-4 border-t flex items-center justify-between font-mono text-sm font-black border-b border-slate-200 rounded-b-xl shadow-2xs ${
-                pnlMetrics.netProfit >= 0 ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'
+                pnlReport.netProfit >= 0 ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'
               }`}>
                 <div className="flex items-center gap-2">
-                  <span>{pnlMetrics.netProfit >= 0 ? 'Net Profit' : 'Net Loss'}</span>
+                  <span>{pnlReport.netProfit >= 0 ? 'Net Profit' : 'Net Loss'}</span>
                   <span className="text-xs font-semibold text-slate-600 font-sans">
-                    (= Gross Sales - Sale Returns - Net Purchases - Expenses)
+                    (Net Margin: {pnlReport.netProfitMarginPercent.toFixed(2)}%)
                   </span>
                 </div>
                 <div className="text-base font-black">
-                  Rs {Math.abs(pnlMetrics.netProfit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  Rs {Math.abs(pnlReport.netProfit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               </div>
             </div>
@@ -3025,8 +3009,308 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
           </>
         )}
 
+        {/* ================= PARTY STATEMENT REPORT ================= */}
+        {activeTab === 'party-statement' && (
+          <>
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-xl font-black text-slate-900 flex items-center gap-2 uppercase tracking-tight">
+                    PARTY STATEMENT (LEDGER)
+                  </h1>
+                  <p className="text-xs text-slate-500 font-semibold mt-0.5">
+                    Continuous chronological ledger with running balance for selected customer or supplier.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (!partyLedgerReport || partyLedgerReport.entries.length === 0) return alert('No ledger entries available to export.');
+                      const headers = ['Date', 'Voucher No', 'Type', 'Description', 'Debit (Rs)', 'Credit (Rs)', 'Running Balance (Rs)'];
+                      const rows = partyLedgerReport.entries.map(e => [e.date, `"${e.voucherNo}"`, e.type, `"${e.description}"`, e.debit.toFixed(2), e.credit.toFixed(2), e.runningBalance.toFixed(2)]);
+                      const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+                      const link = document.createElement('a');
+                      link.setAttribute('href', encodeURI(csvContent));
+                      link.setAttribute('download', `Party_Ledger_${partyLedgerReport.party.name.replace(/\s+/g, '_')}.csv`);
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                    title="Export CSV"
+                    className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                    <span>Export CSV</span>
+                  </button>
+
+                  <button
+                    onClick={handlePrintReport}
+                    title="Print"
+                    className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4 text-slate-600" />
+                    <span>Print Ledger</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Filter Controls: Party Selector & Date Range */}
+              <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm space-y-3 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    {/* Party Selector Dropdown */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-500 font-bold">Party:</span>
+                      <select
+                        value={selectedPartyId}
+                        onChange={e => setSelectedPartyId(Number(e.target.value))}
+                        className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-extrabold outline-none focus:border-blue-500 min-w-[200px]"
+                      >
+                        {partiesList.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.type || 'CUSTOMER'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Date Preset */}
+                    <select
+                      value={datePreset}
+                      onChange={e => handlePresetChange(e.target.value as DatePreset)}
+                      className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                    >
+                      <option value="this_month">This Month</option>
+                      <option value="today">Today</option>
+                      <option value="this_week">This Week</option>
+                      <option value="last_month">Last Month</option>
+                      <option value="this_year">This Year</option>
+                      <option value="custom">Custom Date</option>
+                    </select>
+                  </div>
+
+                  {partyLedgerReport && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-500">Closing Balance:</span>
+                      <span className={`text-sm font-mono font-black px-2.5 py-1 rounded border ${
+                        partyLedgerReport.closingBalanceType === 'RECEIVABLE'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-rose-50 text-rose-700 border-rose-200'
+                      }`}>
+                        Rs {partyLedgerReport.closingBalance.toFixed(2)} ({partyLedgerReport.closingBalanceType})
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Ledger Table */}
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="vyapar-table w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/80 text-slate-500 text-[11px] font-extrabold uppercase tracking-wider border-b border-slate-200">
+                      <th className="py-3 px-4">Date</th>
+                      <th className="py-3 px-4">Ref / Voucher #</th>
+                      <th className="py-3 px-4">Type</th>
+                      <th className="py-3 px-4">Description</th>
+                      <th className="py-3 px-4 text-right">Debit (DR)</th>
+                      <th className="py-3 px-4 text-right">Credit (CR)</th>
+                      <th className="py-3 px-4 text-right">Running Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                    {/* Opening Balance Row */}
+                    {partyLedgerReport && (
+                      <tr className="bg-slate-50/60 font-bold text-slate-800">
+                        <td className="py-2.5 px-4 font-mono">{startDate || '-'}</td>
+                        <td className="py-2.5 px-4 font-mono text-slate-500">-</td>
+                        <td className="py-2.5 px-4">
+                          <span className="px-2 py-0.5 text-[10px] font-extrabold rounded bg-slate-200 text-slate-700 border border-slate-300">
+                            OPENING
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-4">Opening Balance ({partyLedgerReport.openingBalanceType})</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-slate-600">
+                          {partyLedgerReport.openingBalanceType === 'RECEIVABLE' ? `Rs ${partyLedgerReport.openingBalance.toFixed(2)}` : '-'}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono text-slate-600">
+                          {partyLedgerReport.openingBalanceType === 'PAYABLE' ? `Rs ${partyLedgerReport.openingBalance.toFixed(2)}` : '-'}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono font-black text-slate-900">
+                          Rs {partyLedgerReport.openingBalance.toFixed(2)}
+                        </td>
+                      </tr>
+                    )}
+
+                    {!partyLedgerReport || partyLedgerReport.entries.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="text-center py-12 text-slate-400 font-semibold">
+                          No transactions found for {selectedParty?.name || 'selected party'} in this date range.
+                        </td>
+                      </tr>
+                    ) : (
+                      partyLedgerReport.entries.map(entry => (
+                        <tr key={entry.id} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="py-3 px-4 font-mono text-slate-600 whitespace-nowrap">{formatDateDisplay(entry.date)}</td>
+                          <td className="py-3 px-4 font-mono font-bold text-blue-600 whitespace-nowrap">{entry.voucherNo}</td>
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <span className={`inline-block px-2 py-0.5 text-[10px] font-extrabold rounded border ${
+                              entry.type === 'INVOICE' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                              entry.type === 'PAYMENT_IN' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                              entry.type === 'SALE_RETURN' ? 'bg-pink-50 text-pink-700 border-pink-200' :
+                              entry.type === 'PURCHASE_BILL' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                              entry.type === 'PAYMENT_OUT' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                              'bg-indigo-50 text-indigo-700 border-indigo-200'
+                            }`}>
+                              {entry.type.replace(/_/g, ' ')}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-bold text-slate-800">{entry.description}</td>
+                          <td className="py-3 px-4 font-mono font-bold text-rose-600 text-right whitespace-nowrap">
+                            {entry.debit > 0 ? `Rs ${entry.debit.toFixed(2)}` : '-'}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-bold text-emerald-600 text-right whitespace-nowrap">
+                            {entry.credit > 0 ? `Rs ${entry.credit.toFixed(2)}` : '-'}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-black text-slate-900 text-right whitespace-nowrap">
+                            Rs {entry.runningBalance.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {partyLedgerReport && (
+                <div className="bg-slate-50 border-t border-slate-200 px-5 py-3 flex flex-wrap items-center justify-between gap-4 text-xs font-mono font-extrabold">
+                  <div className="text-rose-600">Total Debit (DR): Rs {partyLedgerReport.totalDebit.toFixed(2)}</div>
+                  <div className="text-emerald-600">Total Credit (CR): Rs {partyLedgerReport.totalCredit.toFixed(2)}</div>
+                  <div className="text-slate-900 font-black">
+                    Closing Balance: Rs {partyLedgerReport.closingBalance.toFixed(2)} ({partyLedgerReport.closingBalanceType})
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ================= GST TAX SUMMARY REPORT ================= */}
+        {activeTab === 'gst-tax-summary' && (
+          <>
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-xl font-black text-slate-900 flex items-center gap-2 uppercase tracking-tight">
+                    GST TAX SUMMARY REPORT
+                  </h1>
+                  <p className="text-xs text-slate-500 font-semibold mt-0.5">
+                    Breakdown of Output Tax collected (Sales) vs Input Tax Credit paid (Purchases) by tax rate slab.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (!taxSummaryReport || taxSummaryReport.slabs.length === 0) return alert('No tax data available to export.');
+                      const headers = ['Slab', 'Taxable Sales (Rs)', 'Output Tax (Rs)', 'Taxable Purchases (Rs)', 'Input Tax (Rs)', 'Net Liability (Rs)'];
+                      const rows = taxSummaryReport.slabs.map(s => [`${s.rate}%`, s.taxableSales.toFixed(2), s.totalOutputTax.toFixed(2), s.taxablePurchases.toFixed(2), s.totalInputTax.toFixed(2), s.netTaxLiability.toFixed(2)]);
+                      const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+                      const link = document.createElement('a');
+                      link.setAttribute('href', encodeURI(csvContent));
+                      link.setAttribute('download', `GST_Tax_Summary_${startDate}_to_${endDate}.csv`);
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                    title="Export CSV"
+                    className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                    <span>Export CSV</span>
+                  </button>
+
+                  <button
+                    onClick={handlePrintReport}
+                    title="Print"
+                    className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4 text-slate-600" />
+                    <span>Print</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* KPI Cards for Output Tax, Input Tax Credit, Net Payable */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-1">
+                  <div className="text-slate-500 font-extrabold uppercase text-[11px] tracking-wider">Output Tax Collected (Sales)</div>
+                  <div className="text-2xl font-mono font-black text-emerald-600">
+                    Rs {taxSummaryReport.totalOutputTax.toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-1">
+                  <div className="text-slate-500 font-extrabold uppercase text-[11px] tracking-wider">Input Tax Credit (Purchases)</div>
+                  <div className="text-2xl font-mono font-black text-blue-600">
+                    Rs {taxSummaryReport.totalInputTax.toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-1">
+                  <div className="text-slate-500 font-extrabold uppercase text-[11px] tracking-wider">Net Tax Payable / (Credit)</div>
+                  <div className={`text-2xl font-mono font-black ${taxSummaryReport.netTaxPayable >= 0 ? 'text-amber-600' : 'text-purple-600'}`}>
+                    Rs {taxSummaryReport.netTaxPayable.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Slab-wise Breakdown Table */}
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="vyapar-table w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/80 text-slate-500 text-[11px] font-extrabold uppercase tracking-wider border-b border-slate-200">
+                      <th className="py-3 px-4">Tax Rate Slab</th>
+                      <th className="py-3 px-4 text-right">Taxable Sales</th>
+                      <th className="py-3 px-4 text-right">Output CGST</th>
+                      <th className="py-3 px-4 text-right">Output SGST</th>
+                      <th className="py-3 px-4 text-right">Output IGST</th>
+                      <th className="py-3 px-4 text-right">Total Output Tax</th>
+                      <th className="py-3 px-4 text-right">Taxable Purchases</th>
+                      <th className="py-3 px-4 text-right">Input Tax Credit</th>
+                      <th className="py-3 px-4 text-right">Net Tax Payable</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                    {taxSummaryReport.slabs.map(slab => (
+                      <tr key={slab.rate} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3 px-4 font-mono font-extrabold text-blue-600">{slab.rate}% Slab</td>
+                        <td className="py-3 px-4 font-mono text-right font-bold text-slate-800">Rs {slab.taxableSales.toFixed(2)}</td>
+                        <td className="py-3 px-4 font-mono text-right text-emerald-600">Rs {slab.cgstCollected.toFixed(2)}</td>
+                        <td className="py-3 px-4 font-mono text-right text-emerald-600">Rs {slab.sgstCollected.toFixed(2)}</td>
+                        <td className="py-3 px-4 font-mono text-right text-emerald-600">Rs {slab.igstCollected.toFixed(2)}</td>
+                        <td className="py-3 px-4 font-mono text-right font-black text-emerald-700">Rs {slab.totalOutputTax.toFixed(2)}</td>
+                        <td className="py-3 px-4 font-mono text-right font-bold text-slate-800">Rs {slab.taxablePurchases.toFixed(2)}</td>
+                        <td className="py-3 px-4 font-mono text-right font-black text-blue-600">Rs {slab.totalInputTax.toFixed(2)}</td>
+                        <td className={`py-3 px-4 font-mono font-black text-right ${slab.netTaxLiability >= 0 ? 'text-amber-600' : 'text-purple-600'}`}>
+                          Rs {slab.netTaxLiability.toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
         {/* ================= OTHER REPORT TABS PLACEHOLDER ================= */}
-        {activeTab !== 'sale' && activeTab !== 'purchase' && activeTab !== 'day-book' && activeTab !== 'all-transactions' && activeTab !== 'profit-loss' && activeTab !== 'bill-wise-profit' && (
+        {activeTab !== 'sale' && activeTab !== 'purchase' && activeTab !== 'day-book' && activeTab !== 'all-transactions' && activeTab !== 'profit-loss' && activeTab !== 'party-statement' && activeTab !== 'gst-tax-summary' && activeTab !== 'bill-wise-profit' && (
           <div className="bg-white border border-slate-200 rounded-xl p-8 shadow-sm flex flex-col items-center justify-center text-center my-auto min-h-[400px]">
             <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 mb-4">
               <FileText className="w-7 h-7 stroke-[2]" />

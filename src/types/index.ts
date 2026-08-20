@@ -72,6 +72,7 @@ export interface InvoiceItem {
   sgstRate: number;
   igstRate: number;
   taxAmount: number;
+  discountAmount?: number;
   totalAmount: number;
   batchNumber?: string;
   expiryDate?: string;
@@ -84,6 +85,7 @@ export interface Invoice {
   partyId?: number;
   partyName: string;
   partyPhone?: string;
+  partyAddress?: string;
   partyGstin?: string;
   invoiceNumber: string;
   invoiceDate: string; // YYYY-MM-DD
@@ -255,6 +257,9 @@ export interface PurchaseBillItem {
   quantity: number;
   unitPrice: number;
   purchasePrice: number;
+  cgstRate?: number;
+  sgstRate?: number;
+  igstRate?: number;
   taxAmount?: number;
   totalAmount: number;
 }
@@ -344,6 +349,7 @@ export interface SaleReturnItem {
   unitType?: string;
   returnQuantity: number;
   unitPrice: number;
+  purchasePrice?: number;
   taxAmount?: number;
   totalAmount: number;
 }

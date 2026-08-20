@@ -289,14 +289,43 @@ body {
 }
 
 @media print {
-  @page { size: A4 portrait; margin: 10mm; }
-  body { background: #fff !important; color: #000 !important; overflow: visible !important; }
-  body * { visibility: hidden !important; }
-  #quotation-print-area, #quotation-print-area * { visibility: visible !important; }
-  #quotation-print-area {
-    position: absolute !important; left: 0 !important; top: 0 !important;
-    width: 100% !important; max-width: 100% !important;
-    border: none !important; box-shadow: none !important;
-    padding: 0 !important; margin: 0 !important; background: #fff !important;
+  @page {
+    margin: 0;
+    size: auto;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Explicitly hide non-printable UI components to avoid blank pages */
+  .no-print,
+  nav,
+  aside,
+  header,
+  button,
+  .modal-backdrop-bg,
+  .modal-header-actions,
+  .print-hide {
+    display: none !important;
+  }
+
+  /* Force printable invoice target container to occupy full page */
+  #printable-invoice {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    border: none !important;
   }
 }

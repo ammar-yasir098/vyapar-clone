@@ -110,18 +110,23 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
 
   const items: CashTransaction[] = [];
 
-  // 1. Sales (Cash Sales & Cash Payments Received Upfront)
+  // 1. Sales (Upfront Cash Sales)
   for (const inv of invoices) {
-    const isCredit = (inv.paymentMethod || '').toUpperCase() === 'CREDIT' || inv.paymentStatus === 'UNPAID';
+    const pm = (inv.paymentMethod || '').toUpperCase();
+    const isCredit = pm === 'CREDIT';
+    if (isCredit) continue; // Cash received for credit sales is tracked via PaymentIn vouchers
+
     const grand = Number(inv.grandTotal || 0);
-    const rec = isCredit ? 0 : Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? grand : 0));
-    if (rec > 0) {
+    const rec = Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? grand : 0));
+    const amt = roundCurrency(rec);
+
+    if (amt > 0) {
       items.push({
         id: `cash-sale-${inv.id || inv.invoiceNumber}`,
         cashAccountId: 1,
         tenantId: activeTenantId,
         type: 'IN',
-        amount: roundCurrency(rec),
+        amount: amt,
         source: 'POS_SALE' as CashTransactionSource,
         referenceId: inv.invoiceNumber || '',
         description: `POS Cash Sale - ${inv.partyName || 'Retail Customer'}`,
@@ -149,16 +154,22 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
     }
   }
 
-  // 3. Purchase Bills (Cash Purchases)
+  // 3. Purchase Bills (Upfront Cash Purchases)
   for (const b of purchaseBills) {
-    const paid = Number(b.paidAmount ?? (b.paymentMethod === 'CASH' ? b.grandTotal : 0));
-    if (paid > 0) {
+    const pm = (b.paymentMethod || '').toUpperCase();
+    const isCredit = pm === 'CREDIT';
+    if (isCredit) continue; // Cash paid for credit purchases is tracked via PaymentOut vouchers
+
+    const paid = Number(b.paidAmount ?? (pm === 'CASH' ? b.grandTotal : 0));
+    const amt = roundCurrency(paid);
+
+    if (amt > 0) {
       items.push({
         id: `cash-pur-${b.id || b.billNumber}`,
         cashAccountId: 1,
         tenantId: activeTenantId,
         type: 'OUT',
-        amount: roundCurrency(paid),
+        amount: amt,
         source: 'PURCHASE_BILL' as CashTransactionSource,
         referenceId: b.billNumber || '',
         description: `Cash Purchase - ${b.supplierName || 'Supplier'}`,

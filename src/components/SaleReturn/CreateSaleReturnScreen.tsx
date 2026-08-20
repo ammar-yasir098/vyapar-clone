@@ -179,15 +179,18 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
         });
       }
 
-      // 2. Increase Item Stock Levels (item.currentStock += returnedQty)
+      // 2. Increase Item Stock Levels (item.currentStock += returnedQty) & log sync mutation
       for (const item of validItems) {
         if (item.itemId) {
           const dbItem = await db.items.get(item.itemId);
           if (dbItem) {
             const currentStock = dbItem.currentStock || 0;
+            const newStock = currentStock + item.returnQuantity;
             await db.items.update(item.itemId, {
-              currentStock: currentStock + item.returnQuantity
+              currentStock: newStock,
+              updatedAt: new Date().toISOString()
             });
+            await syncManager.logMutation('ITEM', String(item.itemId), 'UPDATE', { id: item.itemId, name: dbItem.name, skuCode: dbItem.skuCode, currentStock: newStock });
           }
         }
       }

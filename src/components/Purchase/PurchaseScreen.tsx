@@ -24,6 +24,8 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
   const [selectedSupplier, setSelectedSupplier] = useState<Party | null>(suppliers[0] || null);
   const [billNumber, setBillNumber] = useState(`PUR-${Date.now().toString().slice(-4)}`);
   const [billDate, setBillDate] = useState(new Date().toISOString().split('T')[0]);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CREDIT');
+  const [paidAmount, setPaidAmount] = useState<string>('');
   const [purchaseItems, setPurchaseItems] = useState<InvoiceItem[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<number | ''>('');
   const [quantity, setQuantity] = useState<number>(1);
@@ -108,12 +110,31 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
     );
   };
 
-  const totalBillAmount = purchaseItems.reduce((sum, i) => {
-    const itemTotal = safeNum(i.totalAmount) > 0
-      ? safeNum(i.totalAmount)
-      : safeNum(i.quantity) * safeNum(i.unitPrice);
-    return sum + itemTotal;
-  }, 0);
+  const updatePurchaseItemTax = (idx: number, newTaxRate: number) => {
+    setPurchaseItems(prev =>
+      prev.map((item, i) => {
+        if (i === idx) {
+          const taxPct = Math.max(0, newTaxRate);
+          const half = taxPct / 2;
+          const sub = item.quantity * item.unitPrice;
+          const tax = (sub * taxPct) / 100;
+          return {
+            ...item,
+            cgstRate: half,
+            sgstRate: half,
+            igstRate: taxPct,
+            taxAmount: tax,
+            totalAmount: sub + tax
+          };
+        }
+        return item;
+      })
+    );
+  };
+
+  const subtotalCost = purchaseItems.reduce((sum, i) => sum + (safeNum(i.quantity) * safeNum(i.unitPrice)), 0);
+  const taxTotalCost = purchaseItems.reduce((sum, i) => sum + safeNum(i.taxAmount), 0);
+  const totalBillAmount = subtotalCost + taxTotalCost;
 
   const handleSavePurchase = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -124,6 +145,9 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
 
     const currentTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
     const totalAmount = totalBillAmount;
+    const paidAmt = paymentMethod === 'CREDIT' ? 0 : (paidAmount ? Math.max(0, parseFloat(paidAmount)) : totalAmount);
+    const dueAmt = paymentMethod === 'CREDIT' ? totalAmount : Math.max(0, totalAmount - paidAmt);
+    const status: 'PAID' | 'UNPAID' | 'PARTIAL' = paymentMethod === 'CREDIT' ? 'UNPAID' : (dueAmt === 0 ? 'PAID' : (dueAmt >= totalAmount ? 'UNPAID' : 'PARTIAL'));
 
     // 0. Save persistent PurchaseBill record in Dexie IndexedDB
     const billId = `pur-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -150,12 +174,16 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       subtotal: totalAmount,
       taxTotal: 0,
       grandTotal: totalAmount,
+      paidAmount: paidAmt,
+      dueAmount: dueAmt,
+      paymentStatus: status,
+      paymentMethod: paymentMethod || 'CASH',
       createdAt: new Date().toISOString()
     };
 
     await db.purchaseBills.add(newPurchaseBill);
 
-    // 1. Stock Inward: Increase Item stock levels in Dexie DB & log Restock record
+    // 1. Stock Inward: Increase Item stock levels in Dexie DB & log Sync mutation
     for (const pItem of purchaseItems) {
       const dbItem = await db.items.get(pItem.itemId);
       if (dbItem) {
@@ -165,6 +193,7 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
           purchasePrice: pItem.unitPrice,
           updatedAt: new Date().toISOString()
         });
+        await syncManager.logMutation('ITEM', String(pItem.itemId), 'UPDATE', { id: pItem.itemId, name: dbItem.name, skuCode: dbItem.skuCode, currentStock: newStock, purchasePrice: pItem.unitPrice });
       }
 
       await db.itemRestocks.add({
@@ -184,10 +213,10 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       });
     }
 
-    // 2. Update Supplier Accounts Payable Ledger Balance
-    if (selectedSupplier?.id) {
+    // 2. Update Supplier Accounts Payable Ledger Balance (only for dueAmt)
+    if (selectedSupplier?.id && dueAmt > 0) {
       const curBal = safeNum(selectedSupplier.currentBalance);
-      const newBal = curBal + totalAmount;
+      const newBal = curBal + dueAmt;
       await db.parties.update(selectedSupplier.id, {
         currentBalance: newBal
       });
@@ -331,6 +360,7 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
                     <th>Item Description</th>
                     <th>Inward Qty</th>
                     <th>Purchase Rate (Rs)</th>
+                    <th>GST Tax %</th>
                     <th className="text-right">Total Amount (Rs)</th>
                     <th></th>
                   </tr>
@@ -338,15 +368,16 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
                 <tbody>
                   {purchaseItems.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="text-center py-16 text-slate-400 text-xs">
+                      <td colSpan={6} className="text-center py-16 text-slate-400 text-xs">
                         No purchase items added yet. Select a product above.
                       </td>
                     </tr>
                   ) : (
                     purchaseItems.map((item, idx) => {
+                      const itemTaxRate = Number(item.igstRate || (Number(item.cgstRate || 0) + Number(item.sgstRate || 0)));
                       const itemTotal = safeNum(item.totalAmount) > 0
                         ? safeNum(item.totalAmount)
-                        : safeNum(item.quantity) * safeNum(item.unitPrice);
+                        : safeNum(item.quantity) * safeNum(item.unitPrice) + safeNum(item.taxAmount);
                       return (
                         <tr key={idx}>
                           <td className="font-bold text-slate-800 text-xs">{item.itemName}</td>
@@ -384,6 +415,19 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
                               className="w-20 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-900 font-mono font-bold"
                             />
                           </td>
+                          <td>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={itemTaxRate}
+                                onChange={e => updatePurchaseItemTax(idx, parseFloat(e.target.value) || 0)}
+                                className="w-14 bg-slate-50 border border-slate-300 rounded px-1 py-0.5 text-xs text-slate-900 font-mono font-bold text-center"
+                              />
+                              <span className="text-[10px] text-slate-500 font-bold">%</span>
+                            </div>
+                          </td>
                           <td className="font-mono text-xs font-black text-blue-600 text-right">Rs {itemTotal.toFixed(2)}</td>
                           <td className="text-center">
                             <button
@@ -419,9 +463,17 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
                 <span>Total Items:</span>
                 <span className="font-bold text-slate-900">{purchaseItems.length}</span>
               </div>
+              <div className="flex justify-between text-slate-600">
+                <span>Subtotal (Net):</span>
+                <span className="font-bold text-slate-900">Rs {subtotalCost.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-slate-600">
+                <span>Tax Total (GST):</span>
+                <span className="font-bold text-amber-600">+Rs {taxTotalCost.toFixed(2)}</span>
+              </div>
               <div className="flex justify-between text-sm font-black text-blue-600 pt-2 border-t border-slate-200">
                 <span>TOTAL COST:</span>
-                <span>Rs {Number(totalBillAmount || 0).toFixed(2)}</span>
+                <span>Rs {totalBillAmount.toFixed(2)}</span>
               </div>
             </div>
           </div>

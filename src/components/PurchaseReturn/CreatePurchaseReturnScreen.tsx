@@ -145,16 +145,17 @@ export const CreatePurchaseReturnScreen: React.FC<CreatePurchaseReturnScreenProp
         });
       }
 
-      // 2. Reduce Stock in Dexie DB (item.currentStock -= returnQuantity)
+      // 2. Reduce Stock in Dexie DB (item.currentStock -= returnQuantity) & log Sync mutation
       for (const rItem of returnItems) {
         if (rItem.itemId) {
           const dbItem = await db.items.get(rItem.itemId);
           if (dbItem) {
-            const newStock = Math.max(0, safeNum(dbItem.currentStock) - safeNum(rItem.returnQuantity));
+            const newStock = safeNum(dbItem.currentStock) - safeNum(rItem.returnQuantity);
             await db.items.update(rItem.itemId, {
               currentStock: newStock,
               updatedAt: new Date().toISOString()
             });
+            await syncManager.logMutation('ITEM', String(rItem.itemId), 'UPDATE', { id: rItem.itemId, name: dbItem.name, skuCode: dbItem.skuCode, currentStock: newStock });
           }
         }
       }

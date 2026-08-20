@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import {
   Users,
   Plus,
@@ -17,6 +18,7 @@ import { db } from '../../db';
 import { createServerParty, recordServerPartyPayment, deleteServerParty } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { useToast } from '../Common/ToastContext';
+import { generatePartyLedger } from '../../services/reportsService';
 
 interface PartiesScreenProps {
   parties: Party[];
@@ -36,6 +38,26 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
   const [selectedPartyForStatement, setSelectedPartyForStatement] = useState<Party | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentRemarks, setPaymentRemarks] = useState('');
+
+  const allInvoices = useLiveQuery(() => db.invoices.toArray(), []) || [];
+  const allPurchaseBills = useLiveQuery(() => db.purchaseBills.toArray(), []) || [];
+  const allPaymentsIn = useLiveQuery(() => db.paymentIn.toArray(), []) || [];
+  const allPaymentsOut = useLiveQuery(() => db.paymentOut.toArray(), []) || [];
+  const allSaleReturns = useLiveQuery(() => db.saleReturns.toArray(), []) || [];
+  const allPurchaseReturns = useLiveQuery(() => db.purchaseReturns.toArray(), []) || [];
+
+  const partyLedgerReport = useMemo(() => {
+    if (!selectedPartyForStatement) return null;
+    return generatePartyLedger(
+      selectedPartyForStatement,
+      allInvoices,
+      allPaymentsIn,
+      allSaleReturns,
+      allPurchaseBills,
+      allPaymentsOut,
+      allPurchaseReturns
+    );
+  }, [selectedPartyForStatement, allInvoices, allPaymentsIn, allSaleReturns, allPurchaseBills, allPaymentsOut, allPurchaseReturns]);
 
   const safeNum = (val: any): number => {
     if (val === null || val === undefined) return 0;
@@ -503,145 +525,221 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
       {/* View Party Ledger Statement Modal */}
       {selectedPartyForStatement && (() => {
         const party = selectedPartyForStatement;
-        const stmtBal = getPartyEffectiveBalance(party);
         const isCustomer = party.type === 'CUSTOMER';
-        const partyInvoices = invoices.filter(
-          inv => inv.partyId === party.id || (inv.partyName && inv.partyName.trim().toLowerCase() === party.name.trim().toLowerCase())
-        );
+        const stmtBal = partyLedgerReport ? partyLedgerReport.closingBalance : Math.abs(getPartyEffectiveBalance(party));
+        const isSettled = stmtBal === 0;
+
+        const totalBilled = partyLedgerReport?.totalBilled || 0;
+        const totalPaid = partyLedgerReport?.totalPaid || 0;
+
+        const renderTransactionBadge = (type: string) => {
+          switch (type) {
+            case 'PURCHASE_BILL':
+              return (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-extrabold bg-purple-50 text-purple-700 border border-purple-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+                  Purchase Bill
+                </span>
+              );
+            case 'PAYMENT_OUT':
+              return (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                  Payment-Out
+                </span>
+              );
+            case 'INVOICE':
+              return (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                  Sale Invoice
+                </span>
+              );
+            case 'PAYMENT_IN':
+              return (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                  Payment-In
+                </span>
+              );
+            case 'PURCHASE_RETURN':
+              return (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-extrabold bg-rose-50 text-rose-700 border border-rose-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                  Debit Note
+                </span>
+              );
+            case 'SALE_RETURN':
+              return (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                  Credit Note
+                </span>
+              );
+            default:
+              return (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200">
+                  {type}
+                </span>
+              );
+          }
+        };
 
         return (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl w-full max-w-2xl p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] flex flex-col">
-              <div className="flex items-center justify-between border-b border-slate-200 pb-3 shrink-0">
-                <div>
-                  <h3 className="font-extrabold text-base text-slate-900">
-                    Party Statement: {party.name}
-                  </h3>
-                  <p className="text-xs text-slate-500">Phone: {party.phone} | NTN: {party.gstin || 'N/A'}</p>
+          <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl w-full max-w-3xl shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 p-6">
+              
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-slate-200 pb-4 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 text-white flex items-center justify-center shadow-md">
+                    <FileText className="w-6 h-6 text-blue-400" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-black text-lg text-slate-900 tracking-tight">
+                        {party.name}
+                      </h3>
+                      <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border ${
+                        party.type === 'CUSTOMER' 
+                          ? 'bg-blue-50 text-blue-700 border-blue-200' 
+                          : party.type === 'SUPPLIER' 
+                          ? 'bg-purple-50 text-purple-700 border-purple-200'
+                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      }`}>
+                        {party.type}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-slate-500 font-medium mt-0.5">
+                      <span className="flex items-center gap-1"><Phone className="w-3 h-3 text-slate-400" /> {party.phone || 'No Phone'}</span>
+                      <span>•</span>
+                      <span>NTN: {party.gstin || 'N/A'}</span>
+                    </div>
+                  </div>
                 </div>
-                <button
-                  onClick={() => window.print()}
-                  className="btn-vyapar-outline text-xs font-bold flex items-center gap-1 cursor-pointer"
-                >
-                  <Printer className="w-4 h-4" />
-                  <span>Print Statement</span>
-                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => window.print()}
+                    className="btn-vyapar-outline text-xs font-bold flex items-center gap-1.5 cursor-pointer px-3 py-2 rounded-xl"
+                  >
+                    <Printer className="w-4 h-4 text-slate-600" />
+                    <span>Print Statement</span>
+                  </button>
+                  <button
+                    onClick={() => setSelectedPartyForStatement(null)}
+                    className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-900 transition flex items-center justify-center cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
 
-              {/* Status Alert Banner */}
+              {/* Account Dues Banner */}
               <div className="shrink-0">
                 {isCustomer ? (
-                  stmtBal > 0 ? (
-                    <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl flex items-center justify-between text-xs text-emerald-900 font-extrabold shadow-xs">
+                  !isSettled ? (
+                    <div className="bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-transparent border border-emerald-500/20 p-3.5 rounded-2xl flex items-center justify-between text-xs text-emerald-950 font-extrabold shadow-2xs">
                       <span className="flex items-center gap-2">
                         <ArrowDownLeft className="w-5 h-5 text-emerald-600 shrink-0" />
                         <span>STATUS: You have to RECEIVE money from this Customer</span>
                       </span>
-                      <span className="text-sm font-mono font-black text-emerald-700 bg-emerald-100/80 px-2.5 py-1 rounded-lg">
-                        Rs {stmtBal.toFixed(2)}
+                      <span className="text-sm font-mono font-black text-emerald-700 bg-emerald-100/90 px-3 py-1 rounded-xl shadow-2xs">
+                        Rs {stmtBal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
-                  ) : stmtBal === 0 ? (
-                    <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center justify-between text-xs text-slate-700 font-extrabold shadow-xs">
-                      <span>STATUS: Account Fully Settled (No pending dues)</span>
-                      <span className="text-sm font-mono font-black text-slate-800 bg-slate-200 px-2.5 py-1 rounded-lg">Rs 0.00</span>
-                    </div>
                   ) : (
-                    <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl flex items-center justify-between text-xs text-amber-900 font-extrabold shadow-xs">
-                      <span>STATUS: Advance Payment Received (You have to Pay/Refund)</span>
-                      <span className="text-sm font-mono font-black text-amber-700 bg-amber-100 px-2.5 py-1 rounded-lg">Rs {Math.abs(stmtBal).toFixed(2)}</span>
+                    <div className="bg-slate-100/80 border border-slate-200 p-3.5 rounded-2xl flex items-center justify-between text-xs text-slate-700 font-extrabold shadow-2xs">
+                      <span>STATUS: Account Fully Settled (No pending dues)</span>
+                      <span className="text-sm font-mono font-black text-slate-800 bg-slate-200 px-3 py-1 rounded-xl">Rs 0.00</span>
                     </div>
                   )
                 ) : (
-                  stmtBal > 0 ? (
-                    <div className="bg-rose-50 border border-rose-200 p-3 rounded-xl flex items-center justify-between text-xs text-rose-900 font-extrabold shadow-xs">
+                  !isSettled ? (
+                    <div className="bg-gradient-to-r from-rose-500/10 via-rose-500/5 to-transparent border border-rose-500/20 p-3.5 rounded-2xl flex items-center justify-between text-xs text-rose-950 font-extrabold shadow-2xs">
                       <span className="flex items-center gap-2">
                         <ArrowUpRight className="w-5 h-5 text-rose-600 shrink-0" />
                         <span>STATUS: You have to PAY money to this Supplier / Seller</span>
                       </span>
-                      <span className="text-sm font-mono font-black text-rose-700 bg-rose-100/80 px-2.5 py-1 rounded-lg">
-                        Rs {stmtBal.toFixed(2)}
+                      <span className="text-sm font-mono font-black text-rose-700 bg-rose-100/90 px-3 py-1 rounded-xl shadow-2xs">
+                        Rs {stmtBal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
-                  ) : stmtBal === 0 ? (
-                    <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center justify-between text-xs text-slate-700 font-extrabold shadow-xs">
-                      <span>STATUS: Account Fully Settled (No pending dues)</span>
-                      <span className="text-sm font-mono font-black text-slate-800 bg-slate-200 px-2.5 py-1 rounded-lg">Rs 0.00</span>
-                    </div>
                   ) : (
-                    <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl flex items-center justify-between text-xs text-emerald-900 font-extrabold shadow-xs">
-                      <span>STATUS: Advance Paid to Seller (Seller has to Deliver/Refund)</span>
-                      <span className="text-sm font-mono font-black text-emerald-700 bg-emerald-100 px-2.5 py-1 rounded-lg">Rs {Math.abs(stmtBal).toFixed(2)}</span>
+                    <div className="bg-slate-100/80 border border-slate-200 p-3.5 rounded-2xl flex items-center justify-between text-xs text-slate-700 font-extrabold shadow-2xs">
+                      <span>STATUS: Account Fully Settled (No pending dues)</span>
+                      <span className="text-sm font-mono font-black text-slate-800 bg-slate-200 px-3 py-1 rounded-xl">Rs 0.00</span>
                     </div>
                   )
                 )}
               </div>
 
-              {/* Account Overview Box */}
-              <div className="grid grid-cols-3 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200 shrink-0">
-                <div>
-                  <div className="text-[10px] font-bold text-slate-500">PARTY TYPE</div>
-                  <div className="text-xs font-extrabold text-slate-800">{party.type}</div>
+              {/* Account Metrics Grid */}
+              <div className="grid grid-cols-4 gap-3 shrink-0">
+                <div className="bg-slate-50 border border-slate-200/80 p-3 rounded-2xl">
+                  <div className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase">OPENING BALANCE</div>
+                  <div className="text-xs font-mono font-bold text-slate-700 mt-1">Rs {Number(party.openingBalance || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
                 </div>
-                <div>
-                  <div className="text-[10px] font-bold text-slate-500">OPENING BALANCE</div>
-                  <div className="text-xs font-mono font-bold text-slate-700">Rs {Number(party.openingBalance || 0).toFixed(2)}</div>
+                <div className="bg-slate-50 border border-slate-200/80 p-3 rounded-2xl">
+                  <div className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase">{isCustomer ? 'TOTAL SALES' : 'TOTAL PURCHASES'}</div>
+                  <div className="text-xs font-mono font-bold text-slate-900 mt-1">Rs {totalBilled.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
                 </div>
-                <div>
-                  <div className="text-[10px] font-bold text-slate-500">NET OUTSTANDING BALANCE</div>
-                  <div className={`text-sm font-mono font-black ${stmtBal > 0 ? (isCustomer ? 'text-emerald-600' : 'text-rose-600') : 'text-slate-700'}`}>
-                    Rs {stmtBal.toFixed(2)}
+                <div className="bg-slate-50 border border-slate-200/80 p-3 rounded-2xl">
+                  <div className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase">{isCustomer ? 'TOTAL RECEIVED' : 'TOTAL PAID'}</div>
+                  <div className="text-xs font-mono font-bold text-emerald-600 mt-1">Rs {totalPaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                </div>
+                <div className="bg-slate-50 border border-slate-200/80 p-3 rounded-2xl">
+                  <div className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase">NET OUTSTANDING</div>
+                  <div className={`text-sm font-mono font-black mt-0.5 ${!isSettled ? (isCustomer ? 'text-emerald-600' : 'text-rose-600') : 'text-slate-700'}`}>
+                    Rs {stmtBal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                   </div>
                 </div>
               </div>
 
               {/* Address */}
-              <div className="text-xs text-slate-600 flex items-center gap-1.5 shrink-0">
-                <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
-                <span>{party.address || 'No billing address provided.'}</span>
+              <div className="text-xs text-slate-500 flex items-center gap-1.5 shrink-0 px-1">
+                <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span className="truncate">{party.address || 'No billing address provided.'}</span>
               </div>
 
-              {/* Party Transactions Breakdown Table */}
-              <div className="flex-1 min-h-[160px] overflow-y-auto border border-slate-200 rounded-xl bg-white">
-                <table className="vyapar-table text-xs">
-                  <thead>
+              {/* Ledger Statement Table */}
+              <div className="flex-1 min-h-[220px] overflow-y-auto border border-slate-200/90 rounded-2xl bg-white shadow-2xs">
+                <table className="vyapar-table text-xs w-full">
+                  <thead className="bg-slate-50/90 sticky top-0 backdrop-blur-xs z-10 border-b border-slate-200">
                     <tr>
-                      <th>Date</th>
-                      <th>Ref Invoice #</th>
-                      <th>Type</th>
-                      <th>Total (Rs)</th>
-                      <th>Paid (Rs)</th>
-                      <th>Due (Rs)</th>
-                      <th>Status</th>
+                      <th className="py-2.5 px-3">Date</th>
+                      <th className="py-2.5 px-3">Voucher / Ref #</th>
+                      <th className="py-2.5 px-3">Type</th>
+                      <th className="py-2.5 px-3 text-right">Debit (Rs)</th>
+                      <th className="py-2.5 px-3 text-right">Credit (Rs)</th>
+                      <th className="py-2.5 px-3 text-right">Running Balance (Rs)</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {partyInvoices.length === 0 ? (
+                  <tbody className="divide-y divide-slate-100">
+                    {(!partyLedgerReport || partyLedgerReport.entries.length === 0) ? (
                       <tr>
-                        <td colSpan={7} className="text-center py-8 text-slate-400 text-xs">
-                          No transactions found for this party account.
+                        <td colSpan={6} className="text-center py-12 text-slate-400 text-xs">
+                          <div className="flex flex-col items-center justify-center gap-2">
+                            <FileText className="w-8 h-8 text-slate-300 stroke-[1.5]" />
+                            <span className="font-semibold">No ledger transactions found for this party account.</span>
+                          </div>
                         </td>
                       </tr>
                     ) : (
-                      partyInvoices.map((inv, idx) => (
-                        <tr key={inv.id || idx}>
-                          <td className="font-mono text-slate-600">{inv.invoiceDate || '-'}</td>
-                          <td className="font-mono font-bold text-blue-600">{inv.invoiceNumber}</td>
-                          <td className="font-bold text-slate-700">Sales Invoice</td>
-                          <td className="font-mono text-slate-800">Rs {Number(inv.grandTotal || 0).toFixed(2)}</td>
-                          <td className="font-mono text-emerald-600">Rs {Number(inv.receivedAmount || 0).toFixed(2)}</td>
-                          <td className="font-mono font-bold text-rose-600">Rs {Number(inv.dueAmount ?? (inv.grandTotal - (inv.receivedAmount || 0))).toFixed(2)}</td>
-                          <td>
-                            <span
-                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
-                                inv.paymentStatus === 'PAID'
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                  : inv.paymentStatus === 'PARTIAL'
-                                  ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                  : 'bg-rose-50 text-rose-700 border-rose-200'
-                              }`}
-                            >
-                              {inv.paymentStatus || 'UNPAID'}
+                      partyLedgerReport.entries.map((entry, idx) => (
+                        <tr key={entry.id || idx} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="font-mono text-slate-600 py-2.5 px-3">{entry.date || '-'}</td>
+                          <td className="font-mono font-bold text-blue-600 py-2.5 px-3">{entry.voucherNo || '-'}</td>
+                          <td className="py-2.5 px-3">{renderTransactionBadge(entry.type)}</td>
+                          <td className="font-mono text-slate-900 font-medium text-right py-2.5 px-3">
+                            {entry.debit > 0 ? `Rs ${entry.debit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}
+                          </td>
+                          <td className="font-mono text-emerald-600 font-semibold text-right py-2.5 px-3">
+                            {entry.credit > 0 ? `Rs ${entry.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '-'}
+                          </td>
+                          <td className="font-mono font-bold text-right py-2.5 px-3">
+                            <span className={entry.runningBalance > 0 ? (isCustomer ? 'text-emerald-600' : 'text-rose-600') : 'text-slate-500'}>
+                              Rs {entry.runningBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                             </span>
                           </td>
                         </tr>
@@ -651,10 +749,11 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
                 </table>
               </div>
 
+              {/* Modal Footer */}
               <div className="flex justify-end pt-3 border-t border-slate-200 shrink-0">
                 <button
                   onClick={() => setSelectedPartyForStatement(null)}
-                  className="px-5 py-2 rounded-full bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition cursor-pointer"
+                  className="px-6 py-2.5 rounded-2xl bg-slate-900 text-white text-xs font-extrabold hover:bg-slate-800 shadow-md transition cursor-pointer"
                 >
                   Close Statement
                 </button>

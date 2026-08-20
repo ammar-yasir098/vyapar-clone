@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { FileText, Printer, Search } from 'lucide-react';
+import { FileText, Printer, Search, Trash2 } from 'lucide-react';
 import { Invoice, BusinessDetails } from '../../types';
 import { triggerThermalPrint } from '../../services/printer';
 import { db } from '../../db';
 import { syncManager } from '../../services/sync';
+import { useToast } from '../Common/ToastContext';
+import { InvoicePrintModal, InvoiceFormat } from '../Invoice/InvoicePrintModal';
 
 interface InvoicesScreenProps {
   invoices: Invoice[];
@@ -13,6 +15,7 @@ interface InvoicesScreenProps {
 export const InvoicesScreen: React.FC<InvoicesScreenProps> = ({ invoices = [], business }) => {
   const [search, setSearch] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [defaultModalFormat, setDefaultModalFormat] = useState<InvoiceFormat>('a4');
 
   const safeInvoices = Array.isArray(invoices) ? invoices : [];
 
@@ -25,6 +28,94 @@ export const InvoicesScreen: React.FC<InvoicesScreenProps> = ({ invoices = [], b
       partyName.toLowerCase().includes(search.toLowerCase())
     );
   });
+
+  const { showToast, showConfirm } = useToast();
+
+  const handleDeleteInvoice = (inv: Invoice) => {
+    showConfirm({
+      title: 'Delete & Reverse Invoice Stock',
+      message: `Are you sure you want to delete Invoice #${inv.invoiceNumber}? Item stock levels will be restored and customer ledger will be updated.`,
+      type: 'danger',
+      confirmText: 'Delete & Restore Stock',
+      onConfirm: async () => {
+        try {
+          await db.transaction('rw', [db.invoices, db.items, db.parties, db.syncJournal], async () => {
+            // 1. Delete invoice from Dexie
+            if (inv.id) {
+              await db.invoices.delete(inv.id);
+            }
+
+            // 2. Restore item stock levels
+            if (inv.items && Array.isArray(inv.items)) {
+              for (const item of inv.items) {
+                if (item.itemId) {
+                  const dbItem = await db.items.get(item.itemId);
+                  if (dbItem) {
+                    const restoredStock = Number(dbItem.currentStock || 0) + Number(item.quantity || 0);
+                    await db.items.update(item.itemId, {
+                      currentStock: restoredStock,
+                      updatedAt: new Date().toISOString()
+                    });
+
+                    // Log item stock restoration to sync journal
+                    await db.syncJournal.add({
+                      versionId: `client-v-${Date.now()}-item-${item.itemId}`,
+                      clientSequence: Date.now(),
+                      entityType: 'ITEM',
+                      entityId: String(item.itemId),
+                      mutationType: 'UPDATE',
+                      payload: JSON.stringify({ id: item.itemId, name: dbItem.name, skuCode: dbItem.skuCode, currentStock: restoredStock }),
+                      timestamp: new Date().toISOString(),
+                      synced: false
+                    });
+                  }
+                }
+              }
+            }
+
+            // 3. Reverse party ledger balance if dueAmount > 0
+            if (inv.partyId && inv.dueAmount && inv.dueAmount > 0) {
+              const party = await db.parties.get(inv.partyId);
+              if (party) {
+                const curBal = Number(party.currentBalance || 0);
+                const reversedBal = Math.max(0, curBal - inv.dueAmount);
+                await db.parties.update(party.id!, { currentBalance: reversedBal });
+
+                await db.syncJournal.add({
+                  versionId: `client-v-${Date.now()}-party-${party.id}`,
+                  clientSequence: Date.now(),
+                  entityType: 'PARTY',
+                  entityId: String(party.id),
+                  mutationType: 'UPDATE',
+                  payload: JSON.stringify({ id: party.id, currentBalance: reversedBal }),
+                  timestamp: new Date().toISOString(),
+                  synced: false
+                });
+              }
+            }
+
+            // 4. Log Invoice DELETE mutation to sync journal
+            await db.syncJournal.add({
+              versionId: `client-v-${Date.now()}-inv-${inv.invoiceId}`,
+              clientSequence: Date.now(),
+              entityType: 'INVOICE',
+              entityId: inv.invoiceId,
+              mutationType: 'DELETE',
+              payload: JSON.stringify({ id: inv.id, invoiceId: inv.invoiceId, invoiceNumber: inv.invoiceNumber }),
+              timestamp: new Date().toISOString(),
+              synced: false
+            });
+          });
+
+          syncManager.triggerSync();
+          setSelectedInvoice(null);
+          showToast(`Invoice #${inv.invoiceNumber} deleted and stock restored!`, 'success');
+        } catch (err: any) {
+          showToast(`Failed to delete invoice: ${err.message}`, 'error');
+        }
+      }
+    });
+  };
 
   return (
     <div className="flex-1 flex flex-col p-5 bg-[#f3f4f6] overflow-hidden gap-4 select-none">
@@ -111,17 +202,30 @@ export const InvoicesScreen: React.FC<InvoicesScreenProps> = ({ invoices = [], b
                       <td className="text-center">
                         <div className="flex items-center justify-center gap-2">
                           <button
-                            onClick={() => triggerThermalPrint(inv, business, '80mm')}
+                            onClick={() => {
+                              setDefaultModalFormat('80mm');
+                              setSelectedInvoice(inv);
+                            }}
                             className="btn-vyapar-outline py-1 px-2.5 text-[11px] font-bold cursor-pointer"
                           >
                             <Printer className="w-3.5 h-3.5 inline mr-1" />
-                            <span>Thermal Slip</span>
+                            <span>Slip</span>
                           </button>
                           <button
-                            onClick={() => setSelectedInvoice(inv)}
+                            onClick={() => {
+                              setDefaultModalFormat('a4');
+                              setSelectedInvoice(inv);
+                            }}
                             className="text-xs text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer"
                           >
-                            View Details
+                            View
+                          </button>
+                          <button
+                            onClick={() => handleDeleteInvoice(inv)}
+                            className="text-xs text-red-600 hover:text-red-800 font-bold cursor-pointer p-1 rounded hover:bg-red-50"
+                            title="Delete invoice and restore stock"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>
@@ -134,77 +238,14 @@ export const InvoicesScreen: React.FC<InvoicesScreenProps> = ({ invoices = [], b
         </div>
       </div>
 
-      {/* Invoice Detail Modal */}
+      {/* Invoice Print & PDF Export Modal */}
       {selectedInvoice && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-              <h3 className="font-extrabold text-sm text-slate-800 flex items-center gap-2">
-                <FileText className="w-4 h-4 text-blue-600" />
-                <span>Invoice Details: {selectedInvoice.invoiceNumber || ''}</span>
-              </h3>
-              <button
-                onClick={() => setSelectedInvoice(null)}
-                className="text-xs text-slate-400 hover:text-slate-600 font-bold"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="space-y-2 text-xs">
-              <div className="grid grid-cols-2 text-slate-600">
-                <div>Customer: <strong className="text-slate-900">{selectedInvoice.partyName || 'Walk-in'}</strong></div>
-                <div>Date: <strong className="text-slate-900">{selectedInvoice.invoiceDate || '-'}</strong></div>
-              </div>
-
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 max-h-48 overflow-y-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="text-slate-500 text-[10px] uppercase border-b border-slate-200 font-bold">
-                      <th className="py-1">Item</th>
-                      <th className="py-1 text-right">Qty</th>
-                      <th className="py-1 text-right">Rate</th>
-                      <th className="py-1 text-right">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(selectedInvoice.items || []).map((item, i) => (
-                      <tr key={i} className="border-b border-slate-200/60 text-slate-800">
-                        <td className="py-1 font-bold">{item.itemName || 'Item'}</td>
-                        <td className="py-1 text-right font-mono">{Number(item.quantity || 0)}</td>
-                        <td className="py-1 text-right font-mono">Rs {Number(item.unitPrice || 0).toFixed(2)}</td>
-                        <td className="py-1 text-right font-mono font-black text-emerald-600">
-                          Rs {Number(item.totalAmount || 0).toFixed(2)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="bg-slate-100 p-3 rounded-xl space-y-1 font-mono text-xs text-right text-slate-700">
-                <div>Subtotal: Rs {Number(selectedInvoice.subtotal || 0).toFixed(2)}</div>
-                <div>Tax Total: Rs {Number(selectedInvoice.taxTotal || 0).toFixed(2)}</div>
-                <div className="text-sm font-black text-slate-900 pt-1 border-t border-slate-200">
-                  Grand Total: Rs {Number(selectedInvoice.grandTotal || 0).toFixed(2)}
-                </div>
-                <div className="text-sm font-black text-rose-600 pt-0.5">
-                  Remaining Due: Rs {Number(selectedInvoice.dueAmount !== undefined ? selectedInvoice.dueAmount : (selectedInvoice.paymentStatus === 'PAID' ? 0 : selectedInvoice.grandTotal)).toFixed(2)}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
-              <button
-                onClick={() => triggerThermalPrint(selectedInvoice, business, '80mm')}
-                className="btn-vyapar-blue text-xs font-bold"
-              >
-                <Printer className="w-4 h-4 inline mr-1" />
-                <span>Print Thermal Receipt</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        <InvoicePrintModal
+          invoice={selectedInvoice}
+          business={business}
+          defaultFormat={defaultModalFormat}
+          onClose={() => setSelectedInvoice(null)}
+        />
       )}
     </div>
   );

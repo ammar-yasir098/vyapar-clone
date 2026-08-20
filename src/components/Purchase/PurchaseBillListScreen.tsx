@@ -181,36 +181,66 @@ export const PurchaseBillListScreen: React.FC<PurchaseBillListScreenProps> = ({
                     <th className="py-3 px-4">Supplier</th>
                     <th className="py-3 px-4">Items Count</th>
                     <th className="py-3 px-4 text-right">Total Bill Cost</th>
+                    <th className="py-3 px-4 text-center">Payment Status</th>
                     <th className="py-3 px-4 text-center">Stock Status</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                  {filteredBills.map(bill => (
-                    <tr key={bill.id || bill.billId} className="hover:bg-slate-50/80 transition">
-                      <td className="py-3.5 px-4 font-bold text-slate-900 font-mono">
-                        {bill.billNumber}
-                      </td>
-                      <td className="py-3.5 px-4 text-slate-600 font-mono">
-                        {bill.billDate}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <div className="font-bold text-slate-800">{bill.supplierName}</div>
-                        {bill.supplierPhone && <div className="text-[10px] text-slate-400">{bill.supplierPhone}</div>}
-                      </td>
-                      <td className="py-3.5 px-4 font-semibold text-slate-600">
-                        {bill.items?.length || 0} item(s)
-                      </td>
-                      <td className="py-3.5 px-4 text-right font-black text-slate-900">
-                        Rs. {(bill.grandTotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide bg-emerald-100 text-emerald-800">
-                          STOCK ADDED
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
+                  {filteredBills.map(bill => {
+                    const grandTotal = Number(bill.grandTotal || 0);
+                    const dueAmt = bill.dueAmount !== undefined
+                      ? Number(bill.dueAmount)
+                      : (bill.paymentStatus === 'PAID' ? 0 : grandTotal);
+                    const status = bill.paymentStatus
+                      ? bill.paymentStatus
+                      : (dueAmt === 0 ? 'PAID' : (dueAmt >= grandTotal ? 'UNPAID' : 'PARTIAL'));
+
+                    return (
+                      <tr key={bill.id || bill.billId} className="hover:bg-slate-50/80 transition">
+                        <td className="py-3.5 px-4 font-bold text-slate-900 font-mono">
+                          {bill.billNumber}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-600 font-mono">
+                          {bill.billDate}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <div className="font-bold text-slate-800">{bill.supplierName}</div>
+                          {bill.supplierPhone && <div className="text-[10px] text-slate-400">{bill.supplierPhone}</div>}
+                        </td>
+                        <td className="py-3.5 px-4 font-semibold text-slate-600">
+                          {bill.items?.length || 0} item(s)
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-black text-slate-900">
+                          Rs. {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          <div className="flex flex-col items-center gap-0.5">
+                            <span
+                              className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide border ${
+                                status === 'PAID'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : status === 'PARTIAL'
+                                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                  : 'bg-rose-50 text-rose-700 border-rose-200'
+                              }`}
+                            >
+                              {status}
+                            </span>
+                            {dueAmt > 0 && (
+                              <span className="text-[10px] font-mono font-bold text-rose-600">
+                                Due: Rs. {dueAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wide bg-emerald-100 text-emerald-800">
+                            STOCK ADDED
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
                           <button
                             onClick={() => {
                               setSelectedBill(bill);
@@ -243,7 +273,8 @@ export const PurchaseBillListScreen: React.FC<PurchaseBillListScreenProps> = ({
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );
+                })}
                 </tbody>
               </table>
             </div>
@@ -315,10 +346,22 @@ export const PurchaseBillListScreen: React.FC<PurchaseBillListScreenProps> = ({
                 </div>
               )}
 
-              <div className="border-t border-slate-200 pt-3 flex flex-col items-end gap-1 text-xs">
-                <div className="flex justify-between w-48 font-black text-slate-900 text-sm border-slate-200">
+              <div className="border-t border-slate-200 pt-3 flex flex-col items-end gap-1.5 text-xs font-mono">
+                <div className="flex justify-between w-56 font-bold text-slate-700">
                   <span>Grand Total Bill:</span>
-                  <span className="text-blue-600">Rs. {selectedBill.grandTotal}</span>
+                  <span className="text-slate-900 font-extrabold">Rs. {Number(selectedBill.grandTotal || 0).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between w-56 font-bold text-slate-700">
+                  <span>Paid Amount ({selectedBill.paymentMethod || 'CASH'}):</span>
+                  <span className="text-emerald-600 font-bold">
+                    Rs. {Number(selectedBill.paidAmount !== undefined ? selectedBill.paidAmount : (selectedBill.paymentStatus === 'PAID' ? selectedBill.grandTotal : 0)).toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between w-56 font-black text-sm border-t border-slate-200 pt-1.5">
+                  <span>Remaining Due:</span>
+                  <span className={selectedBill.dueAmount && selectedBill.dueAmount > 0 ? 'text-rose-600' : 'text-slate-900'}>
+                    Rs. {Number(selectedBill.dueAmount !== undefined ? selectedBill.dueAmount : (selectedBill.paymentStatus === 'PAID' ? 0 : selectedBill.grandTotal)).toFixed(2)}
+                  </span>
                 </div>
               </div>
             </div>

@@ -93,18 +93,16 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
 
   const handleResetAllData = async () => {
     showConfirm({
-      title: 'Reset All Store Data (Excluding Company Profile)',
-      message: 'Are you sure you want to delete ALL store products, parties, invoices, orders, bills, and expenses in local and cloud DB? Your Company Profile will be preserved.',
+      title: 'Reset All Store Data (Excluding Users & Company Profile)',
+      message: 'Are you sure you want to delete ALL store products, parties, invoices, orders, bills, and expenses in local IndexedDB and cloud PostgreSQL? Your User Accounts and Company Profile will be preserved.',
       type: 'danger',
       confirmText: 'Yes, Reset All Data',
       onConfirm: async () => {
         try {
-          await fetch('http://localhost:5000/api/v1/sync/reset', { method: 'POST' });
-        } catch (err) {
-          console.warn('Server reset warning:', err);
+          await clearAllDatabaseData();
+        } catch (err: any) {
+          showToast(`Reset failed: ${err.message}`, 'error');
         }
-        await clearAllDatabaseData();
-        window.location.reload();
       }
     });
   };

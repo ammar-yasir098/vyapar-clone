@@ -20,6 +20,8 @@ import { db } from '../../db';
 import { printA4TaxInvoice, buildWhatsAppInvoiceLink } from '../../services/pdfInvoice';
 import { createServerInvoice } from '../../services/api';
 import { syncManager } from '../../services/sync';
+import { InvoicePrintModal } from '../Invoice/InvoicePrintModal';
+import { useToast } from '../Common/ToastContext';
 
 interface BillingScreenProps {
   items: Item[];
@@ -34,6 +36,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   business,
   onInvoiceCreated
 }) => {
+  const { showToast } = useToast();
   const [cartItems, setCartItems] = useState<InvoiceItem[]>([]);
   const [selectedParty, setSelectedParty] = useState<Party | null>(
     parties.find(p => (p?.name || '').includes('Walk-in')) || parties[0] || null
@@ -47,6 +50,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   const [showAddPartyModal, setShowAddPartyModal] = useState(false);
   const [newPartyName, setNewPartyName] = useState('');
   const [newPartyPhone, setNewPartyPhone] = useState('');
+  const [checkoutInvoice, setCheckoutInvoice] = useState<Invoice | null>(null);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
@@ -216,9 +220,9 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
 
   const recAmtNum = paymentMethod === 'CREDIT'
     ? 0
-    : (receivedAmount !== '' && !isNaN(parseFloat(receivedAmount))
+    : (receivedAmount.trim() !== '' && !isNaN(parseFloat(receivedAmount))
         ? Math.max(0, parseFloat(receivedAmount))
-        : grandTotal);
+        : (paymentMethod === 'CASH' ? 0 : grandTotal));
 
   const changeToReturn = Math.max(0, recAmtNum - grandTotal);
   const dueAmount = paymentMethod === 'CREDIT'
@@ -228,6 +232,11 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
 
   const handleSaveAndPrint = async () => {
     if (cartItems.length === 0) return;
+
+    if (paymentMethod === 'CASH' && (receivedAmount.trim() === '' || recAmtNum <= 0)) {
+      showToast("Please enter the Amount Received (or click 'Exact Paid') for Cash payment!", 'warning');
+      return;
+    }
 
     const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
     const defaultWalkIn = await db.parties.filter(p => (p.tenantId || 'default-tenant') === activeTenantId && p.name === 'Walk-in Retail Customer').first();
@@ -259,39 +268,74 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
       syncStatus: 'PENDING'
     };
 
-    // 1. Save to local Dexie IndexedDB
-    const savedId = await db.invoices.add(newInvoice);
-    newInvoice.id = savedId;
+    // Execute entire checkout atomically inside a Dexie transaction
+    await db.transaction('rw', [db.invoices, db.items, db.parties, db.syncJournal], async () => {
+      // 1. Save invoice to local Dexie
+      const savedId = await db.invoices.add(newInvoice);
+      newInvoice.id = savedId;
 
-    // Update Party balance if dueAmount > 0
-    if (effectiveParty && effectiveParty.id && dueAmount > 0) {
-      const curVal = Number(effectiveParty.currentBalance);
-      const currentBal = isNaN(curVal) || !isFinite(curVal) ? 0 : curVal;
-      const safeDue = isNaN(Number(dueAmount)) ? 0 : Number(dueAmount);
-      const newBal = currentBal + safeDue;
-      const validBal = isNaN(newBal) || !isFinite(newBal) ? safeDue : newBal;
-      await db.parties.update(effectiveParty.id, { currentBalance: validBal });
-      await syncManager.logMutation('PARTY', String(effectiveParty.id), 'UPDATE', { id: effectiveParty.id, currentBalance: validBal });
-    }
-
-    // Log to Offline Sync Queue
-    await syncManager.logMutation('INVOICE', newInvoice.invoiceId, 'INSERT', newInvoice);
-
-    // 2. Decrement Item stock levels in local DB
-    for (const cItem of cartItems) {
-      const dbItem = await db.items.get(cItem.itemId);
-      if (dbItem) {
-        const newStock = Math.max(0, dbItem.currentStock - cItem.quantity);
-        await db.items.update(cItem.itemId, { currentStock: newStock, updatedAt: new Date().toISOString() });
+      // 2. Update Party balance if dueAmount > 0
+      if (effectiveParty && effectiveParty.id && dueAmount > 0) {
+        const curVal = Number(effectiveParty.currentBalance);
+        const currentBal = isNaN(curVal) || !isFinite(curVal) ? 0 : curVal;
+        const safeDue = isNaN(Number(dueAmount)) ? 0 : Number(dueAmount);
+        const newBal = currentBal + safeDue;
+        const validBal = isNaN(newBal) || !isFinite(newBal) ? safeDue : newBal;
+        await db.parties.update(effectiveParty.id, { currentBalance: validBal });
+        
+        // Log party balance update to sync journal
+        await db.syncJournal.add({
+          versionId: `client-v-${Date.now()}-party-${effectiveParty.id}`,
+          clientSequence: Date.now(),
+          entityType: 'PARTY',
+          entityId: String(effectiveParty.id),
+          mutationType: 'UPDATE',
+          payload: JSON.stringify({ id: effectiveParty.id, currentBalance: validBal }),
+          timestamp: new Date().toISOString(),
+          synced: false
+        });
       }
-    }
 
-    // 3. Send to PostgreSQL backend REST API asynchronously
+      // 3. Log Invoice creation to sync journal
+      await db.syncJournal.add({
+        versionId: `client-v-${Date.now()}-inv-${newInvoice.invoiceId}`,
+        clientSequence: Date.now(),
+        entityType: 'INVOICE',
+        entityId: newInvoice.invoiceId,
+        mutationType: 'INSERT',
+        payload: JSON.stringify(newInvoice),
+        timestamp: new Date().toISOString(),
+        synced: false
+      });
+
+      // 4. Decrement Item stock levels accurately (without silent zero clamping) & log item update
+      for (const cItem of cartItems) {
+        const dbItem = await db.items.get(cItem.itemId);
+        if (dbItem) {
+          const newStock = dbItem.currentStock - cItem.quantity;
+          await db.items.update(cItem.itemId, { currentStock: newStock, updatedAt: new Date().toISOString() });
+          
+          await db.syncJournal.add({
+            versionId: `client-v-${Date.now()}-item-${cItem.itemId}`,
+            clientSequence: Date.now(),
+            entityType: 'ITEM',
+            entityId: String(cItem.itemId),
+            mutationType: 'UPDATE',
+            payload: JSON.stringify({ id: cItem.itemId, name: dbItem.name, skuCode: dbItem.skuCode, currentStock: newStock }),
+            timestamp: new Date().toISOString(),
+            synced: false
+          });
+        }
+      }
+    });
+
+    // 5. Asynchronously trigger background cloud push & server invoice creation
+    syncManager.triggerSync();
     createServerInvoice(newInvoice);
 
-    // 5. Trigger Thermal Print
+    // 6. Trigger Invoice Print Popup & Reset
     onInvoiceCreated(newInvoice);
-
+    setCheckoutInvoice(newInvoice);
     handleResetBill();
   };
 
@@ -707,6 +751,16 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* POS Checkout Success Invoice Print Modal */}
+      {checkoutInvoice && (
+        <InvoicePrintModal
+          invoice={checkoutInvoice}
+          business={business}
+          defaultFormat="80mm"
+          onClose={() => setCheckoutInvoice(null)}
+        />
       )}
     </div>
   );
