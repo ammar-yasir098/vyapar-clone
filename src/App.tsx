@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Building2, Store } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, seedDatabaseIfEmpty, seedLedgerAccountsForTenant, seedWalkInCustomerForTenant, DEFAULT_BUSINESS } from './db';
+import { db, seedDatabaseIfEmpty, seedWalkInCustomerForTenant, DEFAULT_BUSINESS } from './db';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { DashboardScreen } from './components/Dashboard/DashboardScreen';
@@ -9,7 +9,6 @@ import { BillingScreen } from './components/POS/BillingScreen';
 import { InventoryScreen } from './components/Inventory/InventoryScreen';
 import { PartiesScreen } from './components/Parties/PartiesScreen';
 import { PurchaseScreen } from './components/Purchase/PurchaseScreen';
-import { LedgerScreen } from './components/Ledger/LedgerScreen';
 import { InvoicesScreen } from './components/Invoices/InvoicesScreen';
 import { GSTComplianceScreen } from './components/GST/GSTComplianceScreen';
 import { ReportsScreen } from './components/Reports/ReportsScreen';
@@ -40,8 +39,6 @@ import {
   fetchServerCompanyProfile,
   fetchServerAllCompanies,
   saveServerCompanyProfile,
-  fetchServerLedgerAccounts,
-  fetchServerJournalEntries,
   fetchServerEstimates,
   fetchServerPaymentsIn,
   fetchServerPurchaseOrders,
@@ -53,7 +50,6 @@ import {
   fetchServerCashTransactions,
   deleteServerCompanyProfile
 } from './services/api';
-import { syncLedgerAccountBalances } from './services/ledger';
 import { useToast } from './components/Common/ToastContext';
 
 export function App() {
@@ -178,8 +174,7 @@ export function App() {
 
       console.log(`[Sync] Active Tenant ID: ${activeTenantId}`);
 
-      // Seed tenant ledger accounts & walk-in party
-      await seedLedgerAccountsForTenant(activeTenantId);
+      // Seed walk-in party
       await seedWalkInCustomerForTenant(activeTenantId);
 
       // Log startup local records count
@@ -245,8 +240,6 @@ export function App() {
           serverItems,
           serverParties,
           serverInvoices,
-          serverAccounts,
-          serverJournals,
           serverEstimates,
           serverPaymentsIn,
           serverPOs,
@@ -260,8 +253,6 @@ export function App() {
           fetchServerItems(activeTenantId),
           fetchServerParties(activeTenantId),
           fetchServerInvoices(activeTenantId),
-          fetchServerLedgerAccounts(activeTenantId),
-          fetchServerJournalEntries(activeTenantId),
           fetchServerEstimates(activeTenantId),
           fetchServerPaymentsIn(activeTenantId),
           fetchServerPurchaseOrders(activeTenantId),
@@ -334,36 +325,6 @@ export function App() {
               await db.invoices.update(existing.id, invData);
             } else {
               await db.invoices.add(invData);
-            }
-          }
-        }
-
-        // 4. Ledger Accounts Sync
-        if (serverAccounts && serverAccounts.length > 0) {
-          for (const sAcc of serverAccounts) {
-            const existing = await db.ledgerAccounts
-              .filter(a => a.accountCode === sAcc.accountCode)
-              .first();
-            const accData = { ...sAcc, tenantId: sAcc.tenantId || activeTenantId };
-            if (existing && existing.id) {
-              await db.ledgerAccounts.update(existing.id, accData);
-            } else {
-              await db.ledgerAccounts.add(accData);
-            }
-          }
-        }
-
-        // 5. Journal Entries Sync
-        if (serverJournals && serverJournals.length > 0) {
-          for (const sJe of serverJournals) {
-            const existing = await db.journalEntries
-              .filter(j => j.entryNumber === sJe.entryNumber)
-              .first();
-            const jeData = { ...sJe, tenantId: sJe.tenantId || activeTenantId };
-            if (existing && existing.id) {
-              await db.journalEntries.update(existing.id, jeData);
-            } else {
-              await db.journalEntries.add(jeData);
             }
           }
         }
@@ -588,8 +549,6 @@ export function App() {
   const allItems = useLiveQuery(() => db.items.toArray(), []) || [];
   const allParties = useLiveQuery(() => db.parties.toArray(), []) || [];
   const allInvoices = useLiveQuery(() => db.invoices.reverse().toArray(), []) || [];
-  const allAccounts = useLiveQuery(() => db.ledgerAccounts.toArray(), []) || [];
-  const allJournalEntries = useLiveQuery(() => db.journalEntries.reverse().toArray(), []) || [];
   const allEstimates = useLiveQuery(() => db.estimates.reverse().toArray(), []) || [];
   const allPaymentsIn = useLiveQuery(() => db.paymentIn.reverse().toArray(), []) || [];
   const allPurchaseOrders = useLiveQuery(() => db.purchaseOrders.reverse().toArray(), []) || [];
@@ -604,8 +563,6 @@ export function App() {
   const items = allItems.filter(item => (item.tenantId || 'default-tenant') === activeTenantId);
   const parties = allParties.filter(party => (party.tenantId || 'default-tenant') === activeTenantId);
   const invoices = allInvoices.filter(inv => (inv.tenantId || 'default-tenant') === activeTenantId);
-  const accounts = allAccounts.filter(acc => (acc.tenantId || 'default-tenant') === activeTenantId);
-  const journalEntries = allJournalEntries.filter(je => (je.tenantId || 'default-tenant') === activeTenantId);
   const estimates = allEstimates.filter(est => (est.tenantId || 'default-tenant') === activeTenantId);
   const paymentsIn = allPaymentsIn.filter(p => (p.tenantId || 'default-tenant') === activeTenantId);
   const purchaseOrders = allPurchaseOrders.filter(po => (po.tenantId || 'default-tenant') === activeTenantId);
@@ -720,8 +677,6 @@ export function App() {
           await db.paymentIn.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
           await db.paymentOut.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
           await db.estimates.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
-          await db.ledgerAccounts.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
-          await db.journalEntries.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
           await db.cashAccounts.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
           await db.cashTransactions.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
 

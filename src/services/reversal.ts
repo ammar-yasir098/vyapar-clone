@@ -1,6 +1,5 @@
 import { db } from '../db';
 import { syncManager } from './sync';
-import { syncLedgerAccountBalances } from './ledger';
 import { roundCurrency } from '../utils/edgeCaseHelpers';
 
 /**
@@ -8,7 +7,6 @@ import { roundCurrency } from '../utils/edgeCaseHelpers';
  * - Customer receivable balance
  * - Invoice due amounts & payment statuses
  * - Cash transactions ledger
- * - Journal entries & ledger account balances
  */
 export async function voidPaymentIn(paymentInId: number | string): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
@@ -83,25 +81,11 @@ export async function voidPaymentIn(paymentInId: number | string): Promise<{ suc
       }
     }
 
-    // 4. Delete linked Journal Entries
-    const linkedJournals = await db.journalEntries
-      .filter(je => je.referenceId === payment.receiptNumber || je.referenceId === `PAY-${payment.partyName}`)
-      .toArray();
-    for (const je of linkedJournals) {
-      if (je.id) {
-        await db.journalEntries.delete(je.id);
-        await syncManager.logMutation('JOURNAL', je.entryNumber, 'DELETE', { id: je.id });
-      }
-    }
-
-    // 5. Delete PaymentIn record itself
+    // 4. Delete PaymentIn record itself
     if (payment.id) {
       await db.paymentIn.delete(payment.id);
       await syncManager.logMutation('PAYMENT_IN', payment.receiptNumber, 'DELETE', { id: payment.id });
     }
-
-    // 6. Recalculate General Ledger account balances
-    await syncLedgerAccountBalances(tenantId);
 
     return { success: true, message: `Payment-In ${payment.receiptNumber} successfully voided and rolled back.` };
   } catch (err: any) {
@@ -115,7 +99,6 @@ export async function voidPaymentIn(paymentInId: number | string): Promise<{ suc
  * - Supplier payable balance
  * - Purchase Bill due amounts & payment statuses
  * - Cash transactions ledger
- * - Journal entries & ledger account balances
  */
 export async function voidPaymentOut(paymentOutId: number | string): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
@@ -190,25 +173,11 @@ export async function voidPaymentOut(paymentOutId: number | string): Promise<{ s
       }
     }
 
-    // 4. Delete linked Journal Entries
-    const linkedJournals = await db.journalEntries
-      .filter(je => je.referenceId === payment.receiptNumber)
-      .toArray();
-    for (const je of linkedJournals) {
-      if (je.id) {
-        await db.journalEntries.delete(je.id);
-        await syncManager.logMutation('JOURNAL', je.entryNumber, 'DELETE', { id: je.id });
-      }
-    }
-
-    // 5. Delete PaymentOut record itself
+    // 4. Delete PaymentOut record itself
     if (payment.id) {
       await db.paymentOut.delete(payment.id);
       await syncManager.logMutation('PAYMENT_OUT', payment.receiptNumber, 'DELETE', { id: payment.id });
     }
-
-    // 6. Recalculate General Ledger account balances
-    await syncLedgerAccountBalances(tenantId);
 
     return { success: true, message: `Payment-Out ${payment.receiptNumber} successfully voided and rolled back.` };
   } catch (err: any) {
@@ -220,7 +189,6 @@ export async function voidPaymentOut(paymentOutId: number | string): Promise<{ s
 /**
  * Safely voids an Operational Expense record and performs cascade rollbacks across:
  * - Cash transactions ledger
- * - Journal entries & ledger account balances
  */
 export async function voidExpense(expenseId: number | string): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
@@ -230,8 +198,6 @@ export async function voidExpense(expenseId: number | string): Promise<{ success
     if (!exp) {
       return { success: false, error: 'Expense record not found' };
     }
-
-    const tenantId = exp.tenantId || (typeof localStorage !== 'undefined' ? localStorage.getItem('vyapar_current_tenant') : null) || 'default-tenant';
 
     // 1. Delete linked Cash Transactions
     const linkedCashTxns = await db.cashTransactions
@@ -244,25 +210,11 @@ export async function voidExpense(expenseId: number | string): Promise<{ success
       }
     }
 
-    // 2. Delete linked Journal Entries
-    const linkedJournals = await db.journalEntries
-      .filter(je => je.referenceId === exp.expenseNumber)
-      .toArray();
-    for (const je of linkedJournals) {
-      if (je.id) {
-        await db.journalEntries.delete(je.id);
-        await syncManager.logMutation('JOURNAL', je.entryNumber, 'DELETE', { id: je.id });
-      }
-    }
-
-    // 3. Delete Expense record itself
+    // 2. Delete Expense record itself
     if (exp.id) {
       await db.expenses.delete(exp.id);
       await syncManager.logMutation('EXPENSE', exp.expenseNumber, 'DELETE', { id: exp.id });
     }
-
-    // 4. Recalculate General Ledger account balances
-    await syncLedgerAccountBalances(tenantId);
 
     return { success: true, message: `Expense voucher ${exp.expenseNumber} successfully deleted.` };
   } catch (err: any) {
@@ -276,7 +228,6 @@ export async function voidExpense(expenseId: number | string): Promise<{ success
  * - Inventory stock levels (deducts items added by the bill)
  * - Supplier payable balance
  * - Cash transactions ledger (if paid in cash)
- * - Journal entries & ledger account balances
  */
 export async function voidPurchaseBill(purchaseBillId: number | string): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
@@ -286,8 +237,6 @@ export async function voidPurchaseBill(purchaseBillId: number | string): Promise
     if (!bill) {
       return { success: false, error: 'Purchase bill record not found' };
     }
-
-    const tenantId = bill.tenantId || (typeof localStorage !== 'undefined' ? localStorage.getItem('vyapar_current_tenant') : null) || 'default-tenant';
 
     // 1. Revert Inventory Stock Levels (deduct added stock)
     if (bill.items && Array.isArray(bill.items)) {
@@ -328,25 +277,11 @@ export async function voidPurchaseBill(purchaseBillId: number | string): Promise
       }
     }
 
-    // 4. Delete linked Journal Entries
-    const linkedJournals = await db.journalEntries
-      .filter(je => je.referenceId === bill.billNumber)
-      .toArray();
-    for (const je of linkedJournals) {
-      if (je.id) {
-        await db.journalEntries.delete(je.id);
-        await syncManager.logMutation('JOURNAL', je.entryNumber, 'DELETE', { id: je.id });
-      }
-    }
-
-    // 5. Delete PurchaseBill record itself
+    // 4. Delete PurchaseBill record itself
     if (bill.id) {
       await db.purchaseBills.delete(bill.id);
       await syncManager.logMutation('PURCHASE_BILL', bill.billId || String(bill.id), 'DELETE', { id: bill.id });
     }
-
-    // 6. Recalculate General Ledger account balances
-    await syncLedgerAccountBalances(tenantId);
 
     return { success: true, message: `Purchase Bill ${bill.billNumber} successfully voided and stock rolled back.` };
   } catch (err: any) {

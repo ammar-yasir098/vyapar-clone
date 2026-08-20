@@ -95,7 +95,7 @@ async function runHealthAuditTests() {
     const stockAfterBill = (await db.items.get(testItemId))?.currentStock;
     assert(stockAfterBill === 15, 'Stock updated to 15 after Purchase Bill creation');
 
-    // Add cash & journal entries linked to purchase bill
+    // Add cash transaction linked to purchase bill
     await db.cashTransactions.add({
       cashAccountId: 1,
       tenantId: testTenant,
@@ -107,18 +107,6 @@ async function runHealthAuditTests() {
       transactionDate: new Date().toISOString()
     } as any);
 
-    await db.journalEntries.add({
-      tenantId: testTenant,
-      entryNumber: 'JE-AUDIT-PB',
-      referenceId: billNumber,
-      transactionDate: new Date().toISOString().split('T')[0],
-      description: 'Audit PB Journal',
-      lines: [],
-      totalDebit: 1500,
-      totalCredit: 1500,
-      createdAt: new Date().toISOString()
-    } as any);
-
     // Execute voidPurchaseBill
     const pbResult = await voidPurchaseBill(pbId);
     assert(pbResult.success === true, 'voidPurchaseBill executed successfully');
@@ -128,9 +116,6 @@ async function runHealthAuditTests() {
 
     const remainingCashTx = await db.cashTransactions.filter(c => c.referenceId === billNumber).toArray();
     assert(remainingCashTx.length === 0, 'Linked cash transaction deleted after voidPurchaseBill');
-
-    const remainingJe = await db.journalEntries.filter(j => j.referenceId === billNumber).toArray();
-    assert(remainingJe.length === 0, 'Linked journal entry deleted after voidPurchaseBill');
 
     // Clean up Test 2 item
     await db.items.delete(testItemId);
@@ -194,35 +179,9 @@ async function runHealthAuditTests() {
     await db.invoices.delete(invoiceId);
 
     // ----------------------------------------------------
-    // TEST 4: Double-Entry Balance Validation
+    // TEST 4: Sync Journal Pruning
     // ----------------------------------------------------
-    console.log('\n>>> Running Test 4: Double-Entry Balance Validation...');
-    const jeTestNumber = 'JE-BAL-TEST';
-    const jeTestId = await db.journalEntries.add({
-      tenantId: testTenant,
-      entryNumber: jeTestNumber,
-      referenceId: 'REF-BAL',
-      transactionDate: new Date().toISOString().split('T')[0],
-      description: 'Double-entry test',
-      lines: [
-        { accountId: 1, accountCode: '1010', accountName: 'Cash', debit: 5000, credit: 0 },
-        { accountId: 2, accountCode: '4010', accountName: 'Sales', debit: 0, credit: 5000 }
-      ],
-      totalDebit: 5000,
-      totalCredit: 5000,
-      createdAt: new Date().toISOString()
-    } as any);
-
-    const savedJe = await db.journalEntries.get(jeTestId);
-    assert(savedJe !== undefined, 'Journal entry saved successfully');
-    assert(savedJe?.totalDebit === savedJe?.totalCredit, 'Total Debits strictly equal Total Credits (5000 == 5000)');
-
-    await db.journalEntries.delete(jeTestId);
-
-    // ----------------------------------------------------
-    // TEST 5: Sync Journal Pruning
-    // ----------------------------------------------------
-    console.log('\n>>> Running Test 5: Sync Journal Pruning...');
+    console.log('\n>>> Running Test 4: Sync Journal Pruning...');
     const sj1 = await db.syncJournal.add({
       versionId: 9991,
       clientSequence: 1,

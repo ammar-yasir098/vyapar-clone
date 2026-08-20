@@ -16,7 +16,6 @@ import { Party, PartyType, BalanceType, Invoice, BusinessDetails } from '../../t
 import { db } from '../../db';
 import { createServerParty, recordServerPartyPayment, deleteServerParty } from '../../services/api';
 import { syncManager } from '../../services/sync';
-import { postPaymentJournalEntry, syncLedgerAccountBalances } from '../../services/ledger';
 import { useToast } from '../Common/ToastContext';
 
 interface PartiesScreenProps {
@@ -189,10 +188,6 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
           }
         }
       }
-
-      // 3. Post Journal Entry for payment & update Ledger Account balances (Cash in Hand & Accounts Receivable)
-      await postPaymentJournalEntry(party.name, party.type, paymentAmount, paymentRemarks);
-      await syncLedgerAccountBalances();
 
       showToast(`Payment of Rs ${paymentAmount} recorded successfully for ${party.name}!`, 'success');
       setSelectedPartyForPayment(null);

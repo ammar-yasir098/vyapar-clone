@@ -256,24 +256,6 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               }
             }
           }
-        } else if (entityType === 'JOURNAL') {
-          if (payload.entryNumber) {
-            let existing = await JournalEntry.findOne({ where: { entryNumber: payload.entryNumber } });
-            const journalData = {
-              tenantId: tenantId || 'default-tenant',
-              entryNumber: payload.entryNumber,
-              referenceId: payload.referenceId || '',
-              transactionDate: payload.transactionDate || new Date().toISOString().split('T')[0],
-              description: payload.description || '',
-              totalDebit: payload.totalDebit || 0,
-              totalCredit: payload.totalCredit || 0
-            };
-            if (existing) {
-              await existing.update(journalData);
-            } else {
-              await JournalEntry.create(journalData);
-            }
-          }
         } else if (entityType === 'ESTIMATE') {
           const { Estimate, EstimateItem } = await import('../db/sequelize.js');
           if (mutationType === 'DELETE' && payload.id) {

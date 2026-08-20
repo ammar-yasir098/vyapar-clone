@@ -268,30 +268,7 @@ export async function deleteServerPurchaseBill(id: number | string) {
   }
 }
 
-// LEDGER
-export async function fetchServerLedgerAccounts(tenantId?: string) {
-  try {
-    const url = tenantId ? `${API_BASE_URL}/ledger/accounts?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/ledger/accounts`;
-    const res = await fetchWithTimeout(url);
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.data || [];
-  } catch (err) {
-    return [];
-  }
-}
 
-export async function fetchServerJournalEntries(tenantId?: string) {
-  try {
-    const url = tenantId ? `${API_BASE_URL}/ledger/journals?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/ledger/journals`;
-    const res = await fetchWithTimeout(url);
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.data || [];
-  } catch (err) {
-    return [];
-  }
-}
 
 // ESTIMATES
 export async function fetchServerEstimates(tenantId?: string) {

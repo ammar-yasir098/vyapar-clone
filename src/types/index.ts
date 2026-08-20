@@ -104,42 +104,11 @@ export interface Invoice {
   syncStatus: 'PENDING' | 'SYNCED' | 'FAILED';
 }
 
-export interface LedgerAccount {
-  id?: number;
-  tenantId: string;
-  accountCode: string;
-  accountName: string;
-  accountType: AccountType;
-  balance: number; // Positive = Normal balance (Debit for Asset/Expense, Credit for Liab/Equity/Rev)
-  description?: string;
-}
-
-export interface JournalLine {
-  accountId: number;
-  accountCode: string;
-  accountName: string;
-  debit: number;
-  credit: number;
-}
-
-export interface JournalEntry {
-  id?: number;
-  tenantId: string;
-  entryNumber: string; // e.g. JE-2026-0001
-  referenceId: string; // Invoice number or Payment ID
-  transactionDate: string;
-  description: string;
-  lines: JournalLine[];
-  totalDebit: number;
-  totalCredit: number;
-  createdAt: string;
-}
-
 export interface SyncJournal {
   id?: number;
   versionId: string;
   clientSequence: number;
-  entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'JOURNAL' | 'ESTIMATE' | 'PAYMENT_IN' | 'PURCHASE_ORDER' | 'PURCHASE_BILL' | 'PAYMENT_OUT' | 'EXPENSE' | 'PURCHASE_RETURN' | 'SALE_RETURN' | 'CASH_ACCOUNT' | 'CASH_TRANSACTION';
+  entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'ESTIMATE' | 'PAYMENT_IN' | 'PURCHASE_ORDER' | 'PURCHASE_BILL' | 'PAYMENT_OUT' | 'EXPENSE' | 'PURCHASE_RETURN' | 'SALE_RETURN' | 'CASH_ACCOUNT' | 'CASH_TRANSACTION';
   entityId: string;
   mutationType: 'INSERT' | 'UPDATE' | 'DELETE';
   payload: string; // JSON string

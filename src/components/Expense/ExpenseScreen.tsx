@@ -125,42 +125,7 @@ export const ExpenseScreen: React.FC<ExpenseScreenProps> = ({
         });
       }
 
-      // 2. Deduct from Cash/Bank Account Balance in db.ledgerAccounts
-      const accounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === activeTenantId).toArray();
-      const cashAccount = accounts.find(a => a.accountCode === (paymentMode === 'CASH' ? '1010' : '1020')) || accounts[0];
-      const expenseAcc = accounts.find(a => a.accountType === 'EXPENSE') || accounts.find(a => a.accountCode === '5010') || accounts[0];
-
-      if (cashAccount && cashAccount.id) {
-        const newCashBal = (cashAccount.balance || 0) - amount;
-        await db.ledgerAccounts.update(cashAccount.id, { balance: newCashBal });
-      }
-
-      if (expenseAcc && expenseAcc.id) {
-        const newExpBal = (expenseAcc.balance || 0) + amount;
-        await db.ledgerAccounts.update(expenseAcc.id, { balance: newExpBal });
-      }
-
-      // 3. Post Double-Entry Journal Entry (Debit: Operating Expense, Credit: Cash/Bank)
-      const entryNumber = `JE-EXP-${Date.now().toString().slice(-4)}`;
-      const journalEntry = {
-        tenantId: activeTenantId,
-        entryNumber,
-        referenceId: expenseNumber,
-        transactionDate: expenseDate,
-        description: `Operating Expense (${finalCategory}): ${notes || 'Voucher ' + expenseNumber}`,
-        lines: [
-          { accountId: expenseAcc?.id || 1, accountCode: expenseAcc?.accountCode || '5010', accountName: `Operating Expense (${finalCategory})`, debit: amount, credit: 0 },
-          { accountId: cashAccount?.id || 2, accountCode: cashAccount?.accountCode || '1010', accountName: cashAccount?.accountName || 'Cash in Hand', debit: 0, credit: amount }
-        ],
-        totalDebit: amount,
-        totalCredit: amount,
-        createdAt: new Date().toISOString()
-      };
-
-      const jeId = await db.journalEntries.add(journalEntry);
-      await syncManager.logMutation('JOURNAL', entryNumber, 'INSERT', { ...journalEntry, id: jeId });
-
-      // 4. Send to Cloud PostgreSQL server API
+      // 2. Send to Cloud PostgreSQL server API
       try {
         await createServerExpense(newExpense);
       } catch (err) {

@@ -206,42 +206,7 @@ export const PaymentOutScreen: React.FC<PaymentOutScreenProps> = ({
         }
       }
 
-      // 3. Update Ledger Accounts (Accounts Payable credit balance reduced, Cash/Bank reduced)
-      const accounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === activeTenantId).toArray();
-      const apAccount = accounts.find(a => a.accountCode === '2010') || accounts[0];
-      const cashAccount = accounts.find(a => a.accountCode === (paymentMethod === 'CASH' ? '1010' : '1020')) || accounts[0];
-
-      if (apAccount && apAccount.id) {
-        const newApBal = Math.max(0, (apAccount.balance || 0) - amount);
-        await db.ledgerAccounts.update(apAccount.id, { balance: newApBal });
-      }
-
-      if (cashAccount && cashAccount.id) {
-        const newCashBal = (cashAccount.balance || 0) - amount;
-        await db.ledgerAccounts.update(cashAccount.id, { balance: newCashBal });
-      }
-
-      // 4. Post Journal Entry
-      const entryNumber = `JE-PAYOUT-${Date.now().toString().slice(-4)}`;
-      const journalEntry = {
-        tenantId: activeTenantId,
-        entryNumber,
-        referenceId: receiptNumber,
-        transactionDate: paymentDate,
-        description: `Payment-Out voucher ${receiptNumber} paid to ${selectedParty.name} via ${paymentMethod}`,
-        lines: [
-          { accountId: apAccount?.id || 1, accountCode: apAccount?.accountCode || '2010', accountName: `Accounts Payable (${selectedParty.name})`, debit: amount, credit: 0 },
-          { accountId: cashAccount?.id || 2, accountCode: cashAccount?.accountCode || '1010', accountName: cashAccount?.accountName || 'Cash in Hand', debit: 0, credit: amount }
-        ],
-        totalDebit: amount,
-        totalCredit: amount,
-        createdAt: new Date().toISOString()
-      };
-
-      const jeId = await db.journalEntries.add(journalEntry);
-      await syncManager.logMutation('JOURNAL', entryNumber, 'INSERT', { ...journalEntry, id: jeId });
-
-      // 5. Send to Cloud PostgreSQL server API
+      // 3. Send to Cloud PostgreSQL server API
       try {
         await createServerPaymentOut(newPayment);
       } catch (err) {

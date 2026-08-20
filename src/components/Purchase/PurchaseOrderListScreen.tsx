@@ -176,38 +176,7 @@ export const PurchaseOrderListScreen: React.FC<PurchaseOrderListScreenProps> = (
           await syncManager.logMutation('PARTY', String(supplier.id), 'UPDATE', { id: supplier.id, currentBalance: newBal });
         }
 
-        // 3. Post Double-Entry Journal Entry
-        const accounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === currentTenantId).toArray();
-        const invAcc = accounts.find(a => a.accountCode === '1040') || accounts[0];
-        const apAcc = accounts.find(a => a.accountCode === '2010') || accounts[0];
-
-        const entryNumber = `JE-PUR-${Date.now().toString().slice(-4)}`;
-        const journalEntry = {
-          tenantId: currentTenantId,
-          entryNumber,
-          referenceId: billNumber,
-          transactionDate: billDate,
-          description: `Converted Purchase Order ${po.poNumber} to Purchase Bill ${billNumber}`,
-          lines: [
-            { accountId: invAcc?.id || 1, accountCode: invAcc?.accountCode || '1040', accountName: invAcc?.accountName || 'Inventory Asset', debit: po.grandTotal, credit: 0 },
-            { accountId: apAcc?.id || 2, accountCode: apAcc?.accountCode || '2010', accountName: `Accounts Payable (${supplier.name})`, debit: 0, credit: po.grandTotal }
-          ],
-          totalDebit: po.grandTotal,
-          totalCredit: po.grandTotal,
-          createdAt: new Date().toISOString()
-        };
-
-        const jeId = await db.journalEntries.add(journalEntry);
-        await syncManager.logMutation('JOURNAL', entryNumber, 'INSERT', { ...journalEntry, id: jeId });
-
-        if (invAcc && invAcc.id) {
-          await db.ledgerAccounts.update(invAcc.id, { balance: (invAcc.balance || 0) + po.grandTotal });
-        }
-        if (apAcc && apAcc.id) {
-          await db.ledgerAccounts.update(apAcc.id, { balance: (apAcc.balance || 0) + po.grandTotal });
-        }
-
-        // 4. Update PO status to CONVERTED in Dexie & PostgreSQL
+        // 3. Update PO status to CONVERTED in Dexie & PostgreSQL
         if (po.id) {
           await db.purchaseOrders.update(po.id, { status: 'CONVERTED', updatedAt: new Date().toISOString() });
           await updateServerPOStatus(po.id, 'CONVERTED');

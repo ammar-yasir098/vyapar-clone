@@ -17,7 +17,6 @@ import { PaymentIn, Party, Invoice, BusinessDetails } from '../../types';
 import { db } from '../../db';
 import { createServerPaymentIn, recordServerPartyPayment } from '../../services/api';
 import { syncManager } from '../../services/sync';
-import { postPaymentJournalEntry, syncLedgerAccountBalances } from '../../services/ledger';
 import { recordCashEntry } from '../../services/cash';
 import { useToast } from '../Common/ToastContext';
 
@@ -207,11 +206,7 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
         }
       }
 
-      // 4. Post Accounting Journal Entry & recalculate General Ledger balances
-      await postPaymentJournalEntry(party.name, 'CUSTOMER', amount, notes || `Payment-In via ${paymentMethod}`);
-      await syncLedgerAccountBalances(activeTenantId);
-
-      // 5. Send API request to Server
+      // 4. Send API request to Server
       await createServerPaymentIn(newPayment);
 
       showToast(`Payment of Rs. ${amount.toFixed(2)} recorded successfully for ${party.name}!`, 'success');

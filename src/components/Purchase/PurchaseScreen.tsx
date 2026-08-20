@@ -194,40 +194,6 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       await syncManager.logMutation('PARTY', String(selectedSupplier.id), 'UPDATE', { id: selectedSupplier.id, currentBalance: newBal });
     }
 
-    // 3. Post Double-Entry Journal Entry & Update Ledger Accounts
-    const accounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === currentTenantId).toArray();
-    const invAcc = accounts.find(a => a.accountCode === '1040') || accounts[0];
-    const apAcc = accounts.find(a => a.accountCode === '2010') || accounts[0];
-
-    const suppName = selectedSupplier?.name || 'Supplier';
-    const entryNumber = `JE-PUR-${Date.now().toString().slice(-4)}`;
-    const journalEntry = {
-      tenantId: currentTenantId,
-      entryNumber,
-      referenceId: billNumber,
-      transactionDate: billDate,
-      description: `Purchase Inward Bill ${billNumber} from ${suppName}`,
-      lines: [
-        { accountId: invAcc?.id || 1, accountCode: invAcc?.accountCode || '1040', accountName: invAcc?.accountName || 'Inventory Asset', debit: totalAmount, credit: 0 },
-        { accountId: apAcc?.id || 2, accountCode: apAcc?.accountCode || '2010', accountName: `Accounts Payable (${suppName})`, debit: 0, credit: totalAmount }
-      ],
-      totalDebit: totalAmount,
-      totalCredit: totalAmount,
-      createdAt: new Date().toISOString()
-    };
-
-    const jeId = await db.journalEntries.add(journalEntry);
-    await syncManager.logMutation('JOURNAL', entryNumber, 'INSERT', { ...journalEntry, id: jeId });
-
-    if (invAcc && invAcc.id) {
-      const newInvBal = (invAcc.balance || 0) + totalAmount;
-      await db.ledgerAccounts.update(invAcc.id, { balance: newInvBal });
-    }
-    if (apAcc && apAcc.id) {
-      const newApBal = (apAcc.balance || 0) + totalAmount;
-      await db.ledgerAccounts.update(apAcc.id, { balance: newApBal });
-    }
-
     // 4. Send to PostgreSQL backend REST API
     if (selectedSupplier) {
       await createServerPurchase({

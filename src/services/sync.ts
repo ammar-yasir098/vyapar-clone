@@ -132,21 +132,7 @@ class ClientSyncManager {
           }
         }
 
-        const localJournals = await db.journalEntries.filter(j => (j.tenantId || 'default-tenant') === tId).toArray();
-        for (const je of localJournals) {
-          if (je.id || je.entryNumber) {
-            await db.syncJournal.add({
-              versionId: `client-v-${Date.now()}-je-${je.id || je.entryNumber}`,
-              clientSequence: Date.now(),
-              entityType: 'JOURNAL',
-              entityId: String(je.id || je.entryNumber),
-              mutationType: 'INSERT',
-              payload: JSON.stringify(je),
-              timestamp: new Date().toISOString(),
-              synced: false
-            });
-          }
-        }
+
 
         const localEstimates = await db.estimates.filter(e => (e.tenantId || 'default-tenant') === tId).toArray();
         for (const est of localEstimates) {

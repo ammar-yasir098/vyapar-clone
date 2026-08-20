@@ -1,13 +1,11 @@
 import Dexie, { Table } from 'dexie';
-import { Item, Party, Invoice, SyncJournal, BusinessDetails, LedgerAccount, JournalEntry, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock, PurchaseOrder, PurchaseBill, PaymentOut, Expense, PurchaseReturn, SaleReturn, CashAccount, CashTransaction } from '../types';
+import { Item, Party, Invoice, SyncJournal, BusinessDetails, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock, PurchaseOrder, PurchaseBill, PaymentOut, Expense, PurchaseReturn, SaleReturn, CashAccount, CashTransaction } from '../types';
 
 export class VyaparDatabase extends Dexie {
   items!: Table<Item, number>;
   parties!: Table<Party, number>;
   invoices!: Table<Invoice, number>;
   syncJournal!: Table<SyncJournal, number>;
-  ledgerAccounts!: Table<LedgerAccount, number>;
-  journalEntries!: Table<JournalEntry, number>;
   companyProfiles!: Table<CompanyProfileEntity, number>;
   estimates!: Table<Estimate, number>;
   paymentIn!: Table<PaymentIn, number>;
@@ -29,8 +27,6 @@ export class VyaparDatabase extends Dexie {
       parties: '++id, name, phone, type, tenantId',
       invoices: '++id, invoiceId, invoiceNumber, invoiceDate, paymentStatus, partyId, syncStatus, tenantId',
       syncJournal: '++id, versionId, clientSequence, entityType, timestamp, synced',
-      ledgerAccounts: '++id, accountCode, accountName, accountType, tenantId',
-      journalEntries: '++id, entryNumber, referenceId, transactionDate, tenantId',
       companyProfiles: '++id, &tenantId, name',
       estimates: '++id, estimateId, estimateNumber, estimateDate, partyId, tenantId',
       paymentIn: '++id, receiptNumber, partyId, paymentDate, tenantId',
@@ -60,28 +56,6 @@ export const DEFAULT_BUSINESS: BusinessDetails = {
 };
 
 /**
- * Seeds standard 10 Chart of Accounts for a specific store tenant if not present.
- */
-export async function seedLedgerAccountsForTenant(tenantId: string) {
-  if (!tenantId) return;
-  const existingAccounts = await db.ledgerAccounts.filter(a => a.tenantId === tenantId).toArray();
-  if (existingAccounts.length === 0) {
-    await db.ledgerAccounts.bulkAdd([
-      { tenantId, accountCode: '1010', accountName: 'Cash in Hand', accountType: 'ASSET', balance: 0.00, description: 'Physical cash at POS counter' },
-      { tenantId, accountCode: '1020', accountName: 'HDFC Bank Account', accountType: 'ASSET', balance: 0.00, description: 'Operating bank account for UPI/Card' },
-      { tenantId, accountCode: '1030', accountName: 'Accounts Receivable', accountType: 'ASSET', balance: 0.00, description: 'Customer credit receivables' },
-      { tenantId, accountCode: '1040', accountName: 'Merchandise Inventory Asset', accountType: 'ASSET', balance: 0.00, description: 'Total inventory stock value at cost' },
-      { tenantId, accountCode: '2010', accountName: 'Accounts Payable', accountType: 'LIABILITY', balance: 0.00, description: 'Supplier payables' },
-      { tenantId, accountCode: '2020', accountName: 'GST Output Tax Liability', accountType: 'LIABILITY', balance: 0.00, description: 'Collected GST payable to tax authority' },
-      { tenantId, accountCode: '3010', accountName: 'Owner Equity Capital', accountType: 'EQUITY', balance: 0.00, description: 'Initial owner capital investment' },
-      { tenantId, accountCode: '4010', accountName: 'Sales Revenue', accountType: 'REVENUE', balance: 0.00, description: 'Gross merchandise sales revenue' },
-      { tenantId, accountCode: '5010', accountName: 'Cost of Goods Sold (COGS)', accountType: 'EXPENSE', balance: 0.00, description: 'Purchase cost of goods sold' },
-      { tenantId, accountCode: '5020', accountName: 'Sales Discounts Allowed', accountType: 'EXPENSE', balance: 0.00, description: 'Discounts granted to customers' }
-    ]);
-  }
-}
-
-/**
  * Seeds default Walk-in Retail Customer for a specific store tenant if not present.
  * Automatically purges any duplicate Walk-in customer entries for that store.
  */
@@ -103,7 +77,6 @@ export async function seedWalkInCustomerForTenant(tenantId: string) {
       createdAt: new Date().toISOString()
     });
   } else if (walkIns.length > 1) {
-    // Delete duplicate entries, keeping only the first one
     for (let i = 1; i < walkIns.length; i++) {
       if (walkIns[i].id) {
         await db.parties.delete(walkIns[i].id!);
@@ -129,36 +102,23 @@ export async function seedCashAccountForTenant(tenantId: string) {
 }
 
 /**
- * Initializes structural necessities: Chart of Accounts, Walk-in customer, and Main Cash Drawer with ZERO pre-loaded items or suppliers.
+ * Initializes structural necessities: Walk-in customer and Main Cash Drawer for a store tenant.
  */
 export async function seedDatabaseIfEmpty(tenantId?: string) {
-  const tId = tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+  const tId = tenantId || (typeof localStorage !== 'undefined' ? localStorage.getItem('vyapar_current_tenant') : null) || 'default-tenant';
 
-  await seedLedgerAccountsForTenant(tId);
   await seedWalkInCustomerForTenant(tId);
   await seedCashAccountForTenant(tId);
-
-  // Deduplicate any duplicate ledger accounts by accountCode
-  const allLedgerAccs = await db.ledgerAccounts.toArray();
-  const seenAccCodes = new Set<string>();
-  for (const acc of allLedgerAccs) {
-    if (seenAccCodes.has(acc.accountCode)) {
-      if (acc.id) await db.ledgerAccounts.delete(acc.id);
-    } else {
-      seenAccCodes.add(acc.accountCode);
-    }
-  }
 }
 
 /**
- * Wipes all local store data (items, parties, invoices, journal entries) and resets to clean slate.
+ * Wipes all local store data and resets to clean slate.
  */
 export async function clearAllDatabaseData() {
   await db.items.clear();
   await db.parties.clear();
   await db.invoices.clear();
   await db.syncJournal.clear();
-  await db.journalEntries.clear();
   await db.estimates.clear();
   await db.paymentIn.clear();
   await db.itemRestocks.clear();
@@ -170,21 +130,15 @@ export async function clearAllDatabaseData() {
   await db.saleReturns.clear();
   await db.cashTransactions.clear();
   await db.cashAccounts.clear();
-  
-  // Reset account balances to 0 in local Dexie IndexedDB
-  const accounts = await db.ledgerAccounts.toArray();
-  for (const acc of accounts) {
-    if (acc.id) {
-      await db.ledgerAccounts.update(acc.id, { balance: 0 });
-    }
-  }
 
-  // Call server API to reset PostgreSQL tables and reset ledger balances to 0
+  // Call server API to reset PostgreSQL tables
   try {
     await fetch('http://localhost:5000/api/v1/sync/reset', { method: 'POST' });
   } catch (err) {
     console.warn('Server reset notification warning:', err);
   }
 
-  window.location.reload();
+  if (typeof window !== 'undefined') {
+    window.location.reload();
+  }
 }

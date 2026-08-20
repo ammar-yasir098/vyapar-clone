@@ -17,7 +17,6 @@ import {
 } from 'lucide-react';
 import { Item, Party, InvoiceItem, Invoice, PaymentMethod, BusinessDetails } from '../../types';
 import { db } from '../../db';
-import { postInvoiceJournalEntry } from '../../services/ledger';
 import { printA4TaxInvoice, buildWhatsAppInvoiceLink } from '../../services/pdfInvoice';
 import { createServerInvoice } from '../../services/api';
 import { syncManager } from '../../services/sync';
@@ -287,10 +286,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
       }
     }
 
-    // 3. Post Double-Entry Journal Entry
-    await postInvoiceJournalEntry(newInvoice);
-
-    // 4. Send to PostgreSQL backend REST API asynchronously
+    // 3. Send to PostgreSQL backend REST API asynchronously
     createServerInvoice(newInvoice);
 
     // 5. Trigger Thermal Print

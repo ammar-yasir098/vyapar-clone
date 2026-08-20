@@ -212,54 +212,6 @@ InvoiceItem.init(
 Invoice.hasMany(InvoiceItem, { foreignKey: 'invoiceId', as: 'items' });
 InvoiceItem.belongsTo(Invoice, { foreignKey: 'invoiceId' });
 
-// 6. JournalEntry Model
-export class JournalEntry extends Model {
-  declare id: number;
-  declare tenantId: string;
-  declare entryNumber: string;
-  declare referenceId: string;
-  declare transactionDate: string;
-  declare description: string;
-  declare totalDebit: number;
-  declare totalCredit: number;
-}
-JournalEntry.init(
-  {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-    tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
-    entryNumber: { type: DataTypes.STRING, allowNull: false, field: 'entry_number' },
-    referenceId: { type: DataTypes.STRING, allowNull: true, field: 'reference_id' },
-    transactionDate: { type: DataTypes.DATEONLY, allowNull: false, field: 'transaction_date' },
-    description: { type: DataTypes.TEXT, allowNull: true },
-    totalDebit: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'total_debit' },
-    totalCredit: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'total_credit' }
-  },
-  { sequelize, modelName: 'JournalEntry', tableName: 'journal_entries', timestamps: false }
-);
-
-// 7. LedgerAccount Model
-export class LedgerAccount extends Model {
-  declare id: number;
-  declare tenantId: string;
-  declare accountCode: string;
-  declare accountName: string;
-  declare accountType: string;
-  declare balance: number;
-  declare description: string;
-}
-LedgerAccount.init(
-  {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-    tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
-    accountCode: { type: DataTypes.STRING, allowNull: false, field: 'account_code' },
-    accountName: { type: DataTypes.STRING, allowNull: false, field: 'account_name' },
-    accountType: { type: DataTypes.STRING, defaultValue: 'ASSET', field: 'account_type' },
-    balance: { type: DataTypes.FLOAT, defaultValue: 0.0 },
-    description: { type: DataTypes.TEXT, allowNull: true }
-  },
-  { sequelize, modelName: 'LedgerAccount', tableName: 'ledger_accounts', timestamps: false }
-);
-
 // 8. Estimate & EstimateItem Models
 export class Estimate extends Model {
   declare id: number;
@@ -679,33 +631,6 @@ SaleReturnItem.init(
 SaleReturn.hasMany(SaleReturnItem, { foreignKey: 'saleReturnId', as: 'items', onDelete: 'CASCADE' });
 SaleReturnItem.belongsTo(SaleReturn, { foreignKey: 'saleReturnId' });
 
-/**
- * Seeds standard Chart of Accounts in PostgreSQL if empty
- */
-export async function seedServerLedgerAccounts(tenantId: string = 'default-tenant') {
-  try {
-    const count = await LedgerAccount.count({ where: { tenantId } });
-    if (count === 0) {
-      console.log(`🌱 Seeding PostgreSQL Chart of Accounts for tenant '${tenantId}'...`);
-      await LedgerAccount.bulkCreate([
-        { tenantId, accountCode: '1010', accountName: 'Cash in Hand', accountType: 'ASSET', balance: 0.0, description: 'Physical cash at POS counter' },
-        { tenantId, accountCode: '1020', accountName: 'HDFC Bank Account', accountType: 'ASSET', balance: 0.0, description: 'Operating bank account for UPI/Card' },
-        { tenantId, accountCode: '1030', accountName: 'Accounts Receivable', accountType: 'ASSET', balance: 0.0, description: 'Customer credit receivables' },
-        { tenantId, accountCode: '1040', accountName: 'Merchandise Inventory Asset', accountType: 'ASSET', balance: 0.0, description: 'Total inventory stock value at cost' },
-        { tenantId, accountCode: '2010', accountName: 'Accounts Payable', accountType: 'LIABILITY', balance: 0.0, description: 'Supplier payables' },
-        { tenantId, accountCode: '2020', accountName: 'GST Output Tax Liability', accountType: 'LIABILITY', balance: 0.0, description: 'Collected GST payable to tax authority' },
-        { tenantId, accountCode: '3010', accountName: 'Owner Equity Capital', accountType: 'EQUITY', balance: 0.0, description: 'Initial owner capital investment' },
-        { tenantId, accountCode: '4010', accountName: 'Sales Revenue', accountType: 'REVENUE', balance: 0.0, description: 'Gross merchandise sales revenue' },
-        { tenantId, accountCode: '5010', accountName: 'Cost of Goods Sold (COGS)', accountType: 'EXPENSE', balance: 0.0, description: 'Purchase cost of goods sold' },
-        { tenantId, accountCode: '5020', accountName: 'Sales Discounts Allowed', accountType: 'EXPENSE', balance: 0.0, description: 'Discounts granted to customers' }
-      ]);
-      console.log(`✅ PostgreSQL Chart of Accounts seeded successfully for '${tenantId}'.`);
-    }
-  } catch (err) {
-    console.error('Error seeding Ledger Accounts:', err);
-  }
-}
-
 // 21. CashAccount Model
 export class CashAccount extends Model {
   declare id: number;
@@ -787,10 +712,13 @@ export async function bootstrapSequelize() {
     await sequelize.authenticate();
     console.log(`✅ Sequelize ORM successfully authenticated with PostgreSQL database '${databaseName}'`);
 
+    // Drop legacy general ledger tables if present in PostgreSQL
+    await sequelize.query(`DROP TABLE IF EXISTS "journal_entries" CASCADE;`).catch(() => {});
+    await sequelize.query(`DROP TABLE IF EXISTS "ledger_accounts" CASCADE;`).catch(() => {});
+
     // Sync ORM models with PostgreSQL tables
     await sequelize.sync({ alter: true });
-    await seedServerLedgerAccounts();
-    console.log(`✨ Sequelize Migration Complete: Database tables (company_profile, items, parties, invoices, invoice_items, journal_entries, ledger_accounts) ready!`);
+    console.log(`✨ Sequelize Migration Complete: Document-driven database tables ready!`);
     isSequelizeConnected = true;
   } catch (err: any) {
     console.warn(`⚠️ Sequelize Connection Warning: ${err.message}`);
