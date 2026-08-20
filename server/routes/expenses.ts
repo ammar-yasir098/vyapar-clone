@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { Op } from 'sequelize';
-import { Expense, JournalEntry, CashAccount, CashTransaction, isDbConnected, sequelize } from '../db/sequelize.js';
+import { Expense, CashAccount, CashTransaction, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const expensesRouter = Router();
 
@@ -58,16 +57,7 @@ expensesRouter.post('/', async (req: Request, res: Response) => {
           notes
         }, { transaction: t });
 
-        // Post Journal Entry in PostgreSQL
-        await JournalEntry.create({
-          tenantId,
-          entryNumber: `JE-EXP-${Date.now().toString().slice(-4)}`,
-          referenceId: expNum,
-          transactionDate: expenseDate || new Date().toISOString().split('T')[0],
-          description: `Operating Expense (${categoryName}): ${notes || 'Voucher ' + expNum}`,
-          totalDebit: Number(amount),
-          totalCredit: Number(amount)
-        }, { transaction: t });
+
 
         // Post Cash Outflow Entry if Expense is paid in CASH
         if (paymentMode === 'CASH' && Number(amount) > 0) {

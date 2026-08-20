@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { Op } from 'sequelize';
-import { Invoice, InvoiceItem, Item, Party, JournalEntry, CashAccount, CashTransaction, isDbConnected, sequelize } from '../db/sequelize.js';
+import { Invoice, InvoiceItem, Item, Party, CashAccount, CashTransaction, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const invoicesRouter = Router();
 
@@ -175,19 +174,7 @@ invoicesRouter.post('/', async (req: Request, res: Response) => {
           }
         }
 
-        // 5. Post Journal Entry
-        await JournalEntry.create(
-          {
-            tenantId,
-            entryNumber: `JE-SAL-${Date.now().toString().slice(-4)}`,
-            referenceId: invoiceNumber,
-            transactionDate: invoiceDate,
-            description: `Sales Invoice ${invoiceNumber} to ${partyName}`,
-            totalDebit: grandTotal,
-            totalCredit: grandTotal
-          },
-          { transaction: t }
-        );
+
 
         // 6. Post Cash Inflow Entry if Cash Payment Received
         if (paymentMethod === 'CASH' && safeReceivedAmount > 0) {

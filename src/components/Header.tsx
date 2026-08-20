@@ -11,7 +11,9 @@ import {
   Check,
   Store,
   X,
-  Trash2
+  Trash2,
+  LogOut,
+  User as UserIcon
 } from 'lucide-react';
 import { BusinessDetails } from '../types';
 import { syncManager, SyncStatus } from '../services/sync';
@@ -20,6 +22,7 @@ interface HeaderProps {
   business: BusinessDetails;
   companies?: BusinessDetails[];
   currentTenantId?: string;
+  userSession?: { fullName: string; email: string; role?: string } | null;
   itemCount: number;
   invoiceCount: number;
   activeTab: string;
@@ -29,6 +32,7 @@ interface HeaderProps {
   onSelectCompany?: (tenantId: string) => void;
   onCreateCompany?: (newCompany: Partial<BusinessDetails>) => void;
   onDeleteCompany?: (tenantId: string, companyName: string) => void;
+  onSignOut?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -43,7 +47,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSyncModal,
   onSelectCompany,
   onCreateCompany,
-  onDeleteCompany
+  onDeleteCompany,
+  userSession,
+  onSignOut
 }) => {
   const [time, setTime] = useState<string>('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -242,6 +248,28 @@ export const Header: React.FC<HeaderProps> = ({
                   <Building2 className="w-3.5 h-3.5" />
                   <span>Edit Company Details</span>
                 </button>
+
+                {userSession && (
+                  <div className="pt-2 border-t border-slate-100 mt-1 flex flex-col gap-1.5">
+                    <div className="px-3 py-2 bg-slate-50 rounded-xl flex items-center justify-between">
+                      <div className="min-w-0 pr-2">
+                        <div className="text-xs font-bold text-slate-900 truncate">{userSession.fullName || 'User'}</div>
+                        <div className="text-[10px] text-slate-500 font-mono truncate">{userSession.email}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsDropdownOpen(false);
+                          if (onSignOut) onSignOut();
+                        }}
+                        className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11px] font-extrabold rounded-lg transition flex items-center gap-1 cursor-pointer shrink-0 border border-rose-200/60"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Sign Out</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -331,6 +359,26 @@ export const Header: React.FC<HeaderProps> = ({
           <Clock className="w-3.5 h-3.5 text-slate-500" />
           <span>{time}</span>
         </div>
+
+        {/* Logged in User Pill & Sign Out */}
+        {userSession && (
+          <div className="hidden lg:flex items-center gap-2 pl-1 border-l border-slate-200">
+            <div className="flex items-center gap-1.5 bg-slate-100/90 text-slate-800 px-2.5 py-1 rounded-xl text-xs font-bold border border-slate-200" title={userSession.email}>
+              <UserIcon className="w-3.5 h-3.5 text-blue-600" />
+              <span className="max-w-[110px] truncate">{userSession.fullName || userSession.email}</span>
+            </div>
+            {onSignOut && (
+              <button
+                type="button"
+                onClick={onSignOut}
+                title="Sign Out Account"
+                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
+              >
+                <LogOut className="w-4 h-4 stroke-[2.5]" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* CREATE NEW COMPANY MODAL */}

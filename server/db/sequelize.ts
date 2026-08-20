@@ -31,9 +31,37 @@ export function isDbConnected(): boolean {
   return isSequelizeConnected;
 }
 
+// 0. User Model
+export class User extends Model {
+  declare id: number;
+  declare userId: string;
+  declare tenantId: string;
+  declare fullName: string;
+  declare email: string;
+  declare phone: string;
+  declare passwordHash: string;
+  declare role: string;
+  declare createdAt: Date;
+  declare updatedAt: Date;
+}
+User.init(
+  {
+    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    userId: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'user_id' },
+    tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
+    fullName: { type: DataTypes.STRING, allowNull: false, field: 'full_name' },
+    email: { type: DataTypes.STRING, allowNull: false, unique: true },
+    phone: { type: DataTypes.STRING, defaultValue: '' },
+    passwordHash: { type: DataTypes.STRING, allowNull: false, field: 'password_hash' },
+    role: { type: DataTypes.STRING, defaultValue: 'OWNER' }
+  },
+  { sequelize, modelName: 'User', tableName: 'users', timestamps: true }
+);
+
 // 1. CompanyProfile Model
 export class CompanyProfile extends Model {
   declare id: number;
+  declare userId: string;
   declare tenantId: string;
   declare name: string;
   declare phone: string;
@@ -50,6 +78,7 @@ export class CompanyProfile extends Model {
 CompanyProfile.init(
   {
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    userId: { type: DataTypes.STRING, allowNull: true, field: 'user_id' },
     tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
     name: { type: DataTypes.STRING, defaultValue: 'SuperMarket Retail & Traders' },
     phone: { type: DataTypes.STRING, defaultValue: '+92 300 xxxxxxx' },

@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { Op } from 'sequelize';
-import { Item, Party, JournalEntry, PurchaseReturn, PurchaseReturnItem, isDbConnected, sequelize } from '../db/sequelize.js';
+import { Item, Party, PurchaseReturn, PurchaseReturnItem, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const purchaseReturnsRouter = Router();
 
@@ -114,16 +113,7 @@ purchaseReturnsRouter.post('/', async (req: Request, res: Response) => {
           }
         }
 
-        // 4. Insert Journal Entry in journal_entries table
-        await JournalEntry.create({
-          tenantId,
-          entryNumber: `JE-DN-${Date.now().toString().slice(-4)}`,
-          referenceId: debitNoteNumber,
-          transactionDate: returnDate,
-          description: `Purchase Return / Debit Note ${debitNoteNumber} to ${supplierName}`,
-          totalDebit: totalReturnAmount,
-          totalCredit: totalReturnAmount
-        }, { transaction: t });
+
 
         await t.commit();
 

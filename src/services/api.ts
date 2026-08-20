@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:5000/api/v1';
+export const API_BASE_URL = 'http://localhost:5000/api/v1';
 
 let cachedServerOnline: boolean | null = null;
 let lastCheckTime = 0;
@@ -58,9 +58,15 @@ export async function fetchServerCompanyProfile(tenantId = 'default-tenant') {
   }
 }
 
-export async function fetchServerAllCompanies() {
+export async function fetchServerAllCompanies(userId?: string, tenantId?: string) {
   try {
-    const res = await fetchWithTimeout(`${API_BASE_URL}/company/all`);
+    let url = `${API_BASE_URL}/company/all`;
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (tenantId) params.append('tenantId', tenantId);
+    if (params.toString()) url += `?${params.toString()}`;
+
+    const res = await fetchWithTimeout(url);
     if (!res.ok) return [];
     const json = await res.json();
     return Array.isArray(json.data) ? json.data : [];

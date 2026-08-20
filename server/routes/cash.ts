@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { Op } from 'sequelize';
-import { CashAccount, CashTransaction, JournalEntry, LedgerAccount, isDbConnected, sequelize } from '../db/sequelize.js';
+import { CashAccount, CashTransaction, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const cashRouter = Router();
 
@@ -385,34 +385,6 @@ cashRouter.post('/transfer-to-bank', async (req: Request, res: Response) => {
           { transaction: t }
         );
 
-        // Update Ledger Accounts in PostgreSQL (Debit Bank 1020, Credit Cash 1010)
-        const cashAccountLedger = await LedgerAccount.findOne({ where: { accountCode: '1010' }, transaction: t });
-        if (cashAccountLedger) {
-          const cur = round2(cashAccountLedger.get('balance') || 0);
-          await cashAccountLedger.update({ balance: round2(cur - safeAmt) }, { transaction: t });
-        }
-
-        const bankAccountLedger = await LedgerAccount.findOne({ where: { accountCode: '1020' }, transaction: t });
-        if (bankAccountLedger) {
-          const cur = round2(bankAccountLedger.get('balance') || 0);
-          await bankAccountLedger.update({ balance: round2(cur + safeAmt) }, { transaction: t });
-        }
-
-        const validDateStr = (date && typeof date === 'string' ? date : new Date().toISOString()).split('T')[0];
-
-        await JournalEntry.create(
-          {
-            tenantId,
-            entryNumber: `JE-DEP-${Date.now().toString().slice(-4)}`,
-            referenceId: refId,
-            transactionDate: validDateStr,
-            description: txDesc,
-            totalDebit: safeAmt,
-            totalCredit: safeAmt
-          },
-          { transaction: t }
-        );
-
         await t.commit();
         return res.status(201).json({ success: true, message: 'Cash successfully deposited into bank account', data: cashTx });
       } catch (err: any) {
@@ -459,34 +431,6 @@ cashRouter.post('/transfer-from-bank', async (req: Request, res: Response) => {
             referenceId: refId,
             description: txDesc,
             transactionDate: date
-          },
-          { transaction: t }
-        );
-
-        // Update Ledger Accounts in PostgreSQL (Debit Cash 1010, Credit Bank 1020)
-        const cashAccountLedger = await LedgerAccount.findOne({ where: { accountCode: '1010' }, transaction: t });
-        if (cashAccountLedger) {
-          const cur = round2(cashAccountLedger.get('balance') || 0);
-          await cashAccountLedger.update({ balance: round2(cur + safeAmt) }, { transaction: t });
-        }
-
-        const bankAccountLedger = await LedgerAccount.findOne({ where: { accountCode: '1020' }, transaction: t });
-        if (bankAccountLedger) {
-          const cur = round2(bankAccountLedger.get('balance') || 0);
-          await bankAccountLedger.update({ balance: round2(cur - safeAmt) }, { transaction: t });
-        }
-
-        const validDateStr = (date && typeof date === 'string' ? date : new Date().toISOString()).split('T')[0];
-
-        await JournalEntry.create(
-          {
-            tenantId,
-            entryNumber: `JE-WTH-${Date.now().toString().slice(-4)}`,
-            referenceId: refId,
-            transactionDate: validDateStr,
-            description: txDesc,
-            totalDebit: safeAmt,
-            totalCredit: safeAmt
           },
           { transaction: t }
         );

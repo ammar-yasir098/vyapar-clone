@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { Op } from 'sequelize';
-import { Item, Party, JournalEntry, PurchaseBill, PurchaseBillItem, CashAccount, CashTransaction, isDbConnected, sequelize } from '../db/sequelize.js';
+import { Item, Party, PurchaseBill, PurchaseBillItem, CashAccount, CashTransaction, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const purchasesRouter = Router();
 
@@ -121,16 +120,7 @@ purchasesRouter.post('/', async (req: Request, res: Response) => {
           }
         }
 
-        // 5. Post Accounting Journal Entry
-        await JournalEntry.create({
-          tenantId,
-          entryNumber: `JE-PUR-${Date.now().toString().slice(-4)}`,
-          referenceId: billNumber,
-          transactionDate: billDate,
-          description: `Purchase Inward Bill ${billNumber} from ${supplierName}`,
-          totalDebit: totalCost,
-          totalCredit: totalCost
-        }, { transaction: t });
+
 
         await t.commit();
 

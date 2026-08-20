@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { CompanyProfile, isDbConnected } from '../db/sequelize.js';
+import { Op } from 'sequelize';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -43,8 +44,16 @@ function saveBase64Image(base64Data: string | undefined | null, subfolder: strin
 // GET /api/v1/company/all - Fetch all company profiles (Multi-Store / Multi-Branch)
 companyRouter.get('/all', async (req: Request, res: Response) => {
   try {
+    const { tenantId, userId } = req.query;
     if (isDbConnected()) {
-      const profiles = await CompanyProfile.findAll({ order: [['id', 'ASC']] });
+      let whereClause: any = {};
+      if (userId) {
+        // Return profiles owned by this user OR unclaimed profiles (user_id IS NULL)
+        whereClause = { userId: { [Op.or]: [String(userId), null] } };
+      } else if (tenantId) {
+        whereClause = { tenantId: String(tenantId) };
+      }
+      const profiles = await CompanyProfile.findAll({ where: whereClause, order: [['id', 'ASC']] });
       return res.json({ success: true, data: profiles });
     }
 
@@ -72,11 +81,12 @@ companyRouter.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/v1/company - Update company profile using Sequelize find/update or create
+// POST /api/v1/company - Create or update company profile using Sequelize
 companyRouter.post('/', async (req: Request, res: Response) => {
   try {
     let {
       tenantId,
+      userId,
       name,
       phone,
       email,
@@ -118,6 +128,7 @@ companyRouter.post('/', async (req: Request, res: Response) => {
 
       if (profile) {
         await profile.update({
+          userId: userId || profile.get('userId'),
           name: name || profile.get('name'),
           phone: phone || profile.get('phone'),
           email: email || profile.get('email'),
@@ -132,6 +143,7 @@ companyRouter.post('/', async (req: Request, res: Response) => {
         });
       } else {
         profile = await CompanyProfile.create({
+          userId,
           tenantId,
           name,
           phone,

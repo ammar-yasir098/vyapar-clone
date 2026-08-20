@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { Op } from 'sequelize';
-import { Party, JournalEntry, Invoice, LedgerAccount, isDbConnected } from '../db/sequelize.js';
+import { Party, Invoice, isDbConnected } from '../db/sequelize.js';
 
 export const partiesRouter = Router();
 
@@ -86,7 +85,6 @@ partiesRouter.post('/:id/payment', async (req: Request, res: Response) => {
     }
 
     if (isDbConnected()) {
-      const { LedgerAccount } = await import('../db/sequelize.js');
       let party = (id && !isNaN(Number(id))) ? await Party.findByPk(Number(id)) : null;
       if (!party && partyName) {
         party = await Party.findOne({ where: { name: partyName } });
@@ -95,30 +93,6 @@ partiesRouter.post('/:id/payment', async (req: Request, res: Response) => {
         const cur = (party.get('currentBalance') as number) || 0;
         const newBal = cur - paymentAmt;
         await party.update({ currentBalance: newBal });
-
-        await JournalEntry.create({
-          tenantId,
-          entryNumber: `JE-PAY-${Date.now().toString().slice(-4)}`,
-          referenceId: `PAY-${party.get('name')}`,
-          transactionDate: new Date().toISOString().split('T')[0],
-          description: `Payment ${partyType === 'CUSTOMER' ? 'Received from' : 'Made to'} ${party.get('name')}: ${remarks}`,
-          totalDebit: paymentAmt,
-          totalCredit: paymentAmt
-        });
-
-        // Update Ledger Account balances in PostgreSQL
-        const isCust = partyType === 'CUSTOMER';
-        const cashAcc = await LedgerAccount.findOne({ where: { accountCode: '1010' } });
-        if (cashAcc) {
-          const curCash = (cashAcc.get('balance') as number) || 0;
-          await cashAcc.update({ balance: curCash + (isCust ? paymentAmt : -paymentAmt) });
-        }
-
-        const arAcc = await LedgerAccount.findOne({ where: { accountCode: isCust ? '1030' : '2010' } });
-        if (arAcc) {
-          const curAr = (arAcc.get('balance') as number) || 0;
-          await arAcc.update({ balance: curAr - paymentAmt });
-        }
 
         return res.json({ success: true, data: party });
       }

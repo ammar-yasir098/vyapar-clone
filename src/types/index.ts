@@ -117,6 +117,7 @@ export interface SyncJournal {
 }
 
 export interface BusinessDetails {
+  userId?: string;
   tenantId?: string;
   name: string;
   gstin: string;
@@ -135,6 +136,7 @@ export interface BusinessDetails {
 
 export interface CompanyProfileEntity {
   id?: number;
+  userId?: string;
   tenantId: string;
   name: string;
   phone?: string;

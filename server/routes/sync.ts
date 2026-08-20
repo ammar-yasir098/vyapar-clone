@@ -7,7 +7,6 @@ import {
   Invoice, 
   Item, 
   Party, 
-  JournalEntry, 
   EstimateItem, 
   Estimate, 
   PaymentIn,
@@ -35,7 +34,7 @@ syncRouter.post('/reset', async (req: Request, res: Response) => {
     if (isDbConnected()) {
       try {
         await sequelize.query(
-          'TRUNCATE TABLE invoice_items, invoices, items, parties, journal_entries, estimates, estimate_items, payment_in, purchase_order_items, purchase_orders, purchase_bill_items, purchase_bills, payment_out, expenses, purchase_return_items, purchase_returns, sale_return_items, sale_returns, cash_transactions, cash_accounts RESTART IDENTITY CASCADE;'
+          'TRUNCATE TABLE invoice_items, invoices, items, parties, estimates, estimate_items, payment_in, purchase_order_items, purchase_orders, purchase_bill_items, purchase_bills, payment_out, expenses, purchase_return_items, purchase_returns, sale_return_items, sale_returns, cash_transactions, cash_accounts RESTART IDENTITY CASCADE;'
         );
       } catch (truncateErr) {
         console.warn('Truncate SQL warning, using sequential model destroy fallback:', truncateErr);
@@ -58,15 +57,12 @@ syncRouter.post('/reset', async (req: Request, res: Response) => {
         await Expense.destroy({ where: {}, force: true }).catch(() => {});
         await PurchaseReturn.destroy({ where: {}, force: true }).catch(() => {});
         await SaleReturn.destroy({ where: {}, force: true }).catch(() => {});
-        await JournalEntry.destroy({ where: {}, force: true }).catch(() => {});
         await CashAccount.destroy({ where: {}, force: true }).catch(() => {});
 
         // 3. Delete master entity tables last
         await Item.destroy({ where: {}, force: true }).catch(() => {});
         await Party.destroy({ where: {}, force: true }).catch(() => {});
       }
-
-      await sequelize.query('UPDATE ledger_accounts SET balance = 0.0;').catch(() => {});
     }
 
     console.log('🧹 [RESET] Successfully wiped all cloud database records (excluding company_profile) for clean start.');
@@ -103,7 +99,7 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
 
   // Persist mutations directly into PostgreSQL Database using Sequelize ORM
   if (isDbConnected()) {
-    const { sequelize, Item, Party, Invoice, InvoiceItem, JournalEntry, PurchaseBill, Expense, PaymentIn, PaymentOut, CashAccount, CashTransaction } = await import('../db/sequelize.js');
+    const { sequelize, Item, Party, Invoice, InvoiceItem, PurchaseBill, Expense, PaymentIn, PaymentOut, CashAccount, CashTransaction } = await import('../db/sequelize.js');
     const dbTx = await sequelize.transaction();
 
     try {

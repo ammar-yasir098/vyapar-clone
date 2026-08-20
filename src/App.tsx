@@ -29,6 +29,7 @@ import { CreatePurchaseReturnScreen } from './components/PurchaseReturn/CreatePu
 import { SaleReturnListScreen } from './components/SaleReturn/SaleReturnListScreen';
 import { CreateSaleReturnScreen } from './components/SaleReturn/CreateSaleReturnScreen';
 import { CashInHandScreen } from './components/CashBank/CashInHandScreen';
+import { AuthScreen, AuthUser } from './components/Auth/AuthScreen';
 import { Invoice, BusinessDetails, Party } from './types';
 import { triggerThermalPrint } from './services/printer';
 import {
@@ -82,6 +83,52 @@ export function App() {
   const [partyForPaymentOut, setPartyForPaymentOut] = useState<Party | null>(null);
   const [currentTenantId, setCurrentTenantId] = useState<string>(localStorage.getItem('vyapar_current_tenant') || '');
 
+  const [userSession, setUserSession] = useState<AuthUser | null>(() => {
+    const saved = localStorage.getItem('vyapar_user_session');
+    if (saved) {
+      try { return JSON.parse(saved); } catch { }
+    }
+    return null;
+  });
+
+  const handleAuthSuccess = async (session: AuthUser) => {
+    setUserSession(session);
+    localStorage.setItem('vyapar_user_session', JSON.stringify(session));
+    localStorage.setItem('vyapar_auth_token', session.token);
+    if (session.tenantId) {
+      setCurrentTenantId(session.tenantId);
+      localStorage.setItem('vyapar_current_tenant', session.tenantId);
+    }
+    // Clean up local Dexie cache for other users' company profiles on login
+    try {
+      const allDexie = await db.companyProfiles.toArray();
+      const foreignProfiles = allDexie.filter(c => c.userId && c.userId !== session.userId && c.tenantId !== session.tenantId);
+      for (const f of foreignProfiles) {
+        if (f.id) await db.companyProfiles.delete(f.id);
+      }
+    } catch {}
+    showToast(`Welcome, ${session.fullName || session.email}!`, 'success');
+  };
+
+  const handleSignOut = () => {
+    showConfirm({
+      title: 'Sign Out Account',
+      message: 'Are you sure you want to sign out? Your offline store data remains safely saved on this device.',
+      type: 'danger',
+      confirmText: 'Sign Out',
+      onConfirm: () => {
+        localStorage.removeItem('vyapar_user_session');
+        localStorage.removeItem('vyapar_auth_token');
+        localStorage.removeItem('vyapar_current_tenant');
+        localStorage.removeItem('vyapar_business_details');
+        setCompanies([]);
+        setCurrentTenantId('');
+        setUserSession(null);
+        showToast('Signed out successfully.', 'info');
+      }
+    });
+  };
+
   const setActiveTab = (tab: string) => {
     setActiveTabState(tab);
     localStorage.setItem('vyapar_active_tab', tab);
@@ -114,11 +161,16 @@ export function App() {
   useEffect(() => {
     async function syncPostgresToClient() {
       // 1. Read local Dexie companyProfiles FIRST for 0ms instant startup & tenant resolution
-      const localDexieProfiles = await db.companyProfiles.toArray();
-      let activeTenantId = currentTenantId || localStorage.getItem('vyapar_current_tenant') || '';
+      const allDexieProfiles = await db.companyProfiles.toArray();
+      const localDexieProfiles = userSession?.userId
+        ? allDexieProfiles.filter(c => c.userId === userSession.userId || c.tenantId === userSession.tenantId)
+        : allDexieProfiles;
+
+      let activeTenantId = currentTenantId || localStorage.getItem('vyapar_current_tenant') || userSession?.tenantId || '';
 
       if (localDexieProfiles && localDexieProfiles.length > 0) {
         const mappedLocal = localDexieProfiles.map(c => ({
+          userId: c.userId || userSession?.userId,
           tenantId: c.tenantId,
           name: c.name || 'My Store',
           phone: c.phone || '',
@@ -133,9 +185,9 @@ export function App() {
         }));
         setCompanies(mappedLocal);
 
-        // Ensure active company profile does not silently default to 'default-tenant' if other active companies exist
+        // Ensure active company profile belongs to this user
         const validActive = mappedLocal.find(c => c.tenantId && c.tenantId === activeTenantId)
-          || mappedLocal.find(c => c.tenantId && c.tenantId !== 'default-tenant')
+          || mappedLocal.find(c => c.tenantId && c.tenantId === userSession?.tenantId)
           || mappedLocal[0];
 
         if (validActive && validActive.tenantId) {
@@ -148,8 +200,8 @@ export function App() {
         }
       } else {
         const localSaved = getInitialBusiness();
-        activeTenantId = localSaved.tenantId || activeTenantId || 'default-tenant';
-        const defaultProfile: BusinessDetails = { ...localSaved, tenantId: activeTenantId };
+        activeTenantId = userSession?.tenantId || localSaved.tenantId || activeTenantId || 'default-tenant';
+        const defaultProfile: BusinessDetails = { ...localSaved, userId: userSession?.userId, tenantId: activeTenantId };
         setBusinessDetails(defaultProfile);
         setCompanies([defaultProfile]);
         if (activeTenantId !== currentTenantId) {
@@ -158,6 +210,7 @@ export function App() {
         }
         try {
           await db.companyProfiles.put({
+            userId: userSession?.userId,
             tenantId: activeTenantId,
             name: defaultProfile.name,
             phone: defaultProfile.phone,
@@ -197,10 +250,11 @@ export function App() {
       }
 
       try {
-        // Fetch all company profiles (Multi-Store / Multi-Branch)
-        const allCompanies = await fetchServerAllCompanies();
+        // Fetch company profiles strictly scoped to logged in user's userId
+        const allCompanies = await fetchServerAllCompanies(userSession?.userId);
         if (allCompanies && allCompanies.length > 0) {
           const mappedCompanies = allCompanies.map((c: any) => ({
+            userId: c.userId || userSession?.userId,
             tenantId: c.tenantId || 'default-tenant',
             name: c.name || 'My Store',
             phone: c.phone || '+92 300 xxxxxxx',
@@ -531,7 +585,7 @@ export function App() {
     }
 
     syncPostgresToClient();
-  }, [currentTenantId]);
+  }, [currentTenantId, userSession?.userId]);
 
   // Global Ctrl+F listener for Command Palette Search
   useEffect(() => {
@@ -622,6 +676,7 @@ export function App() {
     }
     const newTenantId = newCompanyData.tenantId || `tenant-${maxNum + 1}`;
     const fullCompanyData = {
+      userId: userSession?.userId,
       tenantId: newTenantId,
       name: newCompanyData.name || 'New Branch',
       phone: newCompanyData.phone || '+92 300 xxxxxxx',
@@ -718,6 +773,10 @@ export function App() {
     });
   };
 
+  if (!userSession) {
+    return <AuthScreen onAuthSuccess={handleAuthSuccess} />;
+  }
+
   if (!isDbLoaded) {
     return (
       <div className="h-screen w-screen bg-[#f3f4f6] text-slate-800 flex flex-col items-center justify-center gap-3 select-none">
@@ -734,6 +793,7 @@ export function App() {
         business={businessDetails}
         companies={companies}
         currentTenantId={currentTenantId}
+        userSession={userSession}
         itemCount={items.length}
         invoiceCount={invoices.length}
         activeTab={activeTab}
@@ -743,6 +803,7 @@ export function App() {
         onSelectCompany={handleSelectCompany}
         onCreateCompany={handleCreateCompany}
         onDeleteCompany={handleDeleteCompany}
+        onSignOut={handleSignOut}
       />
 
       {/* Main Body */}
