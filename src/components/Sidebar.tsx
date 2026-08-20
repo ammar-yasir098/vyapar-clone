@@ -1,15 +1,14 @@
 import React, { useState } from 'react';
-import { 
-  Home, 
-  Users, 
-  Package, 
-  ShoppingCart, 
-  CreditCard, 
-  BookOpen, 
-  BarChart3, 
-  Printer, 
-  Building2, 
-  ChevronRight, 
+import {
+  Home,
+  Users,
+  Package,
+  ShoppingCart,
+  BookOpen,
+  BarChart3,
+  Printer,
+  Building2,
+  ChevronRight,
   ChevronDown,
   ShoppingBag,
   ShieldCheck
@@ -20,338 +19,297 @@ interface SidebarProps {
   setActiveTab: (tab: string) => void;
 }
 
+const SIDEBAR_BG   = '#111827';   // rich dark navy
+const ACTIVE_BG    = '#1f2d3d';   // slightly lighter active bg
+const HOVER_BG     = '#1a2535';   // hover background
+const TEXT_NORMAL  = '#9ca3af';   // default text/icon
+const TEXT_ACTIVE  = '#ffffff';   // active text
+const TEXT_HOVER   = '#e2e8f0';   // hover text
+
+// Top-level nav item
+const NavItem: React.FC<{
+  icon: React.ElementType;
+  label: string;
+  isActive: boolean;
+  onClick: () => void;
+  accentColor?: string;
+}> = ({ icon: Icon, label, isActive, onClick, accentColor = '#e53e3e' }) => {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all cursor-pointer relative"
+      style={{
+        background: isActive ? ACTIVE_BG : hovered ? HOVER_BG : 'transparent',
+        color: isActive ? TEXT_ACTIVE : hovered ? TEXT_HOVER : TEXT_NORMAL,
+        fontWeight: isActive ? 600 : 500,
+      }}
+    >
+      {/* Accent bar on active */}
+      {isActive && (
+        <span
+          className="absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full"
+          style={{ width: '3px', height: '18px', background: accentColor }}
+        />
+      )}
+      <Icon
+        style={{
+          width: 16, height: 16, flexShrink: 0,
+          color: isActive ? accentColor : hovered ? TEXT_HOVER : TEXT_NORMAL,
+        }}
+      />
+      <span style={{ letterSpacing: '-0.1px' }}>{label}</span>
+    </button>
+  );
+};
+
+// Expandable group header
+const GroupHeader: React.FC<{
+  icon: React.ElementType;
+  label: string;
+  isActive: boolean;
+  isOpen: boolean;
+  onClick: () => void;
+  accentColor?: string;
+}> = ({ icon: Icon, label, isActive, isOpen, onClick, accentColor = '#e53e3e' }) => {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-[13px] transition-all cursor-pointer relative"
+      style={{
+        background: isActive ? ACTIVE_BG : hovered ? HOVER_BG : 'transparent',
+        color: isActive ? TEXT_ACTIVE : hovered ? TEXT_HOVER : TEXT_NORMAL,
+        fontWeight: isActive ? 600 : 500,
+      }}
+    >
+      {isActive && (
+        <span
+          className="absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full"
+          style={{ width: '3px', height: '18px', background: accentColor }}
+        />
+      )}
+      <div className="flex items-center gap-3">
+        <Icon
+          style={{
+            width: 16, height: 16, flexShrink: 0,
+            color: isActive ? accentColor : hovered ? TEXT_HOVER : TEXT_NORMAL,
+          }}
+        />
+        <span style={{ letterSpacing: '-0.1px' }}>{label}</span>
+      </div>
+      <ChevronDown
+        style={{
+          width: 14, height: 14,
+          color: '#475569',
+          transform: isOpen ? 'rotate(180deg)' : 'none',
+          transition: 'transform 0.2s',
+          flexShrink: 0,
+        }}
+      />
+    </button>
+  );
+};
+
+// Sub-menu item
+const SubItem: React.FC<{
+  label: string;
+  dotColor: string;
+  isActive: boolean;
+  onClick: () => void;
+  activeColor?: string;
+}> = ({ label, dotColor, isActive, onClick, activeColor = '#e53e3e' }) => {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12px] transition-all cursor-pointer"
+      style={{
+        background: isActive ? activeColor : hovered ? 'rgba(255,255,255,0.06)' : 'transparent',
+        color: isActive ? '#fff' : hovered ? TEXT_HOVER : TEXT_NORMAL,
+        fontWeight: isActive ? 700 : 500,
+      }}
+    >
+      <span
+        style={{
+          width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+          background: isActive ? 'rgba(255,255,255,0.8)' : dotColor,
+          display: 'inline-block',
+        }}
+      />
+      {label}
+    </button>
+  );
+};
+
+// Section divider label
+const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div
+    className="px-3 pb-1.5"
+    style={{
+      paddingTop: '20px',
+      fontSize: '10.5px',
+      fontWeight: 800,
+      textTransform: 'uppercase',
+      letterSpacing: '0.12em',
+      color: '#94a3b8',
+    }}
+  >
+    {children}
+  </div>
+);
+
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
   const [isSaleOpen, setIsSaleOpen] = useState(false);
   const [isPurchaseOpen, setIsPurchaseOpen] = useState(false);
   const [isCashBankOpen, setIsCashBankOpen] = useState(false);
 
-  const isSaleActive = activeTab === 'pos' || activeTab === 'payment-in' || activeTab === 'estimates' || activeTab === 'create-estimate' || activeTab === 'invoices' || activeTab === 'sale-returns' || activeTab === 'create-sale-return';
-  const isPurchaseActive = activeTab === 'purchase' || activeTab === 'purchase-orders' || activeTab === 'create-po' || activeTab === 'payment-out' || activeTab === 'expenses' || activeTab === 'purchase-returns' || activeTab === 'create-purchase-return';
-  const isCashBankActive = activeTab === 'cash-in-hand' || activeTab === 'ledger' || activeTab === 'cash-bank';
+  const isSaleActive     = ['pos','payment-in','estimates','create-estimate','invoices','sale-returns','create-sale-return'].includes(activeTab);
+  const isPurchaseActive = ['purchase','purchase-orders','create-po','payment-out','expenses','purchase-returns','create-purchase-return'].includes(activeTab);
+  const isCashBankActive = ['cash-in-hand','ledger','cash-bank'].includes(activeTab);
 
-  const menuGroups = [
-    { id: 'home', label: 'Home', icon: Home },
-    { id: 'parties', label: 'Parties', icon: Users },
-    { id: 'inventory', label: 'Items', icon: Package },
-    // Sale, Purchase & Expense, and Cash & Bank are rendered separately as expandable menus
-    { id: 'gst', label: 'GST & E-Way Bills', icon: ShieldCheck },
-    { id: 'reports', label: 'Reports', icon: BarChart3 },
-    { id: 'settings', label: 'Thermal Printer', icon: Printer }
-  ];
+  const subMenuStyle: React.CSSProperties = {
+    marginLeft: '14px',
+    marginTop: '3px',
+    marginBottom: '3px',
+    padding: '6px',
+    borderRadius: '12px',
+    background: 'rgba(0,0,0,0.3)',
+    borderLeft: '2px solid rgba(255,255,255,0.07)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  };
 
   return (
-    <aside className="w-56 bg-[#17172b] text-slate-300 flex flex-col justify-between shrink-0 select-none border-r border-[#2e2e4a]">
-      {/* Top Menu List */}
-      <div className="py-2 px-2 overflow-y-auto flex-1 space-y-0.5">
-        {/* Render Home, Parties, Items first */}
-        {menuGroups.slice(0, 3).map((item) => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                isActive
-                  ? 'bg-[#232342] text-white shadow-sm border-l-4 border-red-500'
-                  : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Icon className={`w-4 h-4 ${isActive ? 'text-red-400' : 'text-slate-400'}`} />
-                <span>{item.label}</span>
-              </div>
-            </button>
-          );
-        })}
+    <aside
+      className="w-56 flex flex-col shrink-0 select-none"
+      style={{
+        background: SIDEBAR_BG,
+        borderRight: '1px solid rgba(255,255,255,0.07)',
+        fontFamily: "'Inter','Plus Jakarta Sans',sans-serif",
+      }}
+    >
+      {/* Scrollable nav area */}
+      <div
+        className="flex-1 overflow-y-auto sidebar-scroll"
+        style={{ padding: '8px 8px 0', display: 'flex', flexDirection: 'column', gap: '2px' }}
+      >
+        <SectionLabel>Main</SectionLabel>
 
-        {/* EXPANDABLE SALE MENU */}
-        <div className="pt-0.5 pb-0.5">
-          <button
-            type="button"
-            onClick={() => setIsSaleOpen(!isSaleOpen)}
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-              isSaleActive
-                ? 'bg-[#232342] text-white shadow-sm border-l-4 border-red-500'
-                : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <ShoppingCart className={`w-4 h-4 ${isSaleActive ? 'text-red-400' : 'text-slate-400'}`} />
-              <span>Sale</span>
-            </div>
-            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${isSaleOpen ? 'rotate-180' : ''}`} />
-          </button>
+        <NavItem icon={Home}    label="Home"    isActive={activeTab === 'home'}      onClick={() => setActiveTab('home')} />
+        <NavItem icon={Users}   label="Parties" isActive={activeTab === 'parties'}   onClick={() => setActiveTab('parties')} />
+        <NavItem icon={Package} label="Items"   isActive={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')} />
 
-          {/* Sub-menu items under Sale */}
-          {isSaleOpen && (
-            <div className="mt-1 mb-1 pl-3 pr-1 py-1 space-y-1 bg-[#121223]/60 rounded-lg border-l-2 border-slate-700/60 ml-3">
-              {/* POS Sub-option */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('pos')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                  activeTab === 'pos'
-                    ? 'bg-red-600 text-white font-bold shadow-xs'
-                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'pos' ? 'bg-white' : 'bg-red-400'}`}></div>
-                  <span>POS</span>
-                </div>
-              </button>
+        <SectionLabel>Transactions</SectionLabel>
 
-              {/* Payment-In Sub-option */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('payment-in')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                  activeTab === 'payment-in'
-                    ? 'bg-red-600 text-white font-bold shadow-xs'
-                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'payment-in' ? 'bg-white' : 'bg-emerald-400'}`}></div>
-                  <span>Payment-In</span>
-                </div>
-              </button>
+        {/* SALE */}
+        <GroupHeader
+          icon={ShoppingCart}
+          label="Sale"
+          isActive={isSaleActive}
+          isOpen={isSaleOpen}
+          onClick={() => setIsSaleOpen(p => !p)}
+          accentColor="#e53e3e"
+        />
+        {isSaleOpen && (
+          <div style={subMenuStyle}>
+            <SubItem dotColor="#e53e3e" label="POS"                 isActive={activeTab === 'pos'}                                                         onClick={() => setActiveTab('pos')} activeColor="#e53e3e" />
+            <SubItem dotColor="#10b981" label="Payment-In"          isActive={activeTab === 'payment-in'}                                                  onClick={() => setActiveTab('payment-in')} activeColor="#e53e3e" />
+            <SubItem dotColor="#f59e0b" label="Estimate / Quotation" isActive={activeTab === 'estimates' || activeTab === 'create-estimate'}                onClick={() => setActiveTab('estimates')} activeColor="#e53e3e" />
+            <SubItem dotColor="#64748b" label="Sale Invoices"       isActive={activeTab === 'invoices'}                                                    onClick={() => setActiveTab('invoices')} activeColor="#e53e3e" />
+            <SubItem dotColor="#10b981" label="Sale Return"         isActive={activeTab === 'sale-returns' || activeTab === 'create-sale-return'}           onClick={() => setActiveTab('sale-returns')} activeColor="#e53e3e" />
+          </div>
+        )}
 
-              {/* Estimate / Quotation Sub-option */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('estimates')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                  activeTab === 'estimates' || activeTab === 'create-estimate'
-                    ? 'bg-red-600 text-white font-bold shadow-xs'
-                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'estimates' || activeTab === 'create-estimate' ? 'bg-white' : 'bg-amber-400'}`}></div>
-                  <span>Estimate / Quotation</span>
-                </div>
-              </button>
+        {/* PURCHASE */}
+        <GroupHeader
+          icon={ShoppingBag}
+          label="Purchase & Expense"
+          isActive={isPurchaseActive}
+          isOpen={isPurchaseOpen}
+          onClick={() => setIsPurchaseOpen(p => !p)}
+          accentColor="#3b82f6"
+        />
+        {isPurchaseOpen && (
+          <div style={subMenuStyle}>
+            <SubItem dotColor="#3b82f6" label="Purchase Order"   isActive={activeTab === 'purchase-orders' || activeTab === 'create-po'}                   onClick={() => setActiveTab('purchase-orders')} activeColor="#3b82f6" />
+            <SubItem dotColor="#6366f1" label="Purchase Bills"   isActive={activeTab === 'purchase'}                                                       onClick={() => setActiveTab('purchase')} activeColor="#3b82f6" />
+            <SubItem dotColor="#f43f5e" label="Payment-Out"      isActive={activeTab === 'payment-out'}                                                    onClick={() => setActiveTab('payment-out')} activeColor="#3b82f6" />
+            <SubItem dotColor="#f59e0b" label="Expenses"         isActive={activeTab === 'expenses'}                                                       onClick={() => setActiveTab('expenses')} activeColor="#3b82f6" />
+            <SubItem dotColor="#ef4444" label="Purchase Return"  isActive={activeTab === 'purchase-returns' || activeTab === 'create-purchase-return'}      onClick={() => setActiveTab('purchase-returns')} activeColor="#3b82f6" />
+          </div>
+        )}
 
-              {/* Sale Invoices Sub-option */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('invoices')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                  activeTab === 'invoices'
-                    ? 'bg-red-600 text-white font-bold shadow-xs'
-                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'invoices' ? 'bg-white' : 'bg-slate-400'}`}></div>
-                  <span>Sale Invoices</span>
-                </div>
-              </button>
+        {/* CASH & BANK */}
+        <GroupHeader
+          icon={BookOpen}
+          label="Cash & Bank"
+          isActive={isCashBankActive}
+          isOpen={isCashBankOpen}
+          onClick={() => setIsCashBankOpen(p => !p)}
+          accentColor="#10b981"
+        />
+        {isCashBankOpen && (
+          <div style={subMenuStyle}>
+            <SubItem dotColor="#10b981" label="Cash In Hand" isActive={activeTab === 'cash-in-hand' || activeTab === 'ledger'} onClick={() => setActiveTab('cash-in-hand')} activeColor="#10b981" />
+          </div>
+        )}
 
-              {/* Sale Return / Credit Note Sub-option */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('sale-returns')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                  activeTab === 'sale-returns' || activeTab === 'create-sale-return'
-                    ? 'bg-red-600 text-white font-bold shadow-xs'
-                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'sale-returns' || activeTab === 'create-sale-return' ? 'bg-white' : 'bg-emerald-400'}`}></div>
-                  <span>Sale Return</span>
-                </div>
-              </button>
-            </div>
-          )}
-        </div>
+        <SectionLabel>More</SectionLabel>
 
-        {/* EXPANDABLE PURCHASE & EXPENSE MENU */}
-        <div className="pt-0.5 pb-0.5">
-          <button
-            type="button"
-            onClick={() => setIsPurchaseOpen(!isPurchaseOpen)}
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-              isPurchaseActive
-                ? 'bg-[#232342] text-white shadow-sm border-l-4 border-blue-500'
-                : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <ShoppingBag className={`w-4 h-4 ${isPurchaseActive ? 'text-blue-400' : 'text-slate-400'}`} />
-              <span>Purchase & Expense</span>
-            </div>
-            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${isPurchaseOpen ? 'rotate-180' : ''}`} />
-          </button>
+        <NavItem icon={ShieldCheck} label="GST & E-Way Bills" isActive={activeTab === 'gst'}      onClick={() => setActiveTab('gst')} />
+        <NavItem icon={BarChart3}   label="Reports"           isActive={activeTab === 'reports'}   onClick={() => setActiveTab('reports')} />
+        <NavItem icon={Printer}     label="Thermal Printer"   isActive={activeTab === 'settings'}  onClick={() => setActiveTab('settings')} />
 
-          {/* Sub-menu items under Purchase & Expense */}
-          {isPurchaseOpen && (
-            <div className="mt-1 mb-1 pl-3 pr-1 py-1 space-y-1 bg-[#121223]/60 rounded-lg border-l-2 border-slate-700/60 ml-3">
-              {/* Purchase Order Sub-option */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('purchase-orders')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                  activeTab === 'purchase-orders' || activeTab === 'create-po'
-                    ? 'bg-blue-600 text-white font-bold shadow-xs'
-                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'purchase-orders' || activeTab === 'create-po' ? 'bg-white' : 'bg-blue-400'}`}></div>
-                  <span>Purchase Order</span>
-                </div>
-              </button>
-
-              {/* Purchase Bills / Inward Sub-option */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('purchase')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                  activeTab === 'purchase'
-                    ? 'bg-blue-600 text-white font-bold shadow-xs'
-                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'purchase' ? 'bg-white' : 'bg-indigo-400'}`}></div>
-                  <span>Purchase Bills</span>
-                </div>
-              </button>
-
-              {/* Payment-Out Sub-option */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('payment-out')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                  activeTab === 'payment-out'
-                    ? 'bg-blue-600 text-white font-bold shadow-xs'
-                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'payment-out' ? 'bg-white' : 'bg-rose-400'}`}></div>
-                  <span>Payment-Out</span>
-                </div>
-              </button>
-
-              {/* Expenses Sub-option */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('expenses')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                  activeTab === 'expenses'
-                    ? 'bg-blue-600 text-white font-bold shadow-xs'
-                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'expenses' ? 'bg-white' : 'bg-amber-400'}`}></div>
-                  <span>Expenses</span>
-                </div>
-              </button>
-
-              {/* Purchase Return / Dr. Note Sub-option */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('purchase-returns')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                  activeTab === 'purchase-returns' || activeTab === 'create-purchase-return'
-                    ? 'bg-blue-600 text-white font-bold shadow-xs'
-                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'purchase-returns' || activeTab === 'create-purchase-return' ? 'bg-white' : 'bg-red-400'}`}></div>
-                  <span>Purchase Return</span>
-                </div>
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* EXPANDABLE CASH & BANK MENU */}
-        <div className="pt-0.5 pb-0.5">
-          <button
-            type="button"
-            onClick={() => setIsCashBankOpen(!isCashBankOpen)}
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-              isCashBankActive
-                ? 'bg-[#232342] text-white shadow-sm border-l-4 border-emerald-500'
-                : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <BookOpen className={`w-4 h-4 ${isCashBankActive ? 'text-emerald-400' : 'text-slate-400'}`} />
-              <span>Cash & Bank</span>
-            </div>
-            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${isCashBankOpen ? 'rotate-180' : ''}`} />
-          </button>
-
-          {/* Sub-menu items under Cash & Bank */}
-          {isCashBankOpen && (
-            <div className="mt-1 mb-1 pl-3 pr-1 py-1 space-y-1 bg-[#121223]/60 rounded-lg border-l-2 border-slate-700/60 ml-3">
-              {/* Cash In Hand Sub-option */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('cash-in-hand')}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                  activeTab === 'cash-in-hand' || activeTab === 'ledger'
-                    ? 'bg-emerald-600 text-white font-bold shadow-xs'
-                    : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'cash-in-hand' || activeTab === 'ledger' ? 'bg-white' : 'bg-emerald-400'}`}></div>
-                  <span>Cash In Hand</span>
-                </div>
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Render Remaining Menu Items (GST, Reports, Printer) */}
-        {menuGroups.slice(3).map((item) => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                isActive
-                  ? 'bg-[#232342] text-white shadow-sm border-l-4 border-red-500'
-                  : 'text-slate-300 hover:bg-[#22223d] hover:text-white'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Icon className={`w-4 h-4 ${isActive ? 'text-red-400' : 'text-slate-400'}`} />
-                <span>{item.label}</span>
-              </div>
-            </button>
-          );
-        })}
+        {/* bottom spacer */}
+        <div style={{ flexGrow: 1, minHeight: 12 }} />
       </div>
 
-      {/* Bottom Company Selector Footer */}
-      <div className="p-2 border-t border-[#2e2e4a] bg-[#121223]">
+      {/* Bottom — My Company */}
+      <div style={{ padding: '8px', borderTop: '1px solid rgba(255,255,255,0.07)' }}>
         <button
           type="button"
           onClick={() => setActiveTab('company')}
-          className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-semibold cursor-pointer transition ${
-            activeTab === 'company'
-              ? 'bg-[#2b2b4d] text-white border border-sky-400'
-              : 'bg-[#1d1d36] text-slate-200 hover:bg-[#252545]'
-          }`}
+          className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer"
+          style={{
+            background: activeTab === 'company' ? ACTIVE_BG : 'rgba(255,255,255,0.04)',
+            color: activeTab === 'company' ? TEXT_ACTIVE : TEXT_NORMAL,
+            border: activeTab === 'company' ? '1px solid rgba(255,255,255,0.1)' : '1px solid transparent',
+          }}
+          onMouseEnter={e => {
+            if (activeTab !== 'company') {
+              (e.currentTarget as HTMLButtonElement).style.background = HOVER_BG;
+              (e.currentTarget as HTMLButtonElement).style.color = TEXT_HOVER;
+            }
+          }}
+          onMouseLeave={e => {
+            if (activeTab !== 'company') {
+              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)';
+              (e.currentTarget as HTMLButtonElement).style.color = TEXT_NORMAL;
+            }
+          }}
         >
-          <div className="flex items-center gap-2">
-            <Building2 className="w-4 h-4 text-blue-400" />
-            <span className="truncate w-32">My Company</span>
+          <div className="flex items-center gap-2.5">
+            <div
+              className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+              style={{ background: 'rgba(59,130,246,0.18)', border: '1px solid rgba(59,130,246,0.2)' }}
+            >
+              <Building2 style={{ width: 14, height: 14, color: '#60a5fa' }} />
+            </div>
+            <span style={{ fontSize: '13px', fontWeight: 500, maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              My Company
+            </span>
           </div>
-          <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+          <ChevronRight style={{ width: 14, height: 14, color: '#374151', flexShrink: 0 }} />
         </button>
       </div>
     </aside>

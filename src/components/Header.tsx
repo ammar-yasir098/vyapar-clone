@@ -119,7 +119,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="h-14 bg-white border-b border-slate-200/80 px-4 flex items-center justify-between shrink-0 select-none shadow-xs z-30 relative">
+    <header className="h-14 bg-white border-b border-slate-200 px-4 flex items-center justify-between shrink-0 select-none z-30 relative" style={{ boxShadow: '0 1px 0 0 #e2e8f0, 0 2px 8px -1px rgba(0,0,0,0.06)' }}>
       {/* Left: Brand / Store Name & Search Bar */}
       <div className="flex items-center gap-5">
         {/* Business Selector Dropdown */}
@@ -275,106 +275,125 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* Vyapar Search "Open Anything (Ctrl+F)" */}
-        <div 
+        {/* Search */}
+        <div
           onClick={onOpenCommandPalette}
-          className="hidden md:flex items-center relative w-64 cursor-pointer group"
+          className="hidden md:flex items-center relative cursor-pointer group"
+          style={{ width: '260px' }}
         >
           <input
             type="text"
             readOnly
             placeholder="Search items, bills, parties (Ctrl+F)..."
-            className="w-full h-8 pl-8 pr-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 group-hover:border-blue-400 rounded-lg text-xs font-semibold text-slate-800 outline-none cursor-pointer transition placeholder:text-slate-500 placeholder:font-medium"
+            className="w-full cursor-pointer outline-none transition"
+            style={{
+              height: '34px', paddingLeft: '34px', paddingRight: '12px',
+              background: '#f8fafc', border: '1.5px solid #e2e8f0',
+              borderRadius: '10px', fontSize: '12px', fontWeight: 500,
+              color: '#334155', fontFamily: 'inherit',
+            }}
+            onMouseEnter={e => { (e.target as HTMLInputElement).style.borderColor = '#3b82f6'; (e.target as HTMLInputElement).style.background = '#fff'; }}
+            onMouseLeave={e => { (e.target as HTMLInputElement).style.borderColor = '#e2e8f0'; (e.target as HTMLInputElement).style.background = '#f8fafc'; }}
           />
-          <Search className="w-3.5 h-3.5 text-slate-500 group-hover:text-blue-600 absolute left-2.5 top-2.5 transition-colors" />
+          <Search className="w-3.5 h-3.5 absolute left-2.5" style={{ top: '10px', color: '#94a3b8' }} />
+          <kbd className="absolute right-2.5 text-[10px] font-bold text-slate-400 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded" style={{ top: '8px' }}>⌘F</kbd>
         </div>
       </div>
 
-      {/* Center Top Quick Action Buttons */}
+      {/* CTA Buttons */}
       <div className="flex items-center gap-2">
         <button
           onClick={() => onNavigateToTab('pos')}
-          className="btn-vyapar-red flex items-center gap-1.5 cursor-pointer"
+          className="btn-vyapar-red cursor-pointer"
         >
           <Plus className="w-3.5 h-3.5 stroke-[3]" />
-          <span>+ Add Sale</span>
+          + Add Sale
         </button>
 
         <button
           onClick={() => onNavigateToTab('purchase')}
-          className="btn-vyapar-blue flex items-center gap-1.5 cursor-pointer"
+          className="btn-vyapar-blue cursor-pointer"
         >
           <Plus className="w-3.5 h-3.5 stroke-[3]" />
-          <span>+ Add Purchase</span>
+          + Add Purchase
         </button>
 
         <button
           onClick={() => onNavigateToTab('parties')}
-          className="btn-vyapar-outline flex items-center gap-1.5 cursor-pointer hidden sm:flex"
+          className="btn-vyapar-outline cursor-pointer hidden sm:flex"
         >
           <Plus className="w-3.5 h-3.5 stroke-[3]" />
-          <span>+ Add Party</span>
+          + Add Party
         </button>
       </div>
 
-      {/* Right: Support, Cloud Sync & Clock */}
-      <div className="flex items-center gap-3">
-        <div className="hidden xl:flex items-center gap-1.5 text-xs text-slate-700 font-semibold bg-slate-50 px-3 py-1 rounded-full border border-slate-200">
-          <PhoneCall className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Support: <strong className="text-slate-900 font-bold">+92 300 xxxxxxx</strong></span>
+      {/* Right: Support · Sync · Clock · User */}
+      <div className="flex items-center gap-2.5">
+        {/* Support number */}
+        <div
+          className="hidden xl:flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg"
+          style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' }}
+        >
+          <PhoneCall className="w-3.5 h-3.5" style={{ color: '#16a34a' }} />
+          <span>Support: <strong>+92 300 xxxxxxx</strong></span>
         </div>
 
-        {/* Cloud Sync Status */}
+        {/* Cloud Sync */}
         <button
           onClick={onOpenSyncModal}
-          className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full border transition cursor-pointer ${
-            syncStatus.isSyncing
-              ? 'bg-amber-50 text-amber-800 border-amber-300'
-              : syncStatus.pendingCount > 0
-              ? 'bg-blue-50 text-blue-800 border-blue-300'
-              : 'bg-emerald-50 text-emerald-800 border-emerald-300'
-          }`}
           title="Click to force sync"
+          className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
+          style={{
+            background: syncStatus.isSyncing ? '#fffbeb' : syncStatus.pendingCount > 0 ? '#eff6ff' : '#f0fdf4',
+            color:      syncStatus.isSyncing ? '#92400e' : syncStatus.pendingCount > 0 ? '#1e40af' : '#166534',
+            borderColor: syncStatus.isSyncing ? '#fcd34d' : syncStatus.pendingCount > 0 ? '#bfdbfe' : '#bbf7d0',
+          }}
         >
           {syncStatus.isSyncing ? (
-            <>
-              <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
-              <span>Syncing...</span>
-            </>
+            <><RefreshCw className="w-3.5 h-3.5 animate-spin" /><span>Syncing...</span></>
           ) : syncStatus.pendingCount > 0 ? (
-            <>
-              <Cloud className="w-3.5 h-3.5 text-blue-600" />
-              <span>{syncStatus.pendingCount} Pending</span>
-            </>
+            <><Cloud className="w-3.5 h-3.5" /><span>{syncStatus.pendingCount} Pending</span></>
           ) : (
-            <>
-              <Cloud className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Cloud Synced</span>
-            </>
+            <><Cloud className="w-3.5 h-3.5" /><span>Cloud Synced</span></>
           )}
         </button>
 
         {/* Clock */}
-        <div className="font-mono text-xs text-slate-800 font-bold bg-slate-100/80 px-2.5 py-1 rounded-md border border-slate-200/80 flex items-center gap-1">
-          <Clock className="w-3.5 h-3.5 text-slate-500" />
+        <div
+          className="font-mono text-xs font-bold flex items-center gap-1.5 px-3 py-1.5 rounded-lg"
+          style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#334155' }}
+        >
+          <Clock className="w-3.5 h-3.5" style={{ color: '#94a3b8' }} />
           <span>{time}</span>
         </div>
 
-        {/* Logged in User Pill & Sign Out */}
+        {/* User chip */}
         {userSession && (
-          <div className="hidden lg:flex items-center gap-2 pl-1 border-l border-slate-200">
-            <div className="flex items-center gap-1.5 bg-slate-100/90 text-slate-800 px-2.5 py-1 rounded-xl text-xs font-bold border border-slate-200" title={userSession.email}>
-              <UserIcon className="w-3.5 h-3.5 text-blue-600" />
-              <span className="max-w-[110px] truncate">{userSession.fullName || userSession.email}</span>
+          <div className="hidden lg:flex items-center gap-1.5" style={{ paddingLeft: '6px', borderLeft: '1px solid #e2e8f0' }}>
+            <div
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-bold cursor-default"
+              style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#1e293b' }}
+              title={userSession.email}
+            >
+              <div
+                className="w-5 h-5 rounded-lg flex items-center justify-center text-white font-black text-[10px] shrink-0"
+                style={{ background: 'linear-gradient(135deg, #3b82f6, #6366f1)' }}
+              >
+                {(userSession.fullName || userSession.email).charAt(0).toUpperCase()}
+              </div>
+              <span className="max-w-[100px] truncate">{userSession.fullName || userSession.email}</span>
             </div>
             {onSignOut && (
               <button
                 type="button"
                 onClick={onSignOut}
-                title="Sign Out Account"
-                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
+                title="Sign Out"
+                className="w-8 h-8 flex items-center justify-center rounded-xl transition cursor-pointer"
+                style={{ color: '#94a3b8' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#fff1f2'; (e.currentTarget as HTMLButtonElement).style.color = '#e53e3e'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; }}
               >
-                <LogOut className="w-4 h-4 stroke-[2.5]" />
+                <LogOut className="w-3.5 h-3.5 stroke-[2.5]" />
               </button>
             )}
           </div>
