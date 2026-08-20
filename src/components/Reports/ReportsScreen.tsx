@@ -316,9 +316,10 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const normalizedSales = useMemo(() => {
     return safeInvoices.map(inv => {
       const grand = Number(inv.grandTotal || 0);
-      const isCredit = (inv.paymentMethod || '').toUpperCase() === 'CREDIT' || inv.paymentStatus === 'UNPAID';
-      const rec = isCredit ? 0 : Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? grand : 0));
-      const due = grand - rec;
+      const rec = Number(
+        inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? grand : (inv.paymentMethod === 'CASH' ? grand : 0))
+      );
+      const due = Number(inv.dueAmount ?? Math.max(0, grand - rec));
       const { dateISO } = parseLocalDate(inv.invoiceDate, inv.createdAt);
 
       return {
@@ -331,7 +332,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
         grandTotal: grand,
         receivedAmount: rec,
         dueAmount: due,
-        paymentStatus: isCredit ? 'UNPAID' : (inv.paymentStatus || (due <= 0 ? 'PAID' : (rec > 0 ? 'PARTIAL' : 'UNPAID'))),
+        paymentStatus: inv.paymentStatus || (due <= 0 ? 'PAID' : (rec > 0 ? 'PARTIAL' : 'UNPAID')),
         tenantId: inv.tenantId || 'default-tenant',
         rawInvoice: inv
       };
@@ -554,17 +555,14 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   }, [grossPurchaseBillsTotal, debitNotesTotal]);
 
   const purchasePaidTotal = useMemo(() => {
-    const billsPaid = filteredPurchases
-      .filter(p => p.type === 'Purchase')
-      .reduce((sum, p) => sum + p.paidAmount, 0);
-    return billsPaid - debitNotesTotal;
-  }, [filteredPurchases, debitNotesTotal]);
-
-  const purchaseUnpaidTotal = useMemo(() => {
     return filteredPurchases
       .filter(p => p.type === 'Purchase')
-      .reduce((sum, p) => sum + p.balanceDue, 0);
+      .reduce((sum, p) => sum + p.paidAmount, 0);
   }, [filteredPurchases]);
+
+  const purchaseUnpaidTotal = useMemo(() => {
+    return Math.max(0, purchaseTotalAmount - purchasePaidTotal);
+  }, [purchaseTotalAmount, purchasePaidTotal]);
 
   const cashPurchasesTotal = useMemo(() => {
     return filteredPurchases

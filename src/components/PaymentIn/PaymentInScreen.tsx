@@ -231,12 +231,17 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
     if (!id) return;
     showConfirm({
       title: 'Delete Payment-In Receipt',
-      message: 'Are you sure you want to delete this Payment-In receipt record?',
+      message: 'Are you sure you want to delete this Payment-In receipt record? This will revert customer receivables, invoice dues, and linked cash transactions.',
       type: 'danger',
       confirmText: 'Yes, Delete',
       onConfirm: async () => {
-        await db.paymentIn.delete(id);
-        showToast('Payment-In receipt deleted successfully', 'info');
+        const { voidPaymentIn } = await import('../../services/reversal');
+        const res = await voidPaymentIn(id);
+        if (res.success) {
+          showToast(res.message || 'Payment-In receipt deleted and rolled back', 'info');
+        } else {
+          showToast(res.error || 'Failed to void Payment-In receipt', 'error');
+        }
         onPaymentRecorded();
       }
     });

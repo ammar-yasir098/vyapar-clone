@@ -32,7 +32,7 @@ interface CashInHandScreenProps {
 
 export const CashInHandScreen: React.FC<CashInHandScreenProps> = ({ business }) => {
   const { showToast } = useToast();
-  const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || '';
+  const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
   const tenantId = activeTenantId;
 
   // Live Dexie query listeners to reactively trigger reload on any transaction mutation

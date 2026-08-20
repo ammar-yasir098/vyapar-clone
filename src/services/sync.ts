@@ -71,8 +71,8 @@ class ClientSyncManager {
    * Pushes pending local mutations to the cloud backend API.
    */
   public async triggerSync(targetTenantId?: string) {
-    const activeTenantId = targetTenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
-    if (this.isSyncing || !navigator.onLine) return;
+    const activeTenantId = targetTenantId || (typeof localStorage !== 'undefined' ? localStorage.getItem('vyapar_current_tenant') : null) || 'default-tenant';
+    if (this.isSyncing || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
 
     this.isSyncing = true;
     this.notify();
@@ -326,12 +326,14 @@ class ClientSyncManager {
         if (response.ok) {
           const resData = await response.json();
           
-          // Mark local records as synced
+          // Mark local records as synced and prune obsolete journal records
           for (const item of unsynced) {
             if (item.id) {
               await db.syncJournal.update(item.id, { synced: true });
             }
           }
+
+          await pruneSyncedJournalEntries();
 
           this.lastSyncedAt = new Date().toLocaleTimeString('en-US', {
             hour: '2-digit',
@@ -348,6 +350,21 @@ class ClientSyncManager {
       this.isSyncing = false;
       this.notify();
     }
+  }
+}
+
+/**
+ * Deletes obsolete sync journal records where synced === true to keep IndexedDB lean.
+ */
+export async function pruneSyncedJournalEntries() {
+  try {
+    const syncedRecords = await db.syncJournal.filter(j => j.synced === true).toArray();
+    const idsToDelete = syncedRecords.map(j => j.id!).filter(Boolean);
+    if (idsToDelete.length > 0) {
+      await db.syncJournal.bulkDelete(idsToDelete);
+    }
+  } catch (err) {
+    console.warn('Failed to prune synced journal entries:', err);
   }
 }
 

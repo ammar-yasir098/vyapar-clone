@@ -103,13 +103,15 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
 
   // Persist mutations directly into PostgreSQL Database using Sequelize ORM
   if (isDbConnected()) {
-    const { Item, Party, Invoice, InvoiceItem, JournalEntry } = await import('../db/sequelize.js');
+    const { sequelize, Item, Party, Invoice, InvoiceItem, JournalEntry, PurchaseBill, Expense, PaymentIn, PaymentOut, CashAccount, CashTransaction } = await import('../db/sequelize.js');
+    const dbTx = await sequelize.transaction();
 
-    for (const m of mutations) {
-      try {
-        const payload = typeof m.payload === 'string' ? JSON.parse(m.payload) : m.payload;
-        const entityType = m.entityType;
-        const mutationType = m.mutationType;
+    try {
+      for (const m of mutations) {
+        try {
+          const payload = typeof m.payload === 'string' ? JSON.parse(m.payload) : m.payload;
+          const entityType = m.entityType;
+          const mutationType = m.mutationType;
 
         if (entityType === 'ITEM') {
           if (mutationType === 'DELETE' && payload.id) {
@@ -615,9 +617,14 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
           }
         }
       } catch (err) {
-        console.error('Error persisting sync mutation to PostgreSQL:', err);
+        console.error('Error persisting individual sync mutation to PostgreSQL:', err);
       }
     }
+    await dbTx.commit();
+  } catch (txErr) {
+    await dbTx.rollback();
+    console.error('Sequelize transaction rolled back due to push sync failure:', txErr);
+  }
   }
 
   console.log(`[CLOUD SYNC PUSH] Successfully synced ${result.syncedCount} delta mutations to PostgreSQL for tenant: ${tenantId}`);

@@ -62,7 +62,8 @@ export async function deduplicateLocalCashTransactions() {
       const type = t.type;
       const source = t.source;
       const amount = roundCurrency(t.amount);
-      const key = ref ? `${ref}-${type}` : `sig-${source}-${amount}-${t.description}`;
+      const tTenant = t.tenantId || 'default-tenant';
+      const key = ref ? `${tTenant}-${ref}-${type}` : `sig-${tTenant}-${source}-${amount}-${t.description}`;
 
       if (source === 'PURCHASE_BILL' && payoutAmounts.has(amount) && t.id) {
         toDeleteIds.push(Number(t.id));

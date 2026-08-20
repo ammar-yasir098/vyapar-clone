@@ -614,6 +614,7 @@ export function App() {
   const expenses = allExpenses.filter(e => (e.tenantId || 'default-tenant') === activeTenantId);
   const purchaseReturns = allPurchaseReturns.filter(pr => (pr.tenantId || 'default-tenant') === activeTenantId);
   const saleReturns = allSaleReturns.filter(sr => (sr.tenantId || 'default-tenant') === activeTenantId);
+  const cashTransactions = allCashTransactions.filter(ct => (ct.tenantId || 'default-tenant') === activeTenantId);
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');

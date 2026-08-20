@@ -73,7 +73,8 @@ async function deduplicateCashTransactions(cId: number, tenantId?: string, trans
       const type = t.get('type');
       const source = t.get('source');
       const amount = round2(t.get('amount'));
-      const key = ref ? `${ref}-${type}` : `sig-${source}-${amount}-${t.get('description')}`;
+      const tTenant = t.get('tenantId') || tenantId || 'default-tenant';
+      const key = ref ? `${tTenant}-${ref}-${type}` : `sig-${tTenant}-${source}-${amount}-${t.get('description')}`;
 
       if (source === 'PURCHASE_BILL' && payoutAmounts.has(amount)) {
         toDeleteIds.push(t.get('id') as number);
@@ -238,10 +239,11 @@ cashRouter.get('/transactions', async (req: Request, res: Response) => {
         return true;
       });
 
+      const isUnpaginated = limit === 'all' || limit === '0' || req.query.limit === undefined;
       const p = Math.max(1, parseInt(String(page), 10));
       const l = Math.max(1, parseInt(String(limit), 10));
       const startIndex = (p - 1) * l;
-      const paginated = filtered.slice(startIndex, startIndex + l);
+      const paginated = isUnpaginated ? filtered : filtered.slice(startIndex, startIndex + l);
 
       return res.json({
         success: true,

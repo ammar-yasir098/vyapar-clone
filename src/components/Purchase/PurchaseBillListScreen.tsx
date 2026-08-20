@@ -45,15 +45,20 @@ export const PurchaseBillListScreen: React.FC<PurchaseBillListScreenProps> = ({
     if (!bill.id && !bill.billId) return;
     showConfirm({
       title: 'Delete Purchase Bill',
-      message: `Are you sure you want to delete Purchase Bill ${bill.billNumber}? Note: Stock levels and supplier balances will remain as recorded.`,
+      message: `Are you sure you want to delete Purchase Bill ${bill.billNumber}? Stock levels will be deducted, supplier payables reverted, and linked cash/journal records deleted.`,
       type: 'danger',
       confirmText: 'Yes, Delete',
       onConfirm: async () => {
-        if (bill.id) await db.purchaseBills.delete(bill.id);
+        const { voidPurchaseBill } = await import('../../services/reversal');
+        const res = await voidPurchaseBill(bill.id || bill.billNumber);
         try {
           if (bill.id) await deleteServerPurchaseBill(bill.id);
         } catch {}
-        showToast(`Purchase Bill ${bill.billNumber} deleted successfully`, 'info');
+        if (res.success) {
+          showToast(res.message || `Purchase Bill ${bill.billNumber} deleted and stock rolled back`, 'info');
+        } else {
+          showToast(res.error || 'Failed to void Purchase Bill', 'error');
+        }
         onBillUpdated();
         if (selectedBill?.id === bill.id) {
           setIsDetailModalOpen(false);

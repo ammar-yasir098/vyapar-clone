@@ -186,15 +186,20 @@ export const ExpenseScreen: React.FC<ExpenseScreenProps> = ({
     if (!exp.id) return;
     showConfirm({
       title: 'Delete Expense Record',
-      message: `Are you sure you want to delete Expense voucher ${exp.expenseNumber}?`,
+      message: `Are you sure you want to delete Expense voucher ${exp.expenseNumber}? This will remove associated cash outflow records and journal entries.`,
       type: 'danger',
       confirmText: 'Yes, Delete',
       onConfirm: async () => {
-        await db.expenses.delete(exp.id!);
+        const { voidExpense } = await import('../../services/reversal');
+        const res = await voidExpense(exp.id!);
         try {
           if (exp.id) await deleteServerExpense(exp.id);
         } catch {}
-        showToast('Expense voucher deleted', 'info');
+        if (res.success) {
+          showToast(res.message || 'Expense voucher deleted', 'info');
+        } else {
+          showToast(res.error || 'Failed to void expense voucher', 'error');
+        }
         onExpenseRecorded();
       }
     });

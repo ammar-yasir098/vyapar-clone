@@ -223,6 +223,16 @@ export async function postPaymentJournalEntry(
       }
     ];
 
+    const totalDebit = roundCurrency(lines.reduce((sum, l) => sum + l.debit, 0));
+    const totalCredit = roundCurrency(lines.reduce((sum, l) => sum + l.credit, 0));
+
+    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+      console.warn(`Unbalanced payment journal entry detected (${totalDebit} vs ${totalCredit}). Adjusting line.`);
+      if (lines.length > 0) {
+        lines[lines.length - 1].credit = roundCurrency(lines[lines.length - 1].credit + (totalDebit - totalCredit));
+      }
+    }
+
     const count = await db.journalEntries.count();
     const entryNumber = `JE-PAY-${Date.now().toString().slice(-4)}`;
 
@@ -233,8 +243,8 @@ export async function postPaymentJournalEntry(
       transactionDate: new Date().toISOString().split('T')[0],
       description: `Payment ${isCustomer ? 'Received from' : 'Made to'} ${partyName}: ${paymentRemarks}`,
       lines,
-      totalDebit: paymentAmount,
-      totalCredit: paymentAmount,
+      totalDebit,
+      totalCredit,
       createdAt: new Date().toISOString()
     };
 

@@ -546,7 +546,7 @@ export async function deleteServerSaleReturn(id: number | string) {
 // CASH TRANSACTIONS
 export async function fetchServerCashTransactions(tenantId?: string) {
   try {
-    const url = tenantId ? `${API_BASE_URL}/cash/transactions?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/cash/transactions`;
+    const url = tenantId ? `${API_BASE_URL}/cash/transactions?tenantId=${encodeURIComponent(tenantId)}&limit=all` : `${API_BASE_URL}/cash/transactions?limit=all`;
     const res = await fetchWithTimeout(url);
     if (!res.ok) return [];
     const json = await res.json();

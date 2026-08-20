@@ -145,6 +145,67 @@ export const PaymentOutScreen: React.FC<PaymentOutScreenProps> = ({
         await syncManager.logMutation('PARTY', String(selectedParty.id), 'UPDATE', { id: selectedParty.id, currentBalance: newBal });
       }
 
+      // 2b. Automatically apply payment towards unpaid purchase bills for this supplier (oldest first)
+      const allBills = await db.purchaseBills.toArray();
+      const supplierBills = allBills.filter(b =>
+        (selectedParty.id !== undefined && b.supplierId === selectedParty.id) ||
+        (b.supplierName && b.supplierName.trim().toLowerCase() === selectedParty.name.trim().toLowerCase())
+      );
+
+      const unpaidBills = supplierBills
+        .filter(b => b.paymentStatus !== 'PAID' || (b.dueAmount !== undefined && b.dueAmount > 0))
+        .sort((a, b) => new Date(a.billDate || 0).getTime() - new Date(b.billDate || 0).getTime());
+
+      let remainingPayOut = amount;
+
+      for (const bill of unpaidBills) {
+        if (remainingPayOut <= 0) break;
+
+        const currentDue = bill.dueAmount !== undefined && bill.dueAmount > 0
+          ? bill.dueAmount
+          : Math.max(0, (bill.grandTotal || 0) - (bill.paidAmount || 0));
+
+        if (remainingPayOut >= currentDue) {
+          remainingPayOut -= currentDue;
+          const newPaid = bill.grandTotal || ((bill.paidAmount || 0) + currentDue);
+          const updatedBill = {
+            ...bill,
+            paidAmount: newPaid,
+            dueAmount: 0,
+            paymentStatus: 'PAID' as const
+          };
+
+          if (bill.id) {
+            await db.purchaseBills.update(bill.id, {
+              paidAmount: newPaid,
+              dueAmount: 0,
+              paymentStatus: 'PAID'
+            });
+            await syncManager.logMutation('PURCHASE_BILL', bill.billId, 'UPDATE', updatedBill);
+          }
+        } else {
+          const newPaid = (bill.paidAmount || 0) + remainingPayOut;
+          const newDue = Math.max(0, currentDue - remainingPayOut);
+          remainingPayOut = 0;
+
+          const updatedBill = {
+            ...bill,
+            paidAmount: newPaid,
+            dueAmount: newDue,
+            paymentStatus: newDue === 0 ? ('PAID' as const) : ('PARTIAL' as const)
+          };
+
+          if (bill.id) {
+            await db.purchaseBills.update(bill.id, {
+              paidAmount: newPaid,
+              dueAmount: newDue,
+              paymentStatus: newDue === 0 ? 'PAID' : 'PARTIAL'
+            });
+            await syncManager.logMutation('PURCHASE_BILL', bill.billId, 'UPDATE', updatedBill);
+          }
+        }
+      }
+
       // 3. Update Ledger Accounts (Accounts Payable credit balance reduced, Cash/Bank reduced)
       const accounts = await db.ledgerAccounts.filter(a => (a.tenantId || 'default-tenant') === activeTenantId).toArray();
       const apAccount = accounts.find(a => a.accountCode === '2010') || accounts[0];
@@ -205,15 +266,20 @@ export const PaymentOutScreen: React.FC<PaymentOutScreenProps> = ({
     if (!payment.id) return;
     showConfirm({
       title: 'Delete Payment Voucher',
-      message: `Are you sure you want to delete Payment-Out voucher ${payment.receiptNumber}?`,
+      message: `Are you sure you want to delete Payment-Out voucher ${payment.receiptNumber}? This will revert supplier payables, purchase bill dues, and linked cash transactions.`,
       type: 'danger',
       confirmText: 'Yes, Delete',
       onConfirm: async () => {
-        await db.paymentOut.delete(payment.id!);
+        const { voidPaymentOut } = await import('../../services/reversal');
+        const res = await voidPaymentOut(payment.id!);
         try {
           if (payment.id) await deleteServerPaymentOut(payment.id);
         } catch {}
-        showToast('Payment voucher deleted', 'info');
+        if (res.success) {
+          showToast(res.message || 'Payment voucher deleted and rolled back', 'info');
+        } else {
+          showToast(res.error || 'Failed to void payment voucher', 'error');
+        }
         onPaymentRecorded();
       }
     });
