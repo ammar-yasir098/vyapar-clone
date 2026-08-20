@@ -41,6 +41,8 @@ export class User extends Model {
   declare phone: string;
   declare passwordHash: string;
   declare role: string;
+  declare resetToken: string | null;
+  declare resetTokenExpiry: Date | null;
   declare createdAt: Date;
   declare updatedAt: Date;
 }
@@ -53,7 +55,9 @@ User.init(
     email: { type: DataTypes.STRING, allowNull: false, unique: true },
     phone: { type: DataTypes.STRING, defaultValue: '' },
     passwordHash: { type: DataTypes.STRING, allowNull: false, field: 'password_hash' },
-    role: { type: DataTypes.STRING, defaultValue: 'OWNER' }
+    role: { type: DataTypes.STRING, defaultValue: 'OWNER' },
+    resetToken: { type: DataTypes.STRING, allowNull: true, field: 'reset_token' },
+    resetTokenExpiry: { type: DataTypes.DATE, allowNull: true, field: 'reset_token_expiry' }
   },
   { sequelize, modelName: 'User', tableName: 'users', timestamps: true }
 );

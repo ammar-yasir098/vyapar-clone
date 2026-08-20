@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import {
   Store, Lock, Mail, User as UserIcon, Phone, Building2,
   ArrowRight, ShieldCheck, Sparkles, CheckCircle2, AlertCircle,
-  Eye, EyeOff, TrendingUp, Package, Users, Receipt
+  Eye, EyeOff, TrendingUp, Package, Users, Receipt, KeyRound, ArrowLeft
 } from 'lucide-react';
-import { API_BASE_URL } from '../../services/api';
+import { API_BASE_URL, requestForgotPassword, resetPassword } from '../../services/api';
 
 export interface AuthUser {
   userId: string;
@@ -54,51 +54,104 @@ const StatCard: React.FC<{ icon: React.ReactNode; label: string; value: string; 
 };
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot' | 'reset'>('login');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [mounted, setMounted] = useState(false);
 
+  // Form fields
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [businessName, setBusinessName] = useState('');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
 
+  // Password Reset fields
+  const [resetTokenInput, setResetTokenInput] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 60);
     return () => clearTimeout(t);
   }, []);
 
+  // Calculate password strength for registration
+  const getPasswordStrength = (pass: string) => {
+    if (!pass) return { score: 0, label: '', color: '#e2e8f0' };
+    let score = 0;
+    if (pass.length >= 8) score += 1;
+    if (/[A-Z]/.test(pass)) score += 1;
+    if (/[0-9]/.test(pass)) score += 1;
+    if (/[^A-Za-z0-9]/.test(pass)) score += 1;
+
+    switch (score) {
+      case 1: return { score: 1, label: 'Weak (min 8 chars needed)', color: '#ef4444' };
+      case 2: return { score: 2, label: 'Fair', color: '#f59e0b' };
+      case 3: return { score: 3, label: 'Good', color: '#3b82f6' };
+      case 4: return { score: 4, label: 'Strong', color: '#10b981' };
+      default: return { score: 0, label: 'Too Short (min 8 chars)', color: '#ef4444' };
+    }
+  };
+
+  const pwdStrength = getPasswordStrength(password);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    setSuccessMessage(null);
+
+    // Client-side password validation
+    if (mode === 'register' && password.length < 8) {
+      setErrorMessage('Password must be at least 8 characters long.');
+      return;
+    }
+
     setLoading(true);
     try {
-      const endpoint = mode === 'login'
-        ? `${API_BASE_URL}/auth/login`
-        : `${API_BASE_URL}/auth/register`;
-      const bodyPayload = mode === 'login'
-        ? { email, password }
-        : { businessName: businessName || 'Company', fullName, email, phone, password };
+      if (mode === 'login' || mode === 'register') {
+        const endpoint = mode === 'login'
+          ? `${API_BASE_URL}/auth/login`
+          : `${API_BASE_URL}/auth/register`;
+        const bodyPayload = mode === 'login'
+          ? { email, password }
+          : { businessName: businessName || 'Company', fullName, email, phone, password };
 
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bodyPayload)
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || 'Authentication failed.');
-      onAuthSuccess({
-        userId: data.user.userId,
-        tenantId: data.user.tenantId,
-        fullName: data.user.fullName,
-        email: data.user.email,
-        phone: data.user.phone,
-        role: data.user.role || 'OWNER',
-        token: data.token
-      });
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyPayload)
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || 'Authentication failed.');
+        onAuthSuccess({
+          userId: data.user.userId,
+          tenantId: data.user.tenantId,
+          fullName: data.user.fullName,
+          email: data.user.email,
+          phone: data.user.phone,
+          role: data.user.role || 'OWNER',
+          token: data.token
+        });
+      } else if (mode === 'forgot') {
+        const data = await requestForgotPassword(email);
+        if (!data.success) throw new Error(data.error || 'Failed to process request');
+        setSuccessMessage('Reset token generated! Enter the token below to set your new password.');
+        if (data.resetToken) setResetTokenInput(data.resetToken);
+        setMode('reset');
+      } else if (mode === 'reset') {
+        if (newPassword.length < 8) {
+          throw new Error('New password must be at least 8 characters long');
+        }
+        const data = await resetPassword(email, resetTokenInput, newPassword);
+        if (!data.success) throw new Error(data.error || 'Failed to reset password');
+        setSuccessMessage('Password reset successfully! Please sign in with your new password.');
+        setPassword(newPassword);
+        setNewPassword('');
+        setResetTokenInput('');
+        setMode('login');
+      }
     } catch (err: any) {
       setErrorMessage(err.message || 'Unable to connect to server. Please check your connection.');
     } finally {
@@ -300,41 +353,61 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             {/* Heading */}
             <div style={{ marginBottom: '22px' }}>
               <h1 style={{ margin: 0, fontSize: '22px', fontWeight: 900, color: '#0f172a', letterSpacing: '-0.4px' }}>
-                {mode === 'login' ? 'Welcome back 👋' : 'Create your account'}
+                {mode === 'login' && 'Welcome back 👋'}
+                {mode === 'register' && 'Create your account'}
+                {mode === 'forgot' && 'Reset your password'}
+                {mode === 'reset' && 'Enter reset token'}
               </h1>
               <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: '#94a3b8', fontWeight: 500 }}>
-                {mode === 'login'
-                  ? 'Enter your credentials to access your store'
-                  : 'Fill in the details to set up your business'}
+                {mode === 'login' && 'Enter your credentials to access your store'}
+                {mode === 'register' && 'Fill in the details to set up your business'}
+                {mode === 'forgot' && 'Enter your registered email to receive a password reset token'}
+                {mode === 'reset' && 'Enter the reset PIN and your new password'}
               </p>
             </div>
 
-            {/* Tabs */}
-            <div style={{
-              display: 'flex', background: '#f1f5f9', borderRadius: '10px',
-              padding: '4px', marginBottom: '22px', gap: '4px',
-            }}>
-              {(['login', 'register'] as const).map(m => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => { setMode(m); setErrorMessage(null); }}
-                  style={{
-                    flex: 1, padding: '8px 0', fontSize: '12px', fontWeight: 700,
-                    borderRadius: '7px', border: 'none', cursor: 'pointer',
-                    transition: 'all 0.25s',
-                    background: mode === m ? '#fff' : 'transparent',
-                    color: mode === m ? '#0f172a' : '#94a3b8',
-                    boxShadow: mode === m ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  {m === 'login' ? 'Sign In' : 'Create Account'}
-                </button>
-              ))}
-            </div>
+            {/* Mode Switcher Tabs (Only for Login & Register) */}
+            {(mode === 'login' || mode === 'register') && (
+              <div style={{
+                display: 'flex', background: '#f1f5f9', borderRadius: '10px',
+                padding: '4px', marginBottom: '22px', gap: '4px',
+              }}>
+                {(['login', 'register'] as const).map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => { setMode(m); setErrorMessage(null); setSuccessMessage(null); }}
+                    style={{
+                      flex: 1, padding: '8px 0', fontSize: '12px', fontWeight: 700,
+                      borderRadius: '7px', border: 'none', cursor: 'pointer',
+                      transition: 'all 0.25s',
+                      background: mode === m ? '#fff' : 'transparent',
+                      color: mode === m ? '#0f172a' : '#94a3b8',
+                      boxShadow: mode === m ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    {m === 'login' ? 'Sign In' : 'Create Account'}
+                  </button>
+                ))}
+              </div>
+            )}
 
-            {/* Error */}
+            {/* Success Alert */}
+            {successMessage && (
+              <div style={{
+                display: 'flex', alignItems: 'flex-start', gap: '8px',
+                background: '#ecfdf5', border: '1.5px solid #a7f3d0',
+                borderRadius: '10px', padding: '10px 12px',
+                color: '#065f46', fontSize: '12px', fontWeight: 500,
+                marginBottom: '16px',
+              }}>
+                <CheckCircle2 style={{ width: 14, height: 14, marginTop: 1, flexShrink: 0 }} />
+                {successMessage}
+              </div>
+            )}
+
+            {/* Error Alert */}
             {errorMessage && (
               <div style={{
                 display: 'flex', alignItems: 'flex-start', gap: '8px',
@@ -352,6 +425,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             <form onSubmit={handleSubmit}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
+                {/* Registration Fields */}
                 {mode === 'register' && (
                   <>
                     <Field label="Business / Store Name">
@@ -392,6 +466,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                   </>
                 )}
 
+                {/* Email (Shown in Login, Register, Forgot, Reset) */}
                 <Field label="Email Address">
                   <Mail style={{ width: 14, height: 14, color: '#94a3b8', position: 'absolute', left: 13, top: 15 }} />
                   <input
@@ -404,31 +479,128 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                   />
                 </Field>
 
-                <Field label="Password">
-                  <Lock style={{ width: 14, height: 14, color: '#94a3b8', position: 'absolute', left: 13, top: 15 }} />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="••••••••••"
-                    style={{ ...inputBase, paddingRight: '40px' }}
-                    onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
-                    onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
-                  />
+                {/* Password (Login & Register) */}
+                {(mode === 'login' || mode === 'register') && (
+                  <Field label="Password">
+                    <Lock style={{ width: 14, height: 14, color: '#94a3b8', position: 'absolute', left: 13, top: 15 }} />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      style={{ ...inputBase, paddingRight: '40px' }}
+                      onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                      onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
+                    />
+                    <button
+                      type="button" tabIndex={-1}
+                      onClick={() => setShowPassword(v => !v)}
+                      style={{
+                        position: 'absolute', right: 12, top: 12,
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: '#94a3b8', padding: 0, display: 'flex', alignItems: 'center',
+                      }}
+                    >
+                      {showPassword
+                        ? <EyeOff style={{ width: 16, height: 16 }} />
+                        : <Eye style={{ width: 16, height: 16 }} />}
+                    </button>
+                  </Field>
+                )}
+
+                {/* Real-time Password Strength Indicator for Registration */}
+                {mode === 'register' && password && (
+                  <div style={{ marginTop: '-4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>Password Strength:</span>
+                      <span style={{ fontSize: '11px', color: pwdStrength.color, fontWeight: 700 }}>{pwdStrength.label}</span>
+                    </div>
+                    <div style={{ height: '4px', width: '100%', background: '#e2e8f0', borderRadius: '2px', overflow: 'hidden' }}>
+                      <div style={{
+                        height: '100%',
+                        width: `${(pwdStrength.score / 4) * 100}%`,
+                        background: pwdStrength.color,
+                        transition: 'all 0.3s'
+                      }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Forgot Password Link on Login Form */}
+                {mode === 'login' && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-6px' }}>
+                    <button
+                      type="button"
+                      onClick={() => { setMode('forgot'); setErrorMessage(null); setSuccessMessage(null); }}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        fontSize: '11.5px', color: '#3b82f6', fontWeight: 600,
+                        padding: 0, fontFamily: 'inherit'
+                      }}
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
+
+                {/* Reset Token & New Password Inputs for Reset Mode */}
+                {mode === 'reset' && (
+                  <>
+                    <Field label="Reset Token / PIN">
+                      <KeyRound style={{ width: 14, height: 14, color: '#94a3b8', position: 'absolute', left: 13, top: 15 }} />
+                      <input
+                        type="text" required value={resetTokenInput}
+                        onChange={e => setResetTokenInput(e.target.value)}
+                        placeholder="e.g. 123456"
+                        style={inputBase}
+                        onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                        onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
+                      />
+                    </Field>
+
+                    <Field label="New Password (min 8 chars)">
+                      <Lock style={{ width: 14, height: 14, color: '#94a3b8', position: 'absolute', left: 13, top: 15 }} />
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required value={newPassword}
+                        onChange={e => setNewPassword(e.target.value)}
+                        placeholder="••••••••"
+                        style={{ ...inputBase, paddingRight: '40px' }}
+                        onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                        onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
+                      />
+                      <button
+                        type="button" tabIndex={-1}
+                        onClick={() => setShowPassword(v => !v)}
+                        style={{
+                          position: 'absolute', right: 12, top: 12,
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          color: '#94a3b8', padding: 0, display: 'flex', alignItems: 'center',
+                        }}
+                      >
+                        {showPassword
+                          ? <EyeOff style={{ width: 16, height: 16 }} />
+                          : <Eye style={{ width: 16, height: 16 }} />}
+                      </button>
+                    </Field>
+                  </>
+                )}
+
+                {/* Back to Login Button for Forgot / Reset Modes */}
+                {(mode === 'forgot' || mode === 'reset') && (
                   <button
-                    type="button" tabIndex={-1}
-                    onClick={() => setShowPassword(v => !v)}
+                    type="button"
+                    onClick={() => { setMode('login'); setErrorMessage(null); setSuccessMessage(null); }}
                     style={{
-                      position: 'absolute', right: 12, top: 12,
                       background: 'none', border: 'none', cursor: 'pointer',
-                      color: '#94a3b8', padding: 0, display: 'flex', alignItems: 'center',
+                      fontSize: '12px', color: '#64748b', fontWeight: 600,
+                      display: 'flex', alignItems: 'center', gap: '4px', margin: '4px 0',
+                      fontFamily: 'inherit'
                     }}
                   >
-                    {showPassword
-                      ? <EyeOff style={{ width: 16, height: 16 }} />
-                      : <Eye style={{ width: 16, height: 16 }} />}
+                    <ArrowLeft style={{ width: 14, height: 14 }} /> Back to Sign In
                   </button>
-                </Field>
+                )}
 
                 {/* Submit Button */}
                 <button
@@ -466,7 +638,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                     </>
                   ) : (
                     <>
-                      {mode === 'login' ? 'Sign In to Account' : 'Register & Create Store'}
+                      {mode === 'login' && 'Sign In to Account'}
+                      {mode === 'register' && 'Register & Create Store'}
+                      {mode === 'forgot' && 'Request Reset Token'}
+                      {mode === 'reset' && 'Reset Password'}
                       <ArrowRight style={{ width: 16, height: 16, strokeWidth: 2.5 }} />
                     </>
                   )}
@@ -509,8 +684,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             gap: '20px', marginTop: '18px',
           }}>
             {[
-              { icon: <ShieldCheck style={{ width: 13, height: 13, color: '#10b981' }} />, text: '256-Bit SSL Cloud', col: '#10b981' },
-              { icon: <CheckCircle2 style={{ width: 13, height: 13, color: '#3b82f6' }} />, text: 'Full Offline POS Mode', col: '#3b82f6' },
+              { icon: <ShieldCheck style={{ width: 13, height: 13, color: '#10b981' }} />, text: '256-Bit SSL Cloud' },
+              { icon: <CheckCircle2 style={{ width: 13, height: 13, color: '#3b82f6' }} />, text: 'Full Offline POS Mode' },
             ].map(({ icon, text }) => (
               <div key={text} style={{
                 display: 'flex', alignItems: 'center', gap: '5px',

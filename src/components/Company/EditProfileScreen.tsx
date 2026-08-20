@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Pencil, Upload, Calendar, Building, Phone, Mail, MapPin, CheckCircle2, Trash2 } from 'lucide-react';
+import { Pencil, Upload, Calendar, Building, Phone, Mail, MapPin, CheckCircle2, Trash2, Lock, Eye, EyeOff, KeyRound, ShieldCheck } from 'lucide-react';
 import { BusinessDetails } from '../../types';
-import { fetchServerCompanyProfile, saveServerCompanyProfile } from '../../services/api';
+import { fetchServerCompanyProfile, saveServerCompanyProfile, changeUserPassword } from '../../services/api';
 import { db } from '../../db';
 import { useToast } from '../Common/ToastContext';
 
@@ -34,6 +34,49 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Password Change state
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPass, setShowPass] = useState(false);
+  const [isChangingPass, setIsChangingPass] = useState(false);
+  const [passMessage, setPassMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(null);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPassMessage(null);
+
+    if (!currentPassword || !newPassword) {
+      setPassMessage({ text: 'Please fill in both current and new password fields.', type: 'error' });
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setPassMessage({ text: 'New password must be at least 8 characters long.', type: 'error' });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPassMessage({ text: 'New password and confirm password do not match.', type: 'error' });
+      return;
+    }
+
+    setIsChangingPass(true);
+    try {
+      const res = await changeUserPassword(currentPassword, newPassword);
+      if (!res.success) throw new Error(res.error || 'Failed to change password.');
+      setPassMessage({ text: 'Password updated successfully!', type: 'success' });
+      showToast('Password changed successfully.', 'success');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err: any) {
+      setPassMessage({ text: err.message || 'Unable to change password.', type: 'error' });
+    } finally {
+      setIsChangingPass(false);
+    }
+  };
 
   // Load profile from PostgreSQL API or Dexie local IndexedDB fallback
   useEffect(() => {
@@ -389,6 +432,90 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
                   className="absolute inset-0 opacity-0 cursor-pointer"
                 />
               </div>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      {/* Security & Account Password */}
+      <div className="max-w-6xl mx-auto w-full bg-white border border-slate-200 rounded-2xl p-6 shadow-sm mt-6">
+        <div className="flex items-center gap-2 pb-4 border-b border-slate-100 mb-5">
+          <div className="w-8 h-8 rounded-xl bg-blue-50 border border-blue-200 text-blue-600 flex items-center justify-center font-bold">
+            <Lock className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="font-extrabold text-slate-900 text-sm">Security & Account Password</h3>
+            <p className="text-xs text-slate-500 font-medium">Update your account credentials</p>
+          </div>
+        </div>
+
+        {passMessage && (
+          <div className={`p-3 rounded-xl text-xs font-medium mb-4 flex items-center gap-2 ${
+            passMessage.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+          }`}>
+            <span>{passMessage.text}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleChangePassword} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">Current Password</label>
+            <div className="relative">
+              <input
+                type={showPass ? 'text' : 'password'}
+                required
+                value={currentPassword}
+                onChange={e => setCurrentPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full h-10 pl-9 pr-9 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition"
+              />
+              <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">New Password (min 8 chars)</label>
+            <div className="relative">
+              <input
+                type={showPass ? 'text' : 'password'}
+                required
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full h-10 pl-9 pr-9 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition"
+              />
+              <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              <button
+                type="button"
+                onClick={() => setShowPass(v => !v)}
+                className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 transition"
+              >
+                {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">Confirm New Password</label>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={showPass ? 'text' : 'password'}
+                  required
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full h-10 pl-9 pr-3 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 outline-none focus:bg-white focus:border-blue-600 transition"
+                />
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              </div>
+              <button
+                type="submit"
+                disabled={isChangingPass}
+                className="h-10 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer shrink-0 disabled:opacity-50"
+              >
+                {isChangingPass ? 'Updating...' : 'Update Password'}
+              </button>
             </div>
           </div>
         </form>

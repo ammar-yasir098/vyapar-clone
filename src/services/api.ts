@@ -34,11 +34,29 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
     }
   }
 
+  const token = localStorage.getItem('vyapar_auth_token');
+  const headers = new Headers(options.headers || {});
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetch(url, { ...options, headers, signal: controller.signal });
     clearTimeout(id);
+
+    // If session/token is invalid or expired (401 Unauthorized), purge local session & dispatch event
+    if (response.status === 401 && !url.includes('/auth/')) {
+      const hadToken = !!localStorage.getItem('vyapar_auth_token');
+      localStorage.removeItem('vyapar_auth_token');
+      localStorage.removeItem('vyapar_user_session');
+      localStorage.removeItem('vyapar_current_tenant');
+      if (hadToken) {
+        window.dispatchEvent(new Event('vyapar:unauthorized'));
+      }
+    }
+
     return response;
   } catch (err) {
     clearTimeout(id);
@@ -536,6 +554,46 @@ export async function fetchServerCashTransactions(tenantId?: string) {
     return json.data?.transactions || [];
   } catch (err) {
     return [];
+  }
+}
+
+// AUTH & PASSWORD MANAGEMENT
+export async function requestForgotPassword(email: string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Unable to connect to authentication server' };
+  }
+}
+
+export async function resetPassword(email: string, resetToken: string, newPassword: string) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, resetToken, newPassword })
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Unable to connect to authentication server' };
+  }
+}
+
+export async function changeUserPassword(currentPassword: string, newPassword: string) {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/auth/change-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Unable to process password update' };
   }
 }
 

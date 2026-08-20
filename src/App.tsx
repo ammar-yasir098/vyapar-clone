@@ -135,7 +135,7 @@ export function App() {
     window.location.hash = tab;
   };
 
-  // Sync hash changes
+  // Sync hash changes & listen for unauthorized event
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '');
@@ -143,8 +143,15 @@ export function App() {
         setActiveTabState(hash);
       }
     };
+    const handleUnauthorized = () => {
+      setUserSession(null);
+    };
     window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    window.addEventListener('vyapar:unauthorized', handleUnauthorized);
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+      window.removeEventListener('vyapar:unauthorized', handleUnauthorized);
+    };
   }, [activeTab]);
 
   // Helper to check if an entity has pending unsynced local mutations in syncJournal
@@ -238,6 +245,11 @@ export function App() {
       console.log(`[Sync] Local records loaded: ${localItemCount} items, ${localPartyCount} parties, ${localInvoiceCount} invoices`);
 
       setIsDbLoaded(true);
+
+      // If user is not logged in or has no saved auth token, do not attempt protected backend sync calls
+      if (!userSession || !localStorage.getItem('vyapar_auth_token')) {
+        return;
+      }
 
       // Fast health check: if backend server is offline, skip network calls to prevent UI delays
       const isOnline = await checkServerHealth(1500);

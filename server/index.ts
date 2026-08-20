@@ -36,21 +36,28 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Serve static uploaded images
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// REST API v1 Routes
+import { authenticateJwt } from './middleware/auth.js';
+
+// REST API v1 Routes — Public
 app.use('/api/v1/auth', authRouter);
-app.use('/api/v1/sync', syncRouter);
-app.use('/api/v1/company', companyRouter);
-app.use('/api/v1/items', itemsRouter);
-app.use('/api/v1/parties', partiesRouter);
-app.use('/api/v1/invoices', invoicesRouter);
-app.use('/api/v1/purchases', purchasesRouter);
-app.use('/api/v1/estimates', estimatesRouter);
-app.use('/api/v1/payments', paymentsRouter);
-app.use('/api/v1/purchase-orders', purchaseOrdersRouter);
-app.use('/api/v1/expenses', expensesRouter);
-app.use('/api/v1/purchase-returns', purchaseReturnsRouter);
-app.use('/api/v1/sale-returns', saleReturnsRouter);
-app.use('/api/v1/cash', cashRouter);
+
+// REST API v1 Routes — Protected Data & Sync Endpoints
+app.use('/api/v1/sync', (req, res, next) => {
+  if (req.path === '/health') return next();
+  return authenticateJwt(req, res, next);
+}, syncRouter);
+app.use('/api/v1/company', authenticateJwt, companyRouter);
+app.use('/api/v1/items', authenticateJwt, itemsRouter);
+app.use('/api/v1/parties', authenticateJwt, partiesRouter);
+app.use('/api/v1/invoices', authenticateJwt, invoicesRouter);
+app.use('/api/v1/purchases', authenticateJwt, purchasesRouter);
+app.use('/api/v1/estimates', authenticateJwt, estimatesRouter);
+app.use('/api/v1/payments', authenticateJwt, paymentsRouter);
+app.use('/api/v1/purchase-orders', authenticateJwt, purchaseOrdersRouter);
+app.use('/api/v1/expenses', authenticateJwt, expensesRouter);
+app.use('/api/v1/purchase-returns', authenticateJwt, purchaseReturnsRouter);
+app.use('/api/v1/sale-returns', authenticateJwt, saleReturnsRouter);
+app.use('/api/v1/cash', authenticateJwt, cashRouter);
 
 // Root Status
 app.get('/', (req: Request, res: Response) => {
