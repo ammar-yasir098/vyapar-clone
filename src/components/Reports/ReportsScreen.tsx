@@ -2170,7 +2170,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
                   Total Money-Out: Rs {dayBookMoneyOutTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
                 <div className="text-teal-600">
-                  Total Money In - Total Money Out: Rs {dayBookNetBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  Net Balance: Rs {dayBookNetBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               </div>
             </div>

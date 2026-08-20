@@ -1,5 +1,9 @@
-import React, { useState } from 'react';
-import { Store, Lock, Mail, User as UserIcon, Phone, Building2, ArrowRight, ShieldCheck, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  Store, Lock, Mail, User as UserIcon, Phone, Building2,
+  ArrowRight, ShieldCheck, Sparkles, CheckCircle2, AlertCircle,
+  Eye, EyeOff, TrendingUp, Package, Users, Receipt
+} from 'lucide-react';
 import { API_BASE_URL } from '../../services/api';
 
 export interface AuthUser {
@@ -16,25 +20,65 @@ interface AuthScreenProps {
   onAuthSuccess: (session: AuthUser) => void;
 }
 
+// Animated stat card for the left panel
+const StatCard: React.FC<{ icon: React.ReactNode; label: string; value: string; color: string; delay: number }> =
+  ({ icon, label, value, color, delay }) => {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), delay);
+    return () => clearTimeout(t);
+  }, [delay]);
+  return (
+    <div
+      className="flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-700"
+      style={{
+        background: 'rgba(255,255,255,0.06)',
+        border: '1px solid rgba(255,255,255,0.1)',
+        backdropFilter: 'blur(10px)',
+        opacity: visible ? 1 : 0,
+        transform: visible ? 'translateY(0)' : 'translateY(12px)',
+      }}
+    >
+      <div
+        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+        style={{ background: `${color}22` }}
+      >
+        <span style={{ color }}>{icon}</span>
+      </div>
+      <div>
+        <div className="text-white text-sm font-bold">{value}</div>
+        <div className="text-slate-400 text-[11px]">{label}</div>
+      </div>
+    </div>
+  );
+};
+
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
-  // Form fields
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [businessName, setBusinessName] = useState('');
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
 
+  useEffect(() => {
+    const t = setTimeout(() => setMounted(true), 60);
+    return () => clearTimeout(t);
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
     setLoading(true);
-
     try {
-      const endpoint = mode === 'login' ? `${API_BASE_URL}/auth/login` : `${API_BASE_URL}/auth/register`;
+      const endpoint = mode === 'login'
+        ? `${API_BASE_URL}/auth/login`
+        : `${API_BASE_URL}/auth/register`;
       const bodyPayload = mode === 'login'
         ? { email, password }
         : { businessName: businessName || 'Company', fullName, email, phone, password };
@@ -44,14 +88,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bodyPayload)
       });
-
       const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Authentication failed. Please check your credentials.');
-      }
-
-      const session: AuthUser = {
+      if (!res.ok || !data.success) throw new Error(data.error || 'Authentication failed.');
+      onAuthSuccess({
         userId: data.user.userId,
         tenantId: data.user.tenantId,
         fullName: data.user.fullName,
@@ -59,12 +98,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         phone: data.user.phone,
         role: data.user.role || 'OWNER',
         token: data.token
-      };
-
-      onAuthSuccess(session);
+      });
     } catch (err: any) {
-      console.error('Auth Error:', err);
-      setErrorMessage(err.message || 'Unable to connect to authentication server. Please check network connection.');
+      setErrorMessage(err.message || 'Unable to connect to server. Please check your connection.');
     } finally {
       setLoading(false);
     }
@@ -76,201 +112,432 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     setMode('login');
   };
 
+  const inputBase: React.CSSProperties = {
+    width: '100%',
+    height: '44px',
+    paddingLeft: '40px',
+    paddingRight: '16px',
+    background: '#f8fafc',
+    border: '1.5px solid #e2e8f0',
+    borderRadius: '10px',
+    fontSize: '13px',
+    color: '#1e293b',
+    fontWeight: 500,
+    outline: 'none',
+    transition: 'border-color 0.2s, box-shadow 0.2s',
+    fontFamily: 'inherit',
+  };
+
   return (
-    <div className="min-h-screen w-full bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden select-none">
-      {/* Dynamic Ambient Background Glows */}
-      <div className="absolute top-1/4 -left-32 w-96 h-96 bg-blue-600/20 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-1/4 -right-32 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
+    <div
+      style={{
+        minHeight: '100vh',
+        width: '100%',
+        display: 'flex',
+        fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif",
+        userSelect: 'none',
+      }}
+    >
 
-      {/* Main Glassmorphism Auth Container */}
-      <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-3xl shadow-2xl backdrop-blur-xl p-8 z-10 flex flex-col gap-6">
-        
-        {/* Header Branding */}
-        <div className="flex flex-col items-center text-center gap-2">
-          <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-500 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
-            <Store className="w-7 h-7 stroke-[2.5]" />
+      {/* ── Left Panel ───────────────────────────────────────── */}
+      <div
+        style={{
+          width: '420px',
+          minWidth: '420px',
+          background: 'linear-gradient(145deg, #0f172a 0%, #1a2744 45%, #0c1f3f 100%)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          padding: '40px 36px',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+        className="hidden lg:flex"
+      >
+        {/* Subtle dot grid overlay */}
+        <div style={{
+          position: 'absolute', inset: 0, pointerEvents: 'none',
+          backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px)',
+          backgroundSize: '24px 24px',
+        }} />
+
+        {/* Glowing orbs */}
+        <div style={{
+          position: 'absolute', top: '-80px', right: '-60px',
+          width: '300px', height: '300px',
+          background: 'radial-gradient(circle, rgba(59,130,246,0.18) 0%, transparent 70%)',
+          pointerEvents: 'none',
+        }} />
+        <div style={{
+          position: 'absolute', bottom: '-60px', left: '-40px',
+          width: '260px', height: '260px',
+          background: 'radial-gradient(circle, rgba(229,62,62,0.12) 0%, transparent 70%)',
+          pointerEvents: 'none',
+        }} />
+
+        {/* Logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', position: 'relative' }}>
+          <div style={{
+            width: '38px', height: '38px', borderRadius: '10px',
+            background: 'linear-gradient(135deg, #e53e3e, #c53030)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 4px 12px rgba(229,62,62,0.4)',
+          }}>
+            <Store style={{ width: '19px', height: '19px', color: '#fff', strokeWidth: 2.5 }} />
           </div>
-          <h1 className="text-2xl font-black text-white tracking-tight flex items-center gap-1.5 mt-2">
-            Vyapar POS <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-bold border border-blue-500/30 uppercase tracking-widest">Enterprise</span>
-          </h1>
-          <p className="text-xs font-semibold text-slate-400">
-            Cloud Multi-Tenant Authentication & Offline-First POS
-          </p>
-        </div>
-
-        {/* Auth Mode Tabs */}
-        <div className="grid grid-cols-2 bg-slate-950 p-1.5 rounded-2xl border border-slate-800/80">
-          <button
-            type="button"
-            onClick={() => { setMode('login'); setErrorMessage(null); }}
-            className={`py-2 text-xs font-extrabold rounded-xl transition-all ${
-              mode === 'login'
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Sign In
-          </button>
-          <button
-            type="button"
-            onClick={() => { setMode('register'); setErrorMessage(null); }}
-            className={`py-2 text-xs font-extrabold rounded-xl transition-all ${
-              mode === 'register'
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Create Account
-          </button>
-        </div>
-
-        {/* Error Alert */}
-        {errorMessage && (
-          <div className="bg-rose-500/10 border border-rose-500/30 p-3 rounded-2xl flex items-start gap-2.5 text-rose-400 text-xs font-bold animate-fadeIn">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
-            <span>{errorMessage}</span>
-          </div>
-        )}
-
-        {/* Auth Form */}
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          
-          {/* Registration Fields */}
-          {mode === 'register' && (
-            <>
-              <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Business / Store Name
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    required
-                    value={businessName}
-                    onChange={e => setBusinessName(e.target.value)}
-                    placeholder="e.g. SuperMarket Retailers"
-                    className="w-full h-10 pl-9 pr-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs font-bold text-white outline-none focus:border-blue-500 transition"
-                  />
-                  <Building2 className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Full Name
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    required
-                    value={fullName}
-                    onChange={e => setFullName(e.target.value)}
-                    placeholder="e.g. Ammar Yasir"
-                    className="w-full h-10 pl-9 pr-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs font-bold text-white outline-none focus:border-blue-500 transition"
-                  />
-                  <UserIcon className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Phone Number (Optional)
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={phone}
-                    onChange={e => setPhone(e.target.value)}
-                    placeholder="+92 300 xxxxxxx"
-                    className="w-full h-10 pl-9 pr-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs font-bold text-white outline-none focus:border-blue-500 transition"
-                  />
-                  <Phone className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* Email Address */}
           <div>
-            <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">
-              Email Address
-            </label>
-            <div className="relative">
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="admin@vyapar.com"
-                className="w-full h-10 pl-9 pr-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs font-bold text-white outline-none focus:border-blue-500 transition"
-              />
-              <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+            <div style={{ color: '#fff', fontWeight: 800, fontSize: '17px', letterSpacing: '-0.3px', lineHeight: 1.1 }}>
+              Vyapar POS
+            </div>
+            <div style={{
+              display: 'inline-block', fontSize: '9px', padding: '1px 7px', borderRadius: '4px',
+              background: 'rgba(59,130,246,0.25)', color: '#93c5fd',
+              fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            }}>
+              Enterprise
             </div>
           </div>
+        </div>
 
-          {/* Password */}
-          <div>
-            <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">
-              Password
-            </label>
-            <div className="relative">
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full h-10 pl-9 pr-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs font-bold text-white outline-none focus:border-blue-500 transition"
-              />
-              <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
-            </div>
+        {/* Hero text + stat cards */}
+        <div style={{ position: 'relative' }}>
+          <div
+            style={{
+              fontSize: '28px', fontWeight: 900, color: '#fff',
+              lineHeight: 1.25, marginBottom: '10px',
+              opacity: mounted ? 1 : 0,
+              transform: mounted ? 'translateY(0)' : 'translateY(16px)',
+              transition: 'all 0.7s cubic-bezier(0.22,1,0.36,1)',
+            }}
+          >
+            Run your business<br />
+            <span style={{
+              background: 'linear-gradient(90deg, #60a5fa, #818cf8)',
+              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+            }}>
+              smarter, faster.
+            </span>
+          </div>
+          <div style={{
+            fontSize: '12.5px', color: '#94a3b8', lineHeight: 1.6, marginBottom: '28px',
+            opacity: mounted ? 1 : 0,
+            transition: 'all 0.7s 0.1s cubic-bezier(0.22,1,0.36,1)',
+          }}>
+            Sales · Purchases · Inventory · Parties · Reports<br />
+            100% offline-first with real-time cloud sync.
           </div>
 
-          {/* Submit Action Button */}
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full h-11 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 cursor-pointer transition disabled:opacity-50 mt-2"
-          >
-            {loading ? (
-              <span>Authenticating with Cloud Server...</span>
-            ) : (
-              <>
-                <span>{mode === 'login' ? 'Sign In to Account' : 'Register & Create Store'}</span>
-                <ArrowRight className="w-4 h-4 stroke-[2.5]" />
-              </>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <StatCard icon={<TrendingUp style={{ width: 16, height: 16 }} />} label="Revenue tracked" value="Rs 2,40,000" color="#34d399" delay={200} />
+            <StatCard icon={<Package style={{ width: 16, height: 16 }} />} label="Items in catalog" value="1,248 Products" color="#60a5fa" delay={350} />
+            <StatCard icon={<Users style={{ width: 16, height: 16 }} />} label="Active parties" value="364 Customers" color="#f472b6" delay={500} />
+            <StatCard icon={<Receipt style={{ width: 16, height: 16 }} />} label="Bills saved today" value="47 Invoices" color="#fb923c" delay={650} />
+          </div>
+        </div>
+
+        {/* Bottom trust line */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', position: 'relative' }}>
+          {[
+            { icon: <ShieldCheck style={{ width: 13, height: 13, color: '#34d399' }} />, text: '256-bit SSL' },
+            { icon: <CheckCircle2 style={{ width: 13, height: 13, color: '#60a5fa' }} />, text: 'Full offline mode' },
+          ].map(({ icon, text }) => (
+            <div key={text} style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#64748b', fontSize: '11px', fontWeight: 500 }}>
+              {icon} {text}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Right Panel ──────────────────────────────────────── */}
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#f1f5f9',
+        padding: '32px 24px',
+        position: 'relative',
+        overflow: 'hidden',
+      }}>
+        {/* Subtle right-panel gradient accent */}
+        <div style={{
+          position: 'absolute', top: '-100px', right: '-80px',
+          width: '320px', height: '320px',
+          background: 'radial-gradient(circle, rgba(59,130,246,0.07) 0%, transparent 70%)',
+          pointerEvents: 'none',
+        }} />
+
+        <div
+          style={{
+            width: '100%', maxWidth: '420px',
+            opacity: mounted ? 1 : 0,
+            transform: mounted ? 'translateY(0)' : 'translateY(24px)',
+            transition: 'all 0.6s 0.15s cubic-bezier(0.22,1,0.36,1)',
+          }}
+        >
+          {/* Mobile logo */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '28px' }}
+            className="flex lg:hidden">
+            <div style={{
+              width: '34px', height: '34px', borderRadius: '9px',
+              background: 'linear-gradient(135deg, #e53e3e, #c53030)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Store style={{ width: '17px', height: '17px', color: '#fff', strokeWidth: 2.5 }} />
+            </div>
+            <span style={{ fontWeight: 800, color: '#1e293b', fontSize: '16px' }}>Vyapar POS</span>
+          </div>
+
+          {/* Card */}
+          <div style={{
+            background: '#fff',
+            borderRadius: '20px',
+            boxShadow: '0 4px 6px -1px rgba(0,0,0,0.07), 0 20px 60px -10px rgba(0,0,0,0.12)',
+            border: '1px solid rgba(226,232,240,0.8)',
+            padding: '32px',
+          }}>
+            {/* Heading */}
+            <div style={{ marginBottom: '22px' }}>
+              <h1 style={{ margin: 0, fontSize: '22px', fontWeight: 900, color: '#0f172a', letterSpacing: '-0.4px' }}>
+                {mode === 'login' ? 'Welcome back 👋' : 'Create your account'}
+              </h1>
+              <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: '#94a3b8', fontWeight: 500 }}>
+                {mode === 'login'
+                  ? 'Enter your credentials to access your store'
+                  : 'Fill in the details to set up your business'}
+              </p>
+            </div>
+
+            {/* Tabs */}
+            <div style={{
+              display: 'flex', background: '#f1f5f9', borderRadius: '10px',
+              padding: '4px', marginBottom: '22px', gap: '4px',
+            }}>
+              {(['login', 'register'] as const).map(m => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => { setMode(m); setErrorMessage(null); }}
+                  style={{
+                    flex: 1, padding: '8px 0', fontSize: '12px', fontWeight: 700,
+                    borderRadius: '7px', border: 'none', cursor: 'pointer',
+                    transition: 'all 0.25s',
+                    background: mode === m ? '#fff' : 'transparent',
+                    color: mode === m ? '#0f172a' : '#94a3b8',
+                    boxShadow: mode === m ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {m === 'login' ? 'Sign In' : 'Create Account'}
+                </button>
+              ))}
+            </div>
+
+            {/* Error */}
+            {errorMessage && (
+              <div style={{
+                display: 'flex', alignItems: 'flex-start', gap: '8px',
+                background: '#fef2f2', border: '1.5px solid #fecaca',
+                borderRadius: '10px', padding: '10px 12px',
+                color: '#dc2626', fontSize: '12px', fontWeight: 500,
+                marginBottom: '16px',
+              }}>
+                <AlertCircle style={{ width: 14, height: 14, marginTop: 1, flexShrink: 0 }} />
+                {errorMessage}
+              </div>
             )}
-          </button>
-        </form>
 
-        {/* Demo Quick Login Helper */}
-        {mode === 'login' && (
-          <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
-            <span className="text-[11px] text-slate-400 font-semibold">Testing app flow?</span>
-            <button
-              type="button"
-              onClick={fillDemoAccount}
-              className="text-xs font-bold text-blue-400 hover:text-blue-300 flex items-center gap-1 hover:underline cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Fill Demo Admin</span>
-            </button>
+            {/* Form */}
+            <form onSubmit={handleSubmit}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+
+                {mode === 'register' && (
+                  <>
+                    <Field label="Business / Store Name">
+                      <Building2 style={{ width: 14, height: 14, color: '#94a3b8', position: 'absolute', left: 13, top: 15 }} />
+                      <input
+                        type="text" required value={businessName}
+                        onChange={e => setBusinessName(e.target.value)}
+                        placeholder="e.g. SuperMarket Retailers"
+                        style={inputBase}
+                        onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                        onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
+                      />
+                    </Field>
+
+                    <Field label="Full Name">
+                      <UserIcon style={{ width: 14, height: 14, color: '#94a3b8', position: 'absolute', left: 13, top: 15 }} />
+                      <input
+                        type="text" required value={fullName}
+                        onChange={e => setFullName(e.target.value)}
+                        placeholder="e.g. Ammar Yasir"
+                        style={inputBase}
+                        onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                        onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
+                      />
+                    </Field>
+
+                    <Field label="Phone (optional)">
+                      <Phone style={{ width: 14, height: 14, color: '#94a3b8', position: 'absolute', left: 13, top: 15 }} />
+                      <input
+                        type="text" value={phone}
+                        onChange={e => setPhone(e.target.value)}
+                        placeholder="+92 300 xxxxxxx"
+                        style={inputBase}
+                        onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                        onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
+                      />
+                    </Field>
+                  </>
+                )}
+
+                <Field label="Email Address">
+                  <Mail style={{ width: 14, height: 14, color: '#94a3b8', position: 'absolute', left: 13, top: 15 }} />
+                  <input
+                    type="email" required value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="admin@vyapar.com"
+                    style={inputBase}
+                    onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                    onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
+                  />
+                </Field>
+
+                <Field label="Password">
+                  <Lock style={{ width: 14, height: 14, color: '#94a3b8', position: 'absolute', left: 13, top: 15 }} />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="••••••••••"
+                    style={{ ...inputBase, paddingRight: '40px' }}
+                    onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                    onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
+                  />
+                  <button
+                    type="button" tabIndex={-1}
+                    onClick={() => setShowPassword(v => !v)}
+                    style={{
+                      position: 'absolute', right: 12, top: 12,
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: '#94a3b8', padding: 0, display: 'flex', alignItems: 'center',
+                    }}
+                  >
+                    {showPassword
+                      ? <EyeOff style={{ width: 16, height: 16 }} />
+                      : <Eye style={{ width: 16, height: 16 }} />}
+                  </button>
+                </Field>
+
+                {/* Submit Button */}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    width: '100%', height: '46px', marginTop: '4px',
+                    background: loading
+                      ? '#c53030'
+                      : 'linear-gradient(135deg, #e53e3e 0%, #c53030 100%)',
+                    border: 'none', borderRadius: '11px',
+                    color: '#fff', fontSize: '13px', fontWeight: 700,
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                    boxShadow: loading ? 'none' : '0 4px 14px rgba(229,62,62,0.45)',
+                    transition: 'all 0.2s',
+                    fontFamily: 'inherit',
+                    opacity: loading ? 0.8 : 1,
+                    letterSpacing: '0.01em',
+                  }}
+                  onMouseEnter={e => { if (!loading) { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 6px 20px rgba(229,62,62,0.5)'; } }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = loading ? 'none' : '0 4px 14px rgba(229,62,62,0.45)'; }}
+                >
+                  {loading ? (
+                    <>
+                      <svg
+                        className="animate-spin"
+                        style={{ width: 16, height: 16 }}
+                        viewBox="0 0 24 24" fill="none"
+                      >
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                      </svg>
+                      Authenticating...
+                    </>
+                  ) : (
+                    <>
+                      {mode === 'login' ? 'Sign In to Account' : 'Register & Create Store'}
+                      <ArrowRight style={{ width: 16, height: 16, strokeWidth: 2.5 }} />
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+
+            {/* Demo helper */}
+            {mode === 'login' && (
+              <div style={{
+                marginTop: '18px', paddingTop: '16px',
+                borderTop: '1px solid #f1f5f9',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              }}>
+                <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 500 }}>
+                  Testing the app?
+                </span>
+                <button
+                  type="button"
+                  onClick={fillDemoAccount}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: '5px',
+                    fontSize: '11.5px', fontWeight: 700, color: '#3b82f6',
+                    fontFamily: 'inherit', padding: 0,
+                  }}
+                  onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.color = '#2563eb'}
+                  onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = '#3b82f6'}
+                >
+                  <Sparkles style={{ width: 12, height: 12 }} />
+                  Fill Demo Admin
+                </button>
+              </div>
+            )}
           </div>
-        )}
 
-        {/* Security & Offline Feature Badges */}
-        <div className="flex items-center justify-center gap-4 text-[10px] text-slate-500 font-bold tracking-wide uppercase pt-2">
-          <span className="flex items-center gap-1">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            256-Bit SSL Cloud
-          </span>
-          <span>•</span>
-          <span className="flex items-center gap-1">
-            <CheckCircle2 className="w-3.5 h-3.5 text-blue-400" />
-            Full Offline POS Mode
-          </span>
+          {/* Trust badges */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: '20px', marginTop: '18px',
+          }}>
+            {[
+              { icon: <ShieldCheck style={{ width: 13, height: 13, color: '#10b981' }} />, text: '256-Bit SSL Cloud', col: '#10b981' },
+              { icon: <CheckCircle2 style={{ width: 13, height: 13, color: '#3b82f6' }} />, text: 'Full Offline POS Mode', col: '#3b82f6' },
+            ].map(({ icon, text }) => (
+              <div key={text} style={{
+                display: 'flex', alignItems: 'center', gap: '5px',
+                fontSize: '11px', fontWeight: 600, color: '#94a3b8',
+              }}>
+                {icon} {text}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
   );
 };
+
+// Helper wrapper for form fields
+const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <div>
+    <label style={{
+      display: 'block', fontSize: '11px', fontWeight: 700,
+      color: '#475569', marginBottom: '6px',
+      textTransform: 'uppercase', letterSpacing: '0.06em',
+    }}>
+      {label}
+    </label>
+    <div style={{ position: 'relative' }}>
+      {children}
+    </div>
+  </div>
+);
