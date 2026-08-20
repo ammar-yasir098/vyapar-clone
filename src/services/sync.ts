@@ -1,5 +1,6 @@
 import { db } from '../db';
 import { SyncJournal } from '../types';
+import { fetchWithTimeout } from './api';
 
 const SYNC_SERVER_URL = 'http://localhost:5000/api/v1/sync';
 
@@ -300,7 +301,7 @@ class ClientSyncManager {
 
       if (unsynced.length > 0) {
         const activeTenantId = targetTenantId || 'default-tenant';
-        const response = await fetch(`${SYNC_SERVER_URL}/push`, {
+        const response = await fetchWithTimeout(`${SYNC_SERVER_URL}/push`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -312,11 +313,14 @@ class ClientSyncManager {
         if (response.ok) {
           const resData = await response.json();
           
-          // Mark local records as synced and prune obsolete journal records
-          for (const item of unsynced) {
-            if (item.id) {
-              await db.syncJournal.update(item.id, { synced: true });
-            }
+          // Bulk mark local records as synced in a single transaction
+          const idsToSync = unsynced.map(item => item.id!).filter(Boolean);
+          if (idsToSync.length > 0) {
+            await db.transaction('rw', db.syncJournal, async () => {
+              for (const id of idsToSync) {
+                await db.syncJournal.update(id, { synced: true });
+              }
+            });
           }
 
           await pruneSyncedJournalEntries();
@@ -335,6 +339,234 @@ class ClientSyncManager {
     } finally {
       this.isSyncing = false;
       this.notify();
+    }
+  }
+
+  /**
+   * Pulls latest server records from cloud PostgreSQL into local Dexie IndexedDB.
+   */
+  public async pullServerChanges(targetTenantId?: string) {
+    const activeTenantId = targetTenantId || (typeof localStorage !== 'undefined' ? localStorage.getItem('vyapar_current_tenant') : null) || 'default-tenant';
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+
+    try {
+      const response = await fetchWithTimeout(`${SYNC_SERVER_URL}/pull?tenantId=${encodeURIComponent(activeTenantId)}`);
+      if (!response.ok) return;
+      const json = await response.json();
+      if (!json.success || !json.data) return;
+
+      const {
+        items,
+        parties,
+        invoices,
+        estimates,
+        paymentsIn,
+        purchaseOrders,
+        purchaseBills,
+        paymentsOut,
+        expenses,
+        purchaseReturns,
+        saleReturns,
+        cashAccounts,
+        cashTransactions
+      } = json.data;
+
+      // 1. Merge items
+      if (Array.isArray(items) && items.length > 0) {
+        for (const sItem of items) {
+          const existing = await db.items
+            .filter(i => (i.tenantId || 'default-tenant') === activeTenantId && (i.skuCode === sItem.skuCode || i.name === sItem.name))
+            .first();
+          if (existing && existing.id) {
+            await db.items.update(existing.id, { ...sItem, id: existing.id });
+          } else {
+            const { id, ...itemData } = sItem;
+            await db.items.add(itemData);
+          }
+        }
+      }
+
+      // 2. Merge parties
+      if (Array.isArray(parties) && parties.length > 0) {
+        for (const sParty of parties) {
+          const existing = await db.parties
+            .filter(p => (p.tenantId || 'default-tenant') === activeTenantId && p.name === sParty.name)
+            .first();
+          if (existing && existing.id) {
+            await db.parties.update(existing.id, { ...sParty, id: existing.id });
+          } else {
+            const { id, ...partyData } = sParty;
+            await db.parties.add(partyData);
+          }
+        }
+      }
+
+      // 3. Merge invoices
+      if (Array.isArray(invoices) && invoices.length > 0) {
+        for (const sInv of invoices) {
+          const existing = await db.invoices
+            .filter(inv => (inv.tenantId || 'default-tenant') === activeTenantId && (inv.invoiceNumber === sInv.invoiceNumber || inv.invoiceId === sInv.invoiceId))
+            .first();
+          if (existing && existing.id) {
+            await db.invoices.update(existing.id, { ...sInv, id: existing.id });
+          } else {
+            const { id, ...invData } = sInv;
+            await db.invoices.add(invData);
+          }
+        }
+      }
+
+      // 4. Merge estimates
+      if (Array.isArray(estimates) && estimates.length > 0) {
+        for (const sEst of estimates) {
+          const existing = await db.estimates
+            .filter(e => (e.tenantId || 'default-tenant') === activeTenantId && (e.estimateNumber === sEst.estimateNumber || e.estimateId === sEst.estimateId))
+            .first();
+          if (existing && existing.id) {
+            await db.estimates.update(existing.id, { ...sEst, id: existing.id });
+          } else {
+            const { id, ...estData } = sEst;
+            await db.estimates.add(estData);
+          }
+        }
+      }
+
+      // 5. Merge payment-in
+      if (Array.isArray(paymentsIn) && paymentsIn.length > 0) {
+        for (const sPayIn of paymentsIn) {
+          const existing = await db.paymentIn
+            .filter(p => (p.tenantId || 'default-tenant') === activeTenantId && p.receiptNumber === sPayIn.receiptNumber)
+            .first();
+          if (existing && existing.id) {
+            await db.paymentIn.update(existing.id, { ...sPayIn, id: existing.id });
+          } else {
+            const { id, ...payInData } = sPayIn;
+            await db.paymentIn.add(payInData);
+          }
+        }
+      }
+
+      // 6. Merge purchase orders
+      if (Array.isArray(purchaseOrders) && purchaseOrders.length > 0) {
+        for (const sPO of purchaseOrders) {
+          const existing = await db.purchaseOrders
+            .filter(po => (po.tenantId || 'default-tenant') === activeTenantId && (po.poNumber === sPO.poNumber || po.poId === sPO.poId))
+            .first();
+          if (existing && existing.id) {
+            await db.purchaseOrders.update(existing.id, { ...sPO, id: existing.id });
+          } else {
+            const { id, ...poData } = sPO;
+            await db.purchaseOrders.add(poData);
+          }
+        }
+      }
+
+      // 7. Merge purchase bills
+      if (Array.isArray(purchaseBills) && purchaseBills.length > 0) {
+        for (const sBill of purchaseBills) {
+          const existing = await db.purchaseBills
+            .filter(b => (b.tenantId || 'default-tenant') === activeTenantId && (b.billNumber === sBill.billNumber || b.billId === sBill.billId))
+            .first();
+          if (existing && existing.id) {
+            await db.purchaseBills.update(existing.id, { ...sBill, id: existing.id });
+          } else {
+            const { id, ...billData } = sBill;
+            await db.purchaseBills.add(billData);
+          }
+        }
+      }
+
+      // 8. Merge payment-out
+      if (Array.isArray(paymentsOut) && paymentsOut.length > 0) {
+        for (const sPayOut of paymentsOut) {
+          const existing = await db.paymentOut
+            .filter(p => (p.tenantId || 'default-tenant') === activeTenantId && p.receiptNumber === sPayOut.receiptNumber)
+            .first();
+          if (existing && existing.id) {
+            await db.paymentOut.update(existing.id, { ...sPayOut, id: existing.id });
+          } else {
+            const { id, ...payOutData } = sPayOut;
+            await db.paymentOut.add(payOutData);
+          }
+        }
+      }
+
+      // 9. Merge expenses
+      if (Array.isArray(expenses) && expenses.length > 0) {
+        for (const sExp of expenses) {
+          const existing = await db.expenses
+            .filter(e => (e.tenantId || 'default-tenant') === activeTenantId && e.expenseNumber === sExp.expenseNumber)
+            .first();
+          if (existing && existing.id) {
+            await db.expenses.update(existing.id, { ...sExp, id: existing.id });
+          } else {
+            const { id, ...expData } = sExp;
+            await db.expenses.add(expData);
+          }
+        }
+      }
+
+      // 10. Merge purchase returns
+      if (Array.isArray(purchaseReturns) && purchaseReturns.length > 0) {
+        for (const sRet of purchaseReturns) {
+          const existing = await db.purchaseReturns
+            .filter(r => (r.tenantId || 'default-tenant') === activeTenantId && (r.debitNoteNumber === sRet.debitNoteNumber || r.returnId === sRet.returnId))
+            .first();
+          if (existing && existing.id) {
+            await db.purchaseReturns.update(existing.id, { ...sRet, id: existing.id });
+          } else {
+            const { id, ...retData } = sRet;
+            await db.purchaseReturns.add(retData);
+          }
+        }
+      }
+
+      // 11. Merge sale returns
+      if (Array.isArray(saleReturns) && saleReturns.length > 0) {
+        for (const sSRet of saleReturns) {
+          const existing = await db.saleReturns
+            .filter(sr => (sr.tenantId || 'default-tenant') === activeTenantId && (sr.creditNoteNumber === sSRet.creditNoteNumber || sr.returnId === sSRet.returnId))
+            .first();
+          if (existing && existing.id) {
+            await db.saleReturns.update(existing.id, { ...sSRet, id: existing.id });
+          } else {
+            const { id, ...sRetData } = sSRet;
+            await db.saleReturns.add(sRetData);
+          }
+        }
+      }
+
+      // 12. Merge cash accounts
+      if (Array.isArray(cashAccounts) && cashAccounts.length > 0) {
+        for (const sAcc of cashAccounts) {
+          const existing = await db.cashAccounts
+            .filter(c => (c.tenantId || 'default-tenant') === activeTenantId && c.name === sAcc.name)
+            .first();
+          if (existing && existing.id) {
+            await db.cashAccounts.update(existing.id as number, { ...sAcc, id: existing.id });
+          } else {
+            const { id, ...accData } = sAcc;
+            await db.cashAccounts.add(accData);
+          }
+        }
+      }
+
+      // 13. Merge cash transactions
+      if (Array.isArray(cashTransactions) && cashTransactions.length > 0) {
+        for (const sTx of cashTransactions) {
+          const existing = await db.cashTransactions
+            .filter(ct => (ct.tenantId || 'default-tenant') === activeTenantId && !!ct.referenceId && ct.referenceId === sTx.referenceId)
+            .first();
+          if (existing && existing.id) {
+            await db.cashTransactions.update(existing.id as number, { ...sTx, id: existing.id });
+          } else {
+            const { id, ...txData } = sTx;
+            await db.cashTransactions.add(txData);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Error pulling server changes:', err);
     }
   }
 }

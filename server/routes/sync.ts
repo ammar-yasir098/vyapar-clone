@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { cloudStore } from '../db/store.js';
+import { AuthenticatedRequest } from '../middleware/auth.js';
 import { 
   sequelize, 
   isDbConnected, 
@@ -77,7 +78,7 @@ syncRouter.post('/reset', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/v1/health
+// GET /api/v1/sync/health
 syncRouter.get('/health', (req: Request, res: Response) => {
   return res.json({
     status: 'ONLINE',
@@ -87,11 +88,72 @@ syncRouter.get('/health', (req: Request, res: Response) => {
   });
 });
 
+// GET /api/v1/sync/pull - Pull latest cloud records for tenant (Bidirectional Sync)
+syncRouter.get('/pull', async (req: Request, res: Response) => {
+  try {
+    const tenantId = (req as AuthenticatedRequest).user?.tenantId;
+
+    if (!tenantId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Valid authentication token with tenant ID required for pull' });
+    }
+
+    if (!isDbConnected()) {
+      return res.json({ success: true, serverVersion: cloudStore.getLatestVersion(), data: {} });
+    }
+
+    const [items, parties, invoices, estimates, paymentsIn, purchaseOrders, purchaseBills, paymentsOut, expenses, purchaseReturns, saleReturns, cashAccounts, cashTransactions] = await Promise.all([
+      Item.findAll({ where: { tenantId } }),
+      Party.findAll({ where: { tenantId } }),
+      Invoice.findAll({ where: { tenantId } }),
+      Estimate.findAll({ where: { tenantId } }),
+      PaymentIn.findAll({ where: { tenantId } }),
+      PurchaseOrder.findAll({ where: { tenantId } }),
+      PurchaseBill.findAll({ where: { tenantId } }),
+      PaymentOut.findAll({ where: { tenantId } }),
+      Expense.findAll({ where: { tenantId } }),
+      PurchaseReturn.findAll({ where: { tenantId } }),
+      SaleReturn.findAll({ where: { tenantId } }),
+      CashAccount.findAll({ where: { tenantId } }),
+      CashTransaction.findAll({ where: { tenantId } })
+    ]);
+
+    return res.json({
+      success: true,
+      tenantId,
+      serverVersion: cloudStore.getLatestVersion(),
+      data: {
+        items,
+        parties,
+        invoices,
+        estimates,
+        paymentsIn,
+        purchaseOrders,
+        purchaseBills,
+        paymentsOut,
+        expenses,
+        purchaseReturns,
+        saleReturns,
+        cashAccounts,
+        cashTransactions
+      }
+    });
+  } catch (err: any) {
+    console.error('Error pulling server updates:', err);
+    return res.status(500).json({ success: false, error: 'Failed to pull cloud updates' });
+  }
+});
+
 // POST /api/v1/sync/push
 syncRouter.post('/push', async (req: Request, res: Response) => {
-  const { tenantId, mutations } = req.body;
+  const authTenantId = (req as AuthenticatedRequest).user?.tenantId;
+  const { tenantId: bodyTenantId, mutations } = req.body;
+  const tenantId = authTenantId || bodyTenantId;
 
-  if (!tenantId || !Array.isArray(mutations)) {
+  if (!tenantId || (authTenantId && bodyTenantId && authTenantId !== bodyTenantId)) {
+    return res.status(403).json({ error: 'Tenant Mismatch: Cannot sync data for a different store tenant' });
+  }
+
+  if (!Array.isArray(mutations)) {
     return res.status(400).json({ error: 'Invalid push payload' });
   }
 
@@ -110,19 +172,16 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
           const mutationType = m.mutationType;
 
         if (entityType === 'ITEM') {
-          if (mutationType === 'DELETE' && payload.id) {
-            await Item.destroy({ where: { id: payload.id } });
+          if (mutationType === 'DELETE') {
+            if (payload.skuCode) await Item.destroy({ where: { tenantId, skuCode: payload.skuCode } });
+            else if (payload.name) await Item.destroy({ where: { tenantId, name: payload.name } });
           } else if (payload.name) {
-            let existing = payload.id ? await Item.findByPk(payload.id) : null;
-            if (!existing && payload.skuCode) {
-              existing = await Item.findOne({ where: { skuCode: payload.skuCode } });
-            }
-            if (!existing && payload.name) {
-              existing = await Item.findOne({ where: { name: payload.name } });
-            }
+            let existing = null;
+            if (payload.skuCode) existing = await Item.findOne({ where: { tenantId, skuCode: payload.skuCode } });
+            if (!existing && payload.name) existing = await Item.findOne({ where: { tenantId, name: payload.name } });
 
             const itemData = {
-              tenantId: tenantId || 'default-tenant',
+              tenantId,
               name: payload.name,
               skuCode: payload.skuCode || '',
               barcode: payload.barcode || '',
@@ -144,16 +203,13 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
             }
           }
         } else if (entityType === 'PARTY') {
-          if (mutationType === 'DELETE' && payload.id) {
-            await Party.destroy({ where: { id: payload.id } });
+          if (mutationType === 'DELETE' && payload.name) {
+            await Party.destroy({ where: { tenantId, name: payload.name } });
           } else if (payload.name) {
-            let existing = payload.id ? await Party.findByPk(payload.id) : null;
-            if (!existing) {
-              existing = await Party.findOne({ where: { name: payload.name } });
-            }
+            let existing = await Party.findOne({ where: { tenantId, name: payload.name } });
 
             const partyData = {
-              tenantId: tenantId || 'default-tenant',
+              tenantId,
               name: payload.name,
               phone: payload.phone || '',
               type: payload.type || 'CUSTOMER',
@@ -171,11 +227,11 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
             }
           }
         } else if (entityType === 'INVOICE') {
-          if (mutationType === 'DELETE' && payload.id) {
-            await Invoice.destroy({ where: { id: payload.id } });
+          if (mutationType === 'DELETE' && payload.invoiceNumber) {
+            await Invoice.destroy({ where: { tenantId, invoiceNumber: payload.invoiceNumber } });
           } else if (payload.invoiceNumber) {
             let existingInvoice = await Invoice.findOne({
-              where: { invoiceNumber: payload.invoiceNumber }
+              where: { tenantId, invoiceNumber: payload.invoiceNumber }
             });
 
             // Verify partyId foreign key in PostgreSQL

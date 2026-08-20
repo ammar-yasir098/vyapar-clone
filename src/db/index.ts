@@ -22,11 +22,11 @@ export class VyaparDatabase extends Dexie {
   constructor() {
     super('VyaparOfflineDB');
     
-    this.version(15).stores({
+    this.version(16).stores({
       items: '++id, skuCode, barcode, name, currentStock, tenantId',
       parties: '++id, name, phone, type, tenantId',
       invoices: '++id, invoiceId, invoiceNumber, invoiceDate, paymentStatus, partyId, syncStatus, tenantId',
-      syncJournal: '++id, versionId, clientSequence, entityType, timestamp, synced',
+      syncJournal: '++id, versionId, clientSequence, entityType, timestamp, synced, [synced+timestamp]',
       companyProfiles: '++id, userId, tenantId, name',
       estimates: '++id, estimateId, estimateNumber, estimateDate, partyId, tenantId',
       paymentIn: '++id, receiptNumber, partyId, paymentDate, tenantId',

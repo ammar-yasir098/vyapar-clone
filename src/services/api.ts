@@ -25,7 +25,7 @@ export async function checkServerHealth(timeoutMs = 600): Promise<boolean> {
   }
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 2000): Promise<Response> {
+export async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 2000): Promise<Response> {
   const isHealthCheck = url.endsWith('/sync/health');
   if (!isHealthCheck) {
     const isOnline = await checkServerHealth(600);
