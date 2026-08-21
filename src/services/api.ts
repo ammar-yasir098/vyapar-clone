@@ -216,6 +216,19 @@ export async function recordServerPartyPayment(id: number, amount: number, remar
   }
 }
 
+export async function updateServerParty(id: number, partyData: any) {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/parties/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(partyData)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 export async function deleteServerParty(id: number) {
   try {
     const res = await fetchWithTimeout(`${API_BASE_URL}/parties/${id}`, { method: 'DELETE' });
@@ -224,6 +237,7 @@ export async function deleteServerParty(id: number) {
     return { success: false, error: err.message };
   }
 }
+
 
 // INVOICES
 export async function fetchServerInvoices(tenantId?: string) {

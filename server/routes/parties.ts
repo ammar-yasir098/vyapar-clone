@@ -103,6 +103,35 @@ partiesRouter.post('/:id/payment', async (req: Request, res: Response) => {
   }
 });
 
+// PUT /api/v1/parties/:id - Update party using Sequelize
+partiesRouter.put('/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, phone, type, openingBalance, balanceType, currentBalance, gstin, address } = req.body;
+
+    if (isDbConnected() && id) {
+      const party = await Party.findByPk(Number(id));
+      if (party) {
+        const updateData: any = {};
+        if (name !== undefined) updateData.name = String(name).trim();
+        if (phone !== undefined) updateData.phone = String(phone).trim();
+        if (type !== undefined) updateData.type = type;
+        if (openingBalance !== undefined) updateData.openingBalance = Number(openingBalance) || 0;
+        if (balanceType !== undefined) updateData.balanceType = balanceType;
+        if (currentBalance !== undefined) updateData.currentBalance = Number(currentBalance) || 0;
+        if (gstin !== undefined) updateData.gstin = String(gstin).trim();
+        if (address !== undefined) updateData.address = String(address).trim();
+
+        await party.update(updateData);
+        return res.json({ success: true, data: party });
+      }
+    }
+    return res.json({ success: true, message: `Party ${id} updated locally` });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // DELETE /api/v1/parties/:id - Delete party using Sequelize
 partiesRouter.delete('/:id', async (req: Request, res: Response) => {
   try {
@@ -116,3 +145,4 @@ partiesRouter.delete('/:id', async (req: Request, res: Response) => {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
+

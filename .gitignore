@@ -38,3 +38,8 @@ desktop.ini
 # Vite & Development Caches
 .vite/
 .eslintcache
+
+# Generated Invoice Exports & PDFs
+/generated-invoices/
+*.pdf
+
