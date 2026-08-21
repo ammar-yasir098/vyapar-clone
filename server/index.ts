@@ -16,6 +16,8 @@ import { expensesRouter } from './routes/expenses.js';
 import { purchaseReturnsRouter } from './routes/purchaseReturns.js';
 import { saleReturnsRouter } from './routes/saleReturns.js';
 import { cashRouter } from './routes/cash.js';
+import { whatsappRouter } from './routes/whatsapp.js';
+import { initWhatsAppService } from './services/whatsappService.js';
 
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -59,6 +61,9 @@ app.use('/api/v1/purchase-returns', authenticateJwt, purchaseReturnsRouter);
 app.use('/api/v1/sale-returns', authenticateJwt, saleReturnsRouter);
 app.use('/api/v1/cash', authenticateJwt, cashRouter);
 
+// WhatsApp Automated Service Routes (Public/Internal for local app)
+app.use('/api/v1/whatsapp', whatsappRouter);
+
 // Root Status
 app.get('/', (req: Request, res: Response) => {
   res.json({
@@ -77,7 +82,13 @@ app.listen(PORT, async () => {
   console.log(`   - GET/POST http://localhost:${PORT}/api/v1/items`);
   console.log(`   - GET/POST http://localhost:${PORT}/api/v1/parties`);
   console.log(`   - GET/POST http://localhost:${PORT}/api/v1/invoices`);
-  console.log(`   - GET      http://localhost:${PORT}/api/v1/sync/health`);
+  console.log(`   - GET      http://localhost:${PORT}/api/v1/whatsapp/status`);
   console.log(`=======================================================`);
   await bootstrapSequelize();
+
+  // Asynchronously initialize local WhatsApp Baileys service
+  initWhatsAppService().catch((err) => {
+    console.error('Error starting WhatsApp Baileys service:', err);
+  });
 });
+

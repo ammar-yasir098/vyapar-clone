@@ -40,6 +40,7 @@
   },
   "dependencies": {
     "@types/pg": "^8.21.0",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "cors": "^2.8.6",
@@ -51,6 +52,8 @@
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.427.0",
     "pg": "^8.23.0",
+    "pino": "^10.3.1",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "sequelize": "^6.37.8"
@@ -62,6 +65,7 @@
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.2.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",

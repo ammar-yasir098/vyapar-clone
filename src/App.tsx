@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Building2, Store } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, seedDatabaseIfEmpty, seedWalkInCustomerForTenant, DEFAULT_BUSINESS } from './db';
@@ -55,6 +55,9 @@ import { useToast } from './components/Common/ToastContext';
 
 export function App() {
   const { showToast, showConfirm } = useToast();
+
+  const isSyncingRef = useRef(false);
+  const syncedTenantRef = useRef<string | null>(null);
 
   // Read activeTab initial state from hash or localStorage so refresh remembers current screen
   const getInitialTab = () => {
@@ -167,7 +170,12 @@ export function App() {
   // Initialize & Sync with PostgreSQL Backend
   useEffect(() => {
     async function syncPostgresToClient() {
+      if (isSyncingRef.current) return;
+      isSyncingRef.current = true;
+
       // 1. Read local Dexie companyProfiles FIRST for 0ms instant startup & tenant resolution
+
+
       const allDexieProfiles = await db.companyProfiles.toArray();
       const localDexieProfiles = userSession?.userId
         ? allDexieProfiles.filter(c => c.userId === userSession.userId || c.tenantId === userSession.tenantId)
@@ -248,6 +256,7 @@ export function App() {
 
       // If user is not logged in or has no saved auth token, do not attempt protected backend sync calls
       if (!userSession || !localStorage.getItem('vyapar_auth_token')) {
+        isSyncingRef.current = false;
         return;
       }
 
@@ -258,8 +267,10 @@ export function App() {
           await seedDatabaseIfEmpty(activeTenantId);
         }
         console.warn('Backend server offline or unreachable. Operating in 100% local Dexie offline mode.');
+        isSyncingRef.current = false;
         return;
       }
+
 
       try {
         // Fetch company profiles strictly scoped to logged in user's userId
@@ -593,11 +604,14 @@ export function App() {
         }
       } catch (err) {
         console.warn('Error during cloud database sync:', err);
+      } finally {
+        isSyncingRef.current = false;
       }
     }
 
     syncPostgresToClient();
   }, [currentTenantId, userSession?.userId]);
+
 
   // Global Ctrl+F listener for Command Palette Search
   useEffect(() => {

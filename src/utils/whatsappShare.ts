@@ -27,6 +27,39 @@ export function sanitizePhoneNumber(phone?: string): string {
 }
 
 /**
+ * Converts a Blob to a Base64 string asynchronously without blocking the UI thread.
+ */
+export function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      resolve(result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Converts Tailwind v4 oklch(...) color string to standard hex color.
+ * Preserves light backgrounds (slate-50/100) vs dark headers/text (slate-800/900).
+ */
+export function convertOklchToHex(oklchStr: string): string {
+  const match = oklchStr.match(/oklch\(\s*([\d.]+)\%?\s+([\d.]+)\s+([\d.]+)/i);
+  if (match) {
+    let l = parseFloat(match[1]);
+    if (l > 1) l = l / 100;
+    if (l >= 0.85) return '#f8fafc'; // light background
+    if (l >= 0.70) return '#e2e8f0'; // light border
+    if (l <= 0.35) return '#0f172a'; // dark header/text
+    if (l <= 0.50) return '#1e293b'; // medium dark text
+    return '#475569';
+  }
+  return '#f8fafc';
+}
+
+/**
  * Converts a target DOM element (e.g. #printable-invoice) into a high-resolution PDF Blob
  * matching the selected paper format (A4, A5, 80mm thermal, 58mm thermal).
  * Includes automatic CSS oklch() color conversion for html2canvas compatibility.
@@ -62,17 +95,17 @@ export async function generateInvoicePdfBlob(
     filename: filename,
     image: { type: 'jpeg' as const, quality: 0.98 },
     html2canvas: {
-      scale: 2,
+      scale: 2, // High resolution scale for crisp text rendering
       useCORS: true,
       logging: false,
       letterRendering: true,
+      windowWidth: element.scrollWidth,
       onclone: (clonedDoc: Document) => {
-        // 1. Sanitize all <style> tags in cloned document to convert Tailwind 4 oklch() colors
+        // 1. Sanitize all <style> tags in cloned document to convert Tailwind 4 oklch() colors cleanly
         const styleTags = clonedDoc.querySelectorAll('style');
         styleTags.forEach((styleTag) => {
           if (styleTag.textContent && styleTag.textContent.includes('oklch')) {
-            // Replace oklch(...) occurrences in CSS rules with standard hex/rgba fallback
-            styleTag.textContent = styleTag.textContent.replace(/oklch\([^)]+\)/gi, '#334155');
+            styleTag.textContent = styleTag.textContent.replace(/oklch\([^)]+\)/gi, (match) => convertOklchToHex(match));
           }
         });
 
@@ -82,14 +115,16 @@ export async function generateInvoicePdfBlob(
           const canvas = clonedDoc.createElement('canvas');
           const ctx = canvas.getContext('2d');
 
-          const convertColorToHex = (colorStr: string): string => {
-            if (!ctx) return '#334155';
+          const resolveColorToHex = (colorStr: string): string => {
+            if (!ctx) return convertOklchToHex(colorStr);
             try {
               ctx.fillStyle = '#000000';
               ctx.fillStyle = colorStr;
-              return ctx.fillStyle || '#334155';
+              const computedHex = ctx.fillStyle;
+              if (computedHex && computedHex !== '#000000') return computedHex;
+              return convertOklchToHex(colorStr);
             } catch {
-              return '#334155';
+              return convertOklchToHex(colorStr);
             }
           };
 
@@ -101,7 +136,7 @@ export async function generateInvoicePdfBlob(
             if (inlineStyle.includes('oklch')) {
               el.setAttribute(
                 'style',
-                inlineStyle.replace(/oklch\([^)]+\)/gi, (match) => convertColorToHex(match))
+                inlineStyle.replace(/oklch\([^)]+\)/gi, (match) => resolveColorToHex(match))
               );
             }
 
@@ -122,7 +157,7 @@ export async function generateInvoicePdfBlob(
               props.forEach((prop) => {
                 const val = computed.getPropertyValue(prop);
                 if (val && val.includes('oklch')) {
-                  const converted = convertColorToHex(val);
+                  const converted = resolveColorToHex(val);
                   el.style.setProperty(prop, converted, 'important');
                 }
               });
@@ -163,28 +198,30 @@ export interface ShareInvoiceParams {
   targetElement: HTMLElement;
   paperFormat?: InvoiceFormat;
   customMessage?: string;
+  preferOpenApp?: boolean;
 }
 
 export interface ShareResult {
   success: boolean;
-  mode: 'native_share' | 'whatsapp_link';
+  mode: 'automated' | 'native_share' | 'whatsapp_link';
   message: string;
   whatsappUrl?: string;
+  whatsappDesktopUrl?: string;
 }
 
 /**
- * Smart Hybrid WhatsApp Share:
- * 1. Dynamically fetches the latest updated party phone from Dexie DB (handling string vs number IDs).
- * 2. Generates PDF Blob smoothly with oklch color sanitization.
- * 3. On Mobile, attempts native Web Share API with catch fallback.
- * 4. On Desktop / Fallback, downloads PDF Blob in-memory & opens WhatsApp Web without blank tab flickers.
+ * Smart Automated & Interactive WhatsApp Share:
+ * Supports 2 Modes:
+ * 1. Interactive Open App Mode (preferOpenApp = true): Launches WhatsApp App/Web with recipient chat open & pre-filled message, downloads PDF for 1-click attachment!
+ * 2. Automated Background Mode (preferOpenApp = false): Sends PDF directly in background via local Express Baileys engine.
  */
 export async function shareInvoiceViaWhatsApp({
   invoice,
   business,
   targetElement,
   paperFormat = 'a4',
-  customMessage
+  customMessage,
+  preferOpenApp = true
 }: ShareInvoiceParams): Promise<ShareResult> {
   try {
     const invNumber = invoice.invoiceNumber || 'INV-000';
@@ -194,7 +231,10 @@ export async function shareInvoiceViaWhatsApp({
     const blob = await generateInvoicePdfBlob(targetElement, filename, paperFormat);
     const pdfFile = new File([blob], filename, { type: 'application/pdf' });
 
-    // 2. Fetch fresh updated party phone number from Dexie DB (robust against string vs number ID types)
+    // Yield thread to keep UI smooth and responsive
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    // 2. Fetch fresh updated party phone number from Dexie DB
     let livePartyPhone = invoice.partyPhone;
     try {
       let partyRecord: Party | undefined;
@@ -228,51 +268,80 @@ export async function shareInvoiceViaWhatsApp({
     const defaultText = customMessage || 
       `Dear ${customerName},\n\nThank you for doing business with ${businessName}.\n\n*Invoice #${invNumber}* (${paperFormat.toUpperCase()})\nDate: ${invoice.invoiceDate || ''}\nTotal Amount: Rs ${grandTotalFormatted}\nBalance Due: Rs ${dueAmountFormatted}\n\nPlease find your tax invoice PDF attached.`;
 
-    // 3. Mobile Native Web Share API Check
-    const isMobileDevice = typeof navigator !== 'undefined' && 
-      /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-    if (isMobileDevice && typeof navigator !== 'undefined' && !!navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
-      try {
-        await navigator.share({
-          title: `Invoice #${invNumber} - ${businessName}`,
-          text: defaultText,
-          files: [pdfFile]
-        });
-
-        return {
-          success: true,
-          mode: 'native_share',
-          message: 'Invoice shared via Web Share API successfully.'
-        };
-      } catch (shareErr: any) {
-        // If user cancelled share or browser gesture token expired, log & gracefully fallback to WhatsApp link flow
-        console.warn('Native Web Share skipped/failed, executing WhatsApp link fallback:', shareErr);
-      }
-    }
-
-    // 4. Desktop / Standard WhatsApp Link & Download Flow:
-    // A) Trigger in-memory PDF download for the user to attach in WhatsApp
-    downloadPdfBlob(blob, filename);
-
-    // B) Construct WhatsApp API link
     const encodedText = encodeURIComponent(defaultText);
     const whatsappUrl = targetPhone 
       ? `https://wa.me/${targetPhone}?text=${encodedText}`
       : `https://wa.me/?text=${encodedText}`;
 
-    // C) Open WhatsApp Web / Desktop application
+    const whatsappDesktopUrl = targetPhone
+      ? `whatsapp://send?phone=${targetPhone}&text=${encodedText}`
+      : `whatsapp://send?text=${encodedText}`;
+
+    // MODE A: INTERACTIVE OPEN APP MODE (Opens WhatsApp app/web, shows customer chat, user hits Enter to send!)
+    if (preferOpenApp) {
+      // 1. Download PDF Blob
+      downloadPdfBlob(blob, filename);
+
+      // 2. Launch WhatsApp Desktop App or Web
+      try {
+        window.location.href = whatsappDesktopUrl;
+      } catch {
+        window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+      }
+
+      return {
+        success: true,
+        mode: 'whatsapp_link',
+        message: `📱 WhatsApp opened! Chat with +${targetPhone || 'customer'} loaded. PDF downloaded. Click 📎 or drag & drop PDF in WhatsApp!`,
+        whatsappUrl,
+        whatsappDesktopUrl
+      };
+    }
+
+    // MODE B: AUTOMATED BACKGROUND DELIVERY (Sends PDF in background via Baileys engine)
     try {
+      const pdfBase64 = await blobToBase64(blob);
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      const autoRes = await fetch('http://localhost:5000/api/v1/whatsapp/send-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipientPhone: targetPhone,
+          messageText: defaultText,
+          pdfBase64: pdfBase64,
+          filename: filename
+        })
+      });
+
+      if (autoRes.ok) {
+        const autoJson = await autoRes.json();
+        if (autoJson.success) {
+          return {
+            success: true,
+            mode: 'automated',
+            message: `🎉 PDF Invoice sent automatically to WhatsApp (+${targetPhone}) with zero manual attachment!`
+          };
+        }
+      }
+    } catch (autoErr) {
+      console.info('Local WhatsApp automated service not active, switching to interactive WhatsApp launch:', autoErr);
+    }
+
+    // Fallback: Launch WhatsApp app
+    downloadPdfBlob(blob, filename);
+    try {
+      window.location.href = whatsappDesktopUrl;
+    } catch {
       window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
-    } catch (winErr) {
-      console.warn('Window open blocked, user can click direct link:', winErr);
     }
 
     return {
       success: true,
       mode: 'whatsapp_link',
-      message: `PDF (${paperFormat.toUpperCase()}) downloaded & WhatsApp opening! Please attach the downloaded PDF in WhatsApp.`,
-      whatsappUrl
+      message: `PDF downloaded! WhatsApp opened for +${targetPhone || 'customer'}.`,
+      whatsappUrl,
+      whatsappDesktopUrl
     };
   } catch (error: any) {
     console.error('Error during WhatsApp invoice sharing:', error);

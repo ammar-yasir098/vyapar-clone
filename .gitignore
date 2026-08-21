@@ -43,3 +43,7 @@ desktop.ini
 /generated-invoices/
 *.pdf
 
+# WhatsApp Baileys Auth Sessions & Credentials
+whatsapp_auth/
+server/whatsapp_auth/
+server/uploads/
