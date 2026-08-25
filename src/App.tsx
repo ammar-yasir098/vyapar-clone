@@ -7,6 +7,7 @@ import { Sidebar } from './components/Sidebar';
 import { DashboardScreen } from './components/Dashboard/DashboardScreen';
 import { BillingScreen } from './components/POS/BillingScreen';
 import { InventoryScreen } from './components/Inventory/InventoryScreen';
+import { LocationScreen } from './components/Inventory/LocationScreen';
 import { PartiesScreen } from './components/Parties/PartiesScreen';
 import { PurchaseScreen } from './components/Purchase/PurchaseScreen';
 import { InvoicesScreen } from './components/Invoices/InvoicesScreen';
@@ -49,6 +50,9 @@ import {
   fetchServerPurchaseReturns,
   fetchServerSaleReturns,
   fetchServerCashTransactions,
+  fetchServerLocations,
+  fetchServerItemLocations,
+  fetchServerStockTransfers,
   deleteServerCompanyProfile
 } from './services/api';
 import { useToast } from './components/Common/ToastContext';
@@ -325,7 +329,10 @@ export function App() {
           serverExpenses,
           serverReturns,
           serverSaleReturns,
-          serverCashTxns
+          serverCashTxns,
+          serverLocations,
+          serverItemLocations,
+          serverTransfers
         ] = await Promise.all([
           fetchServerItems(activeTenantId),
           fetchServerParties(activeTenantId),
@@ -338,12 +345,57 @@ export function App() {
           fetchServerExpenses(activeTenantId),
           fetchServerPurchaseReturns(activeTenantId),
           fetchServerSaleReturns(activeTenantId),
-          fetchServerCashTransactions(activeTenantId)
+          fetchServerCashTransactions(activeTenantId),
+          fetchServerLocations(activeTenantId),
+          fetchServerItemLocations(activeTenantId),
+          fetchServerStockTransfers(activeTenantId)
         ]);
 
-        const pulledCount = (serverItems?.length || 0) + (serverParties?.length || 0) + (serverInvoices?.length || 0) + (serverEstimates?.length || 0) + (serverPaymentsIn?.length || 0) + (serverPOs?.length || 0) + (serverPBills?.length || 0) + (serverPaymentsOut?.length || 0) + (serverExpenses?.length || 0) + (serverReturns?.length || 0) + (serverSaleReturns?.length || 0) + (serverCashTxns?.length || 0);
+        const pulledCount = (serverItems?.length || 0) + (serverParties?.length || 0) + (serverInvoices?.length || 0) + (serverEstimates?.length || 0) + (serverPaymentsIn?.length || 0) + (serverPOs?.length || 0) + (serverPBills?.length || 0) + (serverPaymentsOut?.length || 0) + (serverExpenses?.length || 0) + (serverReturns?.length || 0) + (serverSaleReturns?.length || 0) + (serverCashTxns?.length || 0) + (serverLocations?.length || 0) + (serverItemLocations?.length || 0) + (serverTransfers?.length || 0);
 
         console.log(`[Sync] Pulled from Postgres: ${pulledCount} records`);
+
+        // Sync Locations to Dexie
+        if (serverLocations && serverLocations.length > 0) {
+          for (const sLoc of serverLocations) {
+            const rawLoc = sLoc.dataValues || sLoc;
+            const existing = await db.locations.filter(l => l.code === rawLoc.code && (l.tenantId || 'default-tenant') === activeTenantId).first();
+            const locData = { ...rawLoc, tenantId: rawLoc.tenantId || activeTenantId };
+            if (existing && existing.id) {
+              await db.locations.update(existing.id, locData);
+            } else {
+              await db.locations.add(locData);
+            }
+          }
+        }
+
+        // Sync ItemLocationMappings to Dexie
+        if (serverItemLocations && serverItemLocations.length > 0) {
+          for (const sMap of serverItemLocations) {
+            const rawMap = sMap.dataValues || sMap;
+            const existing = await db.itemLocations.filter(m => m.itemId === rawMap.itemId && m.locationId === rawMap.locationId).first();
+            const mapData = { ...rawMap, tenantId: rawMap.tenantId || activeTenantId };
+            if (existing && existing.id) {
+              await db.itemLocations.update(existing.id, mapData);
+            } else {
+              await db.itemLocations.add(mapData);
+            }
+          }
+        }
+
+        // Sync StockTransfers to Dexie
+        if (serverTransfers && serverTransfers.length > 0) {
+          for (const sTrf of serverTransfers) {
+            const rawTrf = sTrf.dataValues || sTrf;
+            const existing = await db.stockTransfers.filter(t => t.transferNumber === rawTrf.transferNumber).first();
+            const trfData = { ...rawTrf, tenantId: rawTrf.tenantId || activeTenantId };
+            if (existing && existing.id) {
+              await db.stockTransfers.update(existing.id, trfData);
+            } else {
+              await db.stockTransfers.add(trfData);
+            }
+          }
+        }
 
         // Only seed sample database if local tables AND cloud fetched items are completely empty
         if (localItemCount === 0 && (!serverItems || serverItems.length === 0)) {
@@ -638,6 +690,9 @@ export function App() {
   const allPurchaseReturns = useLiveQuery(() => db.purchaseReturns.reverse().toArray(), []) || [];
   const allSaleReturns = useLiveQuery(() => db.saleReturns.reverse().toArray(), []) || [];
   const allCashTransactions = useLiveQuery(() => db.cashTransactions.reverse().toArray(), []) || [];
+  const allLocations = useLiveQuery(() => db.locations.toArray(), []) || [];
+  const allItemLocations = useLiveQuery(() => db.itemLocations.toArray(), []) || [];
+  const allStockTransfers = useLiveQuery(() => db.stockTransfers.reverse().toArray(), []) || [];
 
   const activeTenantId = currentTenantId || 'default-tenant';
   const items = allItems.filter(item => item && (item.tenantId || 'default-tenant') === activeTenantId);
@@ -652,6 +707,9 @@ export function App() {
   const purchaseReturns = allPurchaseReturns.filter(pr => pr && (pr.tenantId || 'default-tenant') === activeTenantId);
   const saleReturns = allSaleReturns.filter(sr => sr && (sr.tenantId || 'default-tenant') === activeTenantId);
   const cashTransactions = allCashTransactions.filter(ct => ct && (ct.tenantId || 'default-tenant') === activeTenantId);
+  const locations = allLocations.filter(loc => loc && (loc.tenantId || 'default-tenant') === activeTenantId);
+  const itemLocations = allItemLocations.filter(il => il && (il.tenantId || 'default-tenant') === activeTenantId);
+  const stockTransfers = allStockTransfers.filter(st => st && (st.tenantId || 'default-tenant') === activeTenantId);
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');
@@ -859,20 +917,13 @@ export function App() {
           )}
 
           {activeTab === 'inventory-location' && (
-            <div className="flex-1 p-8 overflow-y-auto bg-[#f8fafc] flex flex-col items-center justify-center text-center select-none">
-              <div className="card p-10 max-w-md w-full shadow-lg border border-slate-200/80 rounded-2xl bg-white space-y-4">
-                <div className="w-14 h-14 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center mx-auto border border-purple-100 shadow-sm">
-                  <MapPin className="w-7 h-7 stroke-[2.2]" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-extrabold text-slate-800 tracking-tight">Inventory Location</h2>
-                  <p className="text-xs font-semibold text-purple-600 mt-1 uppercase tracking-wider">Warehouse & Shelf Management</p>
-                </div>
-                <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                  Location tracking section. Functionality will be implemented here later.
-                </p>
-              </div>
-            </div>
+            <LocationScreen
+              items={items}
+              locations={locations}
+              itemLocations={itemLocations}
+              stockTransfers={stockTransfers}
+              business={businessDetails}
+            />
           )}
 
           {activeTab === 'parties' && (

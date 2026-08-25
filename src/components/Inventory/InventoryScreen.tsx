@@ -18,13 +18,15 @@ import {
   Clock, 
   Building2, 
   ArrowDownLeft, 
-  ArrowUpRight 
+  ArrowUpRight,
+  Sparkles
 } from 'lucide-react';
 import { Item, UnitType, BusinessDetails, Party, ItemRestock } from '../../types';
 import { db } from '../../db';
 import { createServerItem, updateServerItem, deleteServerItem, adjustServerItemStock } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { useToast } from '../Common/ToastContext';
+import { seed100SampleItems } from '../../utils/sampleDataSeeder';
 
 interface InventoryScreenProps {
   items: Item[];
@@ -276,6 +278,14 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
     });
   };
 
+  const handleSeed100Items = async () => {
+    const tenantId = business?.tenantId || 'default-tenant';
+    showToast('Seeding 100 sample inventory items...', 'info');
+    const count = await seed100SampleItems(tenantId);
+    showToast(`Successfully added ${count} new sample inventory items!`, 'success');
+    onItemUpdated();
+  };
+
   return (
     <div className="flex-1 flex flex-col p-6 bg-[#f3f4f6] overflow-hidden gap-5 select-none">
       {/* Top Action Header */}
@@ -294,6 +304,15 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSeed100Items}
+            className="px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-extrabold text-xs border border-emerald-200 shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>+ Seed 100 Sample Items</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setFilterLowStock(!filterLowStock)}
@@ -336,6 +355,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
           <table className="vyapar-table">
             <thead>
               <tr>
+                <th className="w-12 text-center">#</th>
                 <th>Item Name</th>
                 <th>SKU / Barcode</th>
                 <th>HSN Code</th>
@@ -349,17 +369,18 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
             <tbody>
               {filteredItems.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-16 text-slate-400 text-xs">
+                  <td colSpan={9} className="text-center py-16 text-slate-400 text-xs">
                     No matching inventory items found.
                   </td>
                 </tr>
               ) : (
-                filteredItems.map(item => {
+                filteredItems.map((item, index) => {
                   const stock = Number(item?.currentStock || 0);
                   const minAlert = Number(item?.minStockAlert || 0);
                   const isLowStock = stock <= minAlert;
                   return (
-                    <tr key={item.id}>
+                    <tr key={item.id || index}>
+                      <td className="font-mono text-xs font-bold text-slate-400 text-center">{index + 1}</td>
                       <td>
                         <div className="font-bold text-slate-900 text-xs">{item.name || 'Unnamed Product'}</div>
                       </td>

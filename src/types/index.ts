@@ -410,6 +410,43 @@ export interface CashTransaction {
   runningBalance?: number;
 }
 
+export type LocationType = 'WAREHOUSE' | 'ZONE' | 'SHELF';
+
+export interface InventoryLocation {
+  id?: number;
+  tenantId: string;
+  name: string;
+  code: string;
+  type: LocationType;
+  parentId?: number | null;
+  capacity?: number;
+  description?: string;
+  createdAt?: string;
+}
+
+export interface ItemLocationMapping {
+  id?: number;
+  tenantId: string;
+  itemId: number;
+  locationId: number;
+  quantity: number;
+  maxCapacity?: number;
+  updatedAt?: string;
+}
+
+export interface StockTransfer {
+  id?: number;
+  transferNumber: string;
+  tenantId: string;
+  sourceLocationId: number;
+  destinationLocationId: number;
+  itemId: number;
+  quantity: number;
+  transferDate: string;
+  notes?: string;
+  createdAt?: string;
+}
+
 
 
 

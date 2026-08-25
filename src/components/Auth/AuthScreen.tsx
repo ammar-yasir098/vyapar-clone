@@ -307,11 +307,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'center',
+        justifyContent: 'flex-start',
         background: '#f1f5f9',
         padding: '32px 24px',
         position: 'relative',
-        overflow: 'hidden',
+        overflowY: 'auto',
+        maxHeight: '100vh',
       }}>
         {/* Subtle right-panel gradient accent */}
         <div style={{
@@ -324,6 +325,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         <div
           style={{
             width: '100%', maxWidth: '420px',
+            margin: 'auto 0',
             opacity: mounted ? 1 : 0,
             transform: mounted ? 'translateY(0)' : 'translateY(24px)',
             transition: 'all 0.6s 0.15s cubic-bezier(0.22,1,0.36,1)',
@@ -348,7 +350,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             borderRadius: '20px',
             boxShadow: '0 4px 6px -1px rgba(0,0,0,0.07), 0 20px 60px -10px rgba(0,0,0,0.12)',
             border: '1px solid rgba(226,232,240,0.8)',
-            padding: '32px',
+            padding: '28px 28px 24px',
+            maxHeight: 'calc(100vh - 64px)',
+            overflowY: 'auto',
           }}>
             {/* Heading */}
             <div style={{ marginBottom: '22px' }}>

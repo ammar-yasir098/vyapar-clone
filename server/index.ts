@@ -16,6 +16,7 @@ import { expensesRouter } from './routes/expenses.js';
 import { purchaseReturnsRouter } from './routes/purchaseReturns.js';
 import { saleReturnsRouter } from './routes/saleReturns.js';
 import { cashRouter } from './routes/cash.js';
+import { locationsRouter } from './routes/locations.js';
 import { whatsappRouter } from './routes/whatsapp.js';
 import { initWhatsAppService } from './services/whatsappService.js';
 
@@ -60,6 +61,7 @@ app.use('/api/v1/expenses', authenticateJwt, expensesRouter);
 app.use('/api/v1/purchase-returns', authenticateJwt, purchaseReturnsRouter);
 app.use('/api/v1/sale-returns', authenticateJwt, saleReturnsRouter);
 app.use('/api/v1/cash', authenticateJwt, cashRouter);
+app.use('/api/v1/locations', authenticateJwt, locationsRouter);
 
 // WhatsApp Automated Service Routes (Public/Internal for local app)
 app.use('/api/v1/whatsapp', whatsappRouter);

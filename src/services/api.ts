@@ -611,3 +611,79 @@ export async function changeUserPassword(currentPassword: string, newPassword: s
   }
 }
 
+// INVENTORY LOCATIONS
+export async function fetchServerLocations(tenantId?: string) {
+  try {
+    const url = tenantId ? `${API_BASE_URL}/locations?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/locations`;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data || [];
+  } catch (err) {
+    return [];
+  }
+}
+
+export async function saveServerLocation(locData: any) {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/locations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(locData)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function fetchServerItemLocations(tenantId?: string) {
+  try {
+    const url = tenantId ? `${API_BASE_URL}/locations/mappings?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/locations/mappings`;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data || [];
+  } catch (err) {
+    return [];
+  }
+}
+
+export async function saveServerItemLocation(mappingData: any) {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/locations/mappings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(mappingData)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function fetchServerStockTransfers(tenantId?: string) {
+  try {
+    const url = tenantId ? `${API_BASE_URL}/locations/transfers?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/locations/transfers`;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data || [];
+  } catch (err) {
+    return [];
+  }
+}
+
+export async function createServerStockTransfer(transferData: any) {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/locations/transfers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(transferData)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+

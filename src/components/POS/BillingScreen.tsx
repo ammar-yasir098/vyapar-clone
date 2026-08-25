@@ -269,7 +269,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
     };
 
     // Execute entire checkout atomically inside a Dexie transaction
-    await db.transaction('rw', [db.invoices, db.items, db.parties, db.syncJournal], async () => {
+    await db.transaction('rw', [db.invoices, db.items, db.itemLocations, db.parties, db.syncJournal], async () => {
       // 1. Save invoice to local Dexie
       const savedId = await db.invoices.add(newInvoice);
       newInvoice.id = savedId;
@@ -308,13 +308,20 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
         synced: false
       });
 
-      // 4. Decrement Item stock levels accurately (without silent zero clamping) & log item update
+      // 4. Decrement Item stock levels accurately & keep location stock in sync
       for (const cItem of cartItems) {
         const dbItem = await db.items.get(cItem.itemId);
         if (dbItem) {
           const newStock = dbItem.currentStock - cItem.quantity;
           await db.items.update(cItem.itemId, { currentStock: newStock, updatedAt: new Date().toISOString() });
           
+          // Also decrement mapped location stock if item is assigned to a shelf
+          const mappedLoc = await db.itemLocations.filter(il => il.itemId === cItem.itemId && il.quantity > 0).first();
+          if (mappedLoc && mappedLoc.id) {
+            const newLocStock = Math.max(0, mappedLoc.quantity - cItem.quantity);
+            await db.itemLocations.update(mappedLoc.id, { quantity: newLocStock, updatedAt: new Date().toISOString() });
+          }
+
           await db.syncJournal.add({
             versionId: `client-v-${Date.now()}-item-${cItem.itemId}`,
             clientSequence: Date.now(),

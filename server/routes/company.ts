@@ -100,31 +100,32 @@ companyRouter.post('/', async (req: Request, res: Response) => {
       booksBeginDate
     } = req.body;
 
-    if (!tenantId) {
-      tenantId = `tenant-${Date.now().toString().slice(-6)}`;
-    }
-
-    const savedLogoUrl = saveBase64Image(logoUrl, 'logos', 'logo', tenantId);
-    const savedSignatureUrl = saveBase64Image(signatureUrl, 'signatures', 'sig', tenantId);
-
-    if (isDbConnected()) {
-      if (req.body.tenantId === undefined || !req.body.tenantId) {
-        let maxNum = 0;
-        const allProfiles = await CompanyProfile.findAll();
-        for (const p of allProfiles) {
-          const tid = p.get('tenantId') as string;
-          if (tid) {
-            const match = tid.match(/^tenant-(\d+)$/i);
-            if (match) {
-              const num = parseInt(match[1], 10);
-              if (!isNaN(num) && num > maxNum) maxNum = num;
-            }
+    let effectiveTenantId = tenantId;
+    if (isDbConnected() && !effectiveTenantId) {
+      let maxNum = 0;
+      const allProfiles = await CompanyProfile.findAll();
+      for (const p of allProfiles) {
+        const tid = p.get('tenantId') as string;
+        if (tid) {
+          const match = tid.match(/(?:tenant-)?(\d+)$/i);
+          if (match) {
+            const num = parseInt(match[1], 10);
+            if (!isNaN(num) && num > maxNum) maxNum = num;
           }
         }
-        tenantId = `tenant-${maxNum + 1}`;
       }
+      effectiveTenantId = `tenant-${maxNum + 1}`;
+    }
 
-      let profile = await CompanyProfile.findOne({ where: { tenantId } });
+    if (!effectiveTenantId) {
+      effectiveTenantId = 'tenant-1';
+    }
+
+    const savedLogoUrl = saveBase64Image(logoUrl, 'logos', 'logo', effectiveTenantId);
+    const savedSignatureUrl = saveBase64Image(signatureUrl, 'signatures', 'sig', effectiveTenantId);
+
+    if (isDbConnected()) {
+      let profile = await CompanyProfile.findOne({ where: { tenantId: effectiveTenantId } });
 
       if (profile) {
         await profile.update({
@@ -209,10 +210,11 @@ companyRouter.delete('/', async (req: Request, res: Response) => {
         PaymentOut, 
         Estimate, 
         EstimateItem, 
-        LedgerAccount, 
-        JournalEntry,
         CashAccount,
-        CashTransaction
+        CashTransaction,
+        InventoryLocation,
+        ItemLocationMapping,
+        StockTransfer
       } = await import('../db/sequelize.js');
 
       await Item.destroy({ where: { tenantId: tId } }).catch(() => {});
@@ -226,10 +228,11 @@ companyRouter.delete('/', async (req: Request, res: Response) => {
       await PaymentIn.destroy({ where: { tenantId: tId } }).catch(() => {});
       await PaymentOut.destroy({ where: { tenantId: tId } }).catch(() => {});
       await Estimate.destroy({ where: { tenantId: tId } }).catch(() => {});
-      await LedgerAccount.destroy({ where: { tenantId: tId } }).catch(() => {});
-      await JournalEntry.destroy({ where: { tenantId: tId } }).catch(() => {});
       await CashTransaction.destroy({ where: { tenantId: tId } }).catch(() => {});
       await CashAccount.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await InventoryLocation.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await ItemLocationMapping.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await StockTransfer.destroy({ where: { tenantId: tId } }).catch(() => {});
     }
 
     console.log(`🗑️ [DELETE COMPANY] Successfully deleted company profile and associated store records for tenantId: ${tId}`);

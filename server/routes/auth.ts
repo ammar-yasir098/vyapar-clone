@@ -155,8 +155,32 @@ authRouter.post('/register', authRateLimiter, async (req: Request, res: Response
       }
     }
 
-    const tenantId = `tenant-${Date.now().toString().slice(-8)}`;
-    const userId = `user-${Date.now().toString().slice(-8)}`;
+    // Auto-increment sequential User ID (user-1, user-2, user-3...) and Tenant ID (tenant-1, tenant-2, tenant-3...)
+    let maxUserNum = 0;
+    let maxTenantNum = 0;
+
+    if (isDbConnected()) {
+      const maxUser = await User.max('id');
+      if (maxUser && typeof maxUser === 'number') maxUserNum = maxUser;
+
+      const allProfiles = await CompanyProfile.findAll();
+      for (const p of allProfiles) {
+        const tid = p.get('tenantId') as string;
+        if (tid) {
+          const match = tid.match(/(?:tenant-)?(\d+)$/i);
+          if (match) {
+            const num = parseInt(match[1], 10);
+            if (!isNaN(num) && num > maxTenantNum) maxTenantNum = num;
+          }
+        }
+      }
+    } else {
+      maxUserNum = memoryUsers.length;
+      maxTenantNum = memoryUsers.length;
+    }
+
+    const tenantId = `tenant-${maxTenantNum + 1}`;
+    const userId = `user-${maxUserNum + 1}`;
     const passwordHash = bcrypt.hashSync(password, 8);
 
     const userData = {

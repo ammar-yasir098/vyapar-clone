@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { Item, Party, Invoice, SyncJournal, BusinessDetails, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock, PurchaseOrder, PurchaseBill, PaymentOut, Expense, PurchaseReturn, SaleReturn, CashAccount, CashTransaction } from '../types';
+import { Item, Party, Invoice, SyncJournal, BusinessDetails, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock, PurchaseOrder, PurchaseBill, PaymentOut, Expense, PurchaseReturn, SaleReturn, CashAccount, CashTransaction, InventoryLocation, ItemLocationMapping, StockTransfer } from '../types';
 
 export class VyaparDatabase extends Dexie {
   items!: Table<Item, number>;
@@ -18,11 +18,14 @@ export class VyaparDatabase extends Dexie {
   saleReturns!: Table<SaleReturn, number>;
   cashAccounts!: Table<CashAccount, number>;
   cashTransactions!: Table<CashTransaction, number>;
+  locations!: Table<InventoryLocation, number>;
+  itemLocations!: Table<ItemLocationMapping, number>;
+  stockTransfers!: Table<StockTransfer, number>;
 
   constructor() {
     super('VyaparOfflineDB');
     
-    this.version(16).stores({
+    this.version(17).stores({
       items: '++id, skuCode, barcode, name, currentStock, tenantId',
       parties: '++id, name, phone, type, tenantId',
       invoices: '++id, invoiceId, invoiceNumber, invoiceDate, paymentStatus, partyId, syncStatus, tenantId',
@@ -38,7 +41,10 @@ export class VyaparDatabase extends Dexie {
       purchaseReturns: '++id, returnId, debitNoteNumber, returnDate, supplierId, tenantId',
       saleReturns: '++id, returnId, creditNoteNumber, returnDate, partyId, tenantId',
       cashAccounts: '++id, name, tenantId',
-      cashTransactions: '++id, cashAccountId, type, source, transactionDate, tenantId'
+      cashTransactions: '++id, cashAccountId, type, source, transactionDate, tenantId',
+      locations: '++id, tenantId, name, code, type, parentId',
+      itemLocations: '++id, tenantId, itemId, locationId, [itemId+locationId]',
+      stockTransfers: '++id, tenantId, transferNumber, sourceLocationId, destinationLocationId, itemId, transferDate'
     });
   }
 }
@@ -102,7 +108,49 @@ export async function seedCashAccountForTenant(tenantId: string) {
 }
 
 /**
+ * Seeds default Warehouse & Shelf Location structure for a store tenant if not present.
+ */
+export async function seedDefaultLocationsForTenant(tenantId: string) {
+  if (!tenantId) return;
+  const count = await db.locations.filter(l => l.tenantId === tenantId).count();
+  if (count === 0) {
+    const mainStoreId = await db.locations.add({
+      tenantId,
+      name: 'Main Store / Godown',
+      code: 'WH-MAIN',
+      type: 'WAREHOUSE',
+      capacity: 5000,
+      description: 'Primary retail storefront warehouse',
+      createdAt: new Date().toISOString()
+    });
+
+    const aisleAId = await db.locations.add({
+      tenantId,
+      name: 'Aisle 1 - General FMCG',
+      code: 'ZONE-A1',
+      type: 'ZONE',
+      parentId: mainStoreId,
+      capacity: 1500,
+      description: 'Front store fast moving items',
+      createdAt: new Date().toISOString()
+    });
+
+    await db.locations.add({
+      tenantId,
+      name: 'Shelf A1-Bin 01',
+      code: 'SH-A1-01',
+      type: 'SHELF',
+      parentId: aisleAId,
+      capacity: 250,
+      description: 'Top shelf for packaged goods',
+      createdAt: new Date().toISOString()
+    });
+  }
+}
+
+/**
  * Initializes structural necessities: Walk-in customer and Main Cash Drawer for a store tenant.
+ * (Locations remain blank for new stores so owners can build their custom physical space layout).
  */
 export async function seedDatabaseIfEmpty(tenantId?: string) {
   const tId = tenantId || (typeof localStorage !== 'undefined' ? localStorage.getItem('vyapar_current_tenant') : null) || 'default-tenant';
@@ -112,7 +160,7 @@ export async function seedDatabaseIfEmpty(tenantId?: string) {
 }
 
 /**
- * Wipes all local store data and resets to clean slate (EXCEPT users and company profiles).
+ * Wipes all operational store data from IndexedDB and cloud PostgreSQL (EXCEPT users and company profiles).
  */
 export async function clearAllDatabaseData() {
   await db.items.clear();
@@ -130,6 +178,11 @@ export async function clearAllDatabaseData() {
   await db.saleReturns.clear();
   await db.cashTransactions.clear();
   await db.cashAccounts.clear();
+  await db.locations.clear();
+  await db.itemLocations.clear();
+  await db.stockTransfers.clear();
+
+  // EXPLICITLY PRESERVED: db.companyProfiles and user sessions remain intact!
 
   // Call server API to reset PostgreSQL tables using authenticated fetchWithTimeout
   try {

@@ -22,83 +22,62 @@ import {
   SaleReturn,
   SaleReturnItem,
   CashAccount,
-  CashTransaction
+  CashTransaction,
+  InventoryLocation,
+  ItemLocationMapping,
+  StockTransfer,
+  CompanyProfile,
+  User
 } from '../db/sequelize.js';
 
 export const syncRouter = Router();
 
-// POST /api/v1/sync/reset - Wipe all cloud database records (EXCEPT users & company_profile)
+// POST /api/v1/sync/reset - Wipe all cloud store records (EXCEPT users & company_profile)
 syncRouter.post('/reset', async (req: Request, res: Response) => {
   try {
     cloudStore.clear();
 
-    const authReq = req as AuthenticatedRequest;
-    const tenantId = authReq.user?.tenantId;
-
     if (isDbConnected()) {
-      if (tenantId) {
-        // Delete records specifically belonging to the authenticated tenant
-        const whereOpt = { where: { tenantId } };
+      // TRUNCATE all transactional & inventory tables across all stores (EXCEPT users and company_profile)
+      try {
+        await sequelize.query(
+          'TRUNCATE TABLE invoice_items, invoices, items, parties, estimates, estimate_items, payment_in, purchase_order_items, purchase_orders, purchase_bill_items, purchase_bills, payment_out, expenses, purchase_return_items, purchase_returns, sale_return_items, sale_returns, cash_transactions, cash_accounts, item_location_mappings, stock_transfers, inventory_locations RESTART IDENTITY CASCADE;'
+        );
+      } catch (truncateErr) {
+        console.warn('Truncate SQL warning, using model destroy fallback:', truncateErr);
+        await InvoiceItem.destroy({ where: {}, force: true }).catch(() => {});
+        await EstimateItem.destroy({ where: {}, force: true }).catch(() => {});
+        await PurchaseOrderItem.destroy({ where: {}, force: true }).catch(() => {});
+        await PurchaseBillItem.destroy({ where: {}, force: true }).catch(() => {});
+        await PurchaseReturnItem.destroy({ where: {}, force: true }).catch(() => {});
+        await SaleReturnItem.destroy({ where: {}, force: true }).catch(() => {});
+        await CashTransaction.destroy({ where: {}, force: true }).catch(() => {});
 
-        await InvoiceItem.destroy({ where: {} }).catch(() => {});
-        await EstimateItem.destroy({ where: {} }).catch(() => {});
-        await PurchaseOrderItem.destroy({ where: {} }).catch(() => {});
-        await PurchaseBillItem.destroy({ where: {} }).catch(() => {});
-        await PurchaseReturnItem.destroy({ where: {} }).catch(() => {});
-        await SaleReturnItem.destroy({ where: {} }).catch(() => {});
-        await CashTransaction.destroy({ where: {} }).catch(() => {});
+        await Invoice.destroy({ where: {}, force: true }).catch(() => {});
+        await Estimate.destroy({ where: {}, force: true }).catch(() => {});
+        await PaymentIn.destroy({ where: {}, force: true }).catch(() => {});
+        await PurchaseOrder.destroy({ where: {}, force: true }).catch(() => {});
+        await PurchaseBill.destroy({ where: {}, force: true }).catch(() => {});
+        await PaymentOut.destroy({ where: {}, force: true }).catch(() => {});
+        await Expense.destroy({ where: {}, force: true }).catch(() => {});
+        await PurchaseReturn.destroy({ where: {}, force: true }).catch(() => {});
+        await SaleReturn.destroy({ where: {}, force: true }).catch(() => {});
+        await CashAccount.destroy({ where: {}, force: true }).catch(() => {});
 
-        await Invoice.destroy(whereOpt).catch(() => {});
-        await Estimate.destroy(whereOpt).catch(() => {});
-        await PaymentIn.destroy(whereOpt).catch(() => {});
-        await PurchaseOrder.destroy(whereOpt).catch(() => {});
-        await PurchaseBill.destroy(whereOpt).catch(() => {});
-        await PaymentOut.destroy(whereOpt).catch(() => {});
-        await Expense.destroy(whereOpt).catch(() => {});
-        await PurchaseReturn.destroy(whereOpt).catch(() => {});
-        await SaleReturn.destroy(whereOpt).catch(() => {});
-        await CashAccount.destroy(whereOpt).catch(() => {});
+        await StockTransfer.destroy({ where: {}, force: true }).catch(() => {});
+        await ItemLocationMapping.destroy({ where: {}, force: true }).catch(() => {});
+        await InventoryLocation.destroy({ where: {}, force: true }).catch(() => {});
 
-        await Item.destroy(whereOpt).catch(() => {});
-        await Party.destroy(whereOpt).catch(() => {});
-      } else {
-        // Fallback: TRUNCATE all transactional tables (EXCEPT users and company_profile)
-        try {
-          await sequelize.query(
-            'TRUNCATE TABLE invoice_items, invoices, items, parties, estimates, estimate_items, payment_in, purchase_order_items, purchase_orders, purchase_bill_items, purchase_bills, payment_out, expenses, purchase_return_items, purchase_returns, sale_return_items, sale_returns, cash_transactions, cash_accounts RESTART IDENTITY CASCADE;'
-          );
-        } catch (truncateErr) {
-          console.warn('Truncate SQL warning, using model destroy fallback:', truncateErr);
-          await InvoiceItem.destroy({ where: {}, force: true }).catch(() => {});
-          await EstimateItem.destroy({ where: {}, force: true }).catch(() => {});
-          await PurchaseOrderItem.destroy({ where: {}, force: true }).catch(() => {});
-          await PurchaseBillItem.destroy({ where: {}, force: true }).catch(() => {});
-          await PurchaseReturnItem.destroy({ where: {}, force: true }).catch(() => {});
-          await SaleReturnItem.destroy({ where: {}, force: true }).catch(() => {});
-          await CashTransaction.destroy({ where: {}, force: true }).catch(() => {});
-
-          await Invoice.destroy({ where: {}, force: true }).catch(() => {});
-          await Estimate.destroy({ where: {}, force: true }).catch(() => {});
-          await PaymentIn.destroy({ where: {}, force: true }).catch(() => {});
-          await PurchaseOrder.destroy({ where: {}, force: true }).catch(() => {});
-          await PurchaseBill.destroy({ where: {}, force: true }).catch(() => {});
-          await PaymentOut.destroy({ where: {}, force: true }).catch(() => {});
-          await Expense.destroy({ where: {}, force: true }).catch(() => {});
-          await PurchaseReturn.destroy({ where: {}, force: true }).catch(() => {});
-          await SaleReturn.destroy({ where: {}, force: true }).catch(() => {});
-          await CashAccount.destroy({ where: {}, force: true }).catch(() => {});
-
-          await Item.destroy({ where: {}, force: true }).catch(() => {});
-          await Party.destroy({ where: {}, force: true }).catch(() => {});
-        }
+        await Item.destroy({ where: {}, force: true }).catch(() => {});
+        await Party.destroy({ where: {}, force: true }).catch(() => {});
       }
     }
 
-    console.log('🧹 [RESET] Successfully wiped cloud database records (excluding users & company_profile).');
+    console.log('🧹 [RESET] Successfully wiped all operational store data (EXCLUDING users & company_profile).');
 
     return res.json({
       success: true,
-      message: 'All store data (excluding user accounts & company profile) wiped successfully.'
+      message: 'All operational store data (excluding user accounts & company profiles) wiped successfully.'
     });
   } catch (err: any) {
     console.error('Reset error:', err);
