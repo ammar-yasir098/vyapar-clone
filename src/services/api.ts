@@ -637,6 +637,18 @@ export async function saveServerLocation(locData: any) {
   }
 }
 
+export async function deleteServerLocation(id: number) {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/locations/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 export async function fetchServerItemLocations(tenantId?: string) {
   try {
     const url = tenantId ? `${API_BASE_URL}/locations/mappings?tenantId=${encodeURIComponent(tenantId)}` : `${API_BASE_URL}/locations/mappings`;

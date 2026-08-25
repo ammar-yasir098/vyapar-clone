@@ -18,7 +18,12 @@ import {
   MapPin,
   X,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  Wand2,
+  Store,
+  Check,
+  Trash2,
+  Maximize2
 } from 'lucide-react';
 import {
   Item,
@@ -29,7 +34,7 @@ import {
   LocationType
 } from '../../types';
 import { db } from '../../db';
-import { saveServerLocation, saveServerItemLocation, createServerStockTransfer } from '../../services/api';
+import { saveServerLocation, deleteServerLocation, saveServerItemLocation, createServerStockTransfer } from '../../services/api';
 import { useToast } from '../Common/ToastContext';
 import { seed100SampleItems } from '../../utils/sampleDataSeeder';
 
@@ -48,7 +53,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   stockTransfers,
   business
 }) => {
-  const { showToast } = useToast();
+  const { showToast, showConfirm } = useToast();
 
   const [activeViewTab, setActiveViewTab] = useState<'stock-table' | 'hierarchy-master' | 'transfer-history'>('stock-table');
   const [searchTerm, setSearchTerm] = useState('');
@@ -80,8 +85,206 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
   // Relocate Form
   const [relocateDestLocId, setRelocateDestLocId] = useState<string>('');
+  const [relocateWhId, setRelocateWhId] = useState<string>('');
+  const [relocateZoneId, setRelocateZoneId] = useState<string>('');
+  const [relocateRackId, setRelocateRackId] = useState<string>('');
   const [relocateQty, setRelocateQty] = useState<string>('1');
   const [relocateMaxCap, setRelocateMaxCap] = useState<string>('100');
+
+  // Store Layout Generator Form
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [presetTemplate, setPresetTemplate] = useState<'RETAIL' | 'SUPERMARKET' | 'BOUTIQUE' | 'CUSTOM'>('RETAIL');
+  const [whName, setWhName] = useState('Main Retail Store');
+  const [whCode, setWhCode] = useState('MRS');
+  const [whCapacity, setWhCapacity] = useState<number>(600);
+  const [zoneCount, setZoneCount] = useState<number>(3);
+  const [zoneCapacity, setZoneCapacity] = useState<number>(180);
+  const [racksPerZone, setRacksPerZone] = useState<number>(3);
+  const [rackCapacity, setRackCapacity] = useState<number>(50);
+
+  // Enlarged Product Preview Modal State
+  const [previewItemDetail, setPreviewItemDetail] = useState<{
+    item: Item;
+    quantity: number;
+    mapping?: ItemLocationMapping;
+    locationId?: number;
+  } | null>(null);
+
+  const handleSelectPreset = (preset: 'RETAIL' | 'SUPERMARKET' | 'BOUTIQUE' | 'CUSTOM') => {
+    setPresetTemplate(preset);
+    if (preset === 'RETAIL') {
+      setWhName('Main Retail Store');
+      setWhCode('MRS');
+      setWhCapacity(600);
+      setZoneCount(3);
+      setZoneCapacity(180);
+      setRacksPerZone(3);
+      setRackCapacity(50);
+    } else if (preset === 'SUPERMARKET') {
+      setWhName('Supermarket Godown');
+      setWhCode('SMG');
+      setWhCapacity(1200);
+      setZoneCount(4);
+      setZoneCapacity(250);
+      setRacksPerZone(4);
+      setRackCapacity(50);
+    } else if (preset === 'BOUTIQUE') {
+      setWhName('Boutique Store');
+      setWhCode('BTS');
+      setWhCapacity(300);
+      setZoneCount(2);
+      setZoneCapacity(120);
+      setRacksPerZone(2);
+      setRackCapacity(50);
+    }
+  };
+
+  const totalZoneCapAllocated = zoneCount * zoneCapacity;
+  const isZoneCapExceeded = totalZoneCapAllocated > whCapacity;
+  const totalRackCapAllocatedPerZone = racksPerZone * rackCapacity;
+  const isRackCapExceeded = totalRackCapAllocatedPerZone > zoneCapacity;
+  const totalLocationsToGenerate = 1 + zoneCount + (zoneCount * racksPerZone);
+
+  const handleGenerateStore = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!whName.trim() || !whCode.trim()) {
+      showToast('Please enter Warehouse Name and Code', 'error');
+      return;
+    }
+
+    if (isZoneCapExceeded) {
+      showToast(`Total zones capacity (${totalZoneCapAllocated} units) cannot exceed Warehouse capacity (${whCapacity} units).`, 'error');
+      return;
+    }
+
+    if (isRackCapExceeded) {
+      showToast(`Total racks capacity per zone (${totalRackCapAllocatedPerZone} units) cannot exceed Zone capacity (${zoneCapacity} units).`, 'error');
+      return;
+    }
+
+    const codeUpper = whCode.trim().toUpperCase();
+    const existingCode = locations.find(l => l.code === codeUpper && l.tenantId === tenantId);
+    if (existingCode) {
+      showToast(`Warehouse Code "${codeUpper}" already exists! Please use a unique code.`, 'error');
+      return;
+    }
+
+    try {
+      const timestamp = new Date().toISOString();
+
+      // 1. Create Main Warehouse
+      const whPayload = {
+        tenantId,
+        name: whName.trim(),
+        code: codeUpper,
+        type: 'WAREHOUSE' as LocationType,
+        parentId: null,
+        capacity: whCapacity,
+        description: `${presetTemplate} generated warehouse layout`,
+        createdAt: timestamp
+      };
+      const whId = await db.locations.add(whPayload);
+      saveServerLocation({ ...whPayload, id: whId }).catch(() => {});
+
+      // 2. Create Zones and Racks
+      const zoneLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+      for (let z = 0; z < zoneCount; z++) {
+        const letter = zoneLetters[z % zoneLetters.length] || `Z${z + 1}`;
+        const zoneName = `Zone ${letter}`;
+        const zoneCode = `${codeUpper}-Z${letter}`;
+        const zonePayload = {
+          tenantId,
+          name: zoneName,
+          code: zoneCode,
+          type: 'ZONE' as LocationType,
+          parentId: whId,
+          capacity: zoneCapacity,
+          description: `Zone ${letter} in ${whName}`,
+          createdAt: timestamp
+        };
+        const zoneId = await db.locations.add(zonePayload);
+        saveServerLocation({ ...zonePayload, id: zoneId }).catch(() => {});
+
+        for (let r = 1; r <= racksPerZone; r++) {
+          const rackName = `Rack ${letter}-${r}`;
+          const rackCode = `${zoneCode}-R${r}`;
+          const rackPayload = {
+            tenantId,
+            name: rackName,
+            code: rackCode,
+            type: 'SHELF' as LocationType,
+            parentId: zoneId,
+            capacity: rackCapacity,
+            description: `Rack ${r} in ${zoneName}`,
+            createdAt: timestamp
+          };
+          const rackId = await db.locations.add(rackPayload);
+          saveServerLocation({ ...rackPayload, id: rackId }).catch(() => {});
+        }
+      }
+
+      showToast(`🎉 Generated "${whName}" layout! Added 1 Warehouse, ${zoneCount} Zones, and ${zoneCount * racksPerZone} Racks.`, 'success');
+      setIsTemplateModalOpen(false);
+    } catch (err: any) {
+      showToast(`Failed to generate store layout: ${err.message}`, 'error');
+    }
+  };
+
+  // Delete Location Handler (Cascade deletes sub-locations)
+  const handleDeleteLocation = (loc: InventoryLocation) => {
+    if (!loc.id) return;
+
+    let message = `Are you sure you want to delete "${loc.name}" (${loc.code})?`;
+    if (loc.type === 'WAREHOUSE') {
+      message = `Are you sure you want to delete Warehouse "${loc.name}"? This will also delete ALL zones and racks inside it!`;
+    } else if (loc.type === 'ZONE') {
+      message = `Are you sure you want to delete Zone "${loc.name}"? This will also delete ALL racks inside it!`;
+    }
+
+    showConfirm({
+      title: `Delete ${loc.type === 'WAREHOUSE' ? 'Warehouse' : loc.type === 'ZONE' ? 'Zone' : 'Shelf'}`,
+      message,
+      type: 'danger',
+      confirmText: 'Delete Location',
+      onConfirm: async () => {
+        try {
+          const idsToDelete: number[] = [loc.id!];
+
+          if (loc.type === 'WAREHOUSE') {
+            const childZones = locations.filter(l => String(l.parentId) === String(loc.id));
+            childZones.forEach(z => {
+              if (z.id) idsToDelete.push(z.id);
+              const childRacks = locations.filter(l => String(l.parentId) === String(z.id));
+              childRacks.forEach(r => {
+                if (r.id && !idsToDelete.includes(r.id)) idsToDelete.push(r.id);
+              });
+            });
+            const directRacks = locations.filter(l => l.type === 'SHELF' && String(l.parentId) === String(loc.id));
+            directRacks.forEach(r => {
+              if (r.id && !idsToDelete.includes(r.id)) idsToDelete.push(r.id);
+            });
+          } else if (loc.type === 'ZONE') {
+            const childRacks = locations.filter(l => String(l.parentId) === String(loc.id));
+            childRacks.forEach(r => {
+              if (r.id && !idsToDelete.includes(r.id)) idsToDelete.push(r.id);
+            });
+          }
+
+          // Delete from IndexedDB
+          await db.locations.bulkDelete(idsToDelete);
+
+          // Delete from Server
+          idsToDelete.forEach(id => {
+            deleteServerLocation(id).catch(() => {});
+          });
+
+          showToast(`Location "${loc.name}" deleted successfully!`, 'success');
+        } catch (err: any) {
+          showToast(`Failed to delete location: ${err.message}`, 'error');
+        }
+      }
+    });
+  };
 
   const tenantId = business.tenantId || 'default-tenant';
   const searchContainerRef = useRef<HTMLDivElement>(null);
@@ -106,6 +309,30 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, []);
+
+  // Auto-cleanup duplicate itemLocation mapping records in Dexie IndexedDB
+  useEffect(() => {
+    const cleanupDuplicates = async () => {
+      const allMappings = await db.itemLocations.toArray();
+      const seen = new Set<string>();
+      const idsToDelete: number[] = [];
+
+      for (const m of allMappings) {
+        if (!m.id) continue;
+        const key = `${m.itemId}_${m.locationId}`;
+        if (seen.has(key)) {
+          idsToDelete.push(m.id);
+        } else {
+          seen.add(key);
+        }
+      }
+
+      if (idsToDelete.length > 0) {
+        await db.itemLocations.bulkDelete(idsToDelete);
+      }
+    };
+    cleanupDuplicates().catch(() => {});
+  }, [itemLocations]);
 
   // Detailed capacity stats for the currently selected parent location
   const parentCapacityStats = useMemo(() => {
@@ -176,9 +403,112 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   // Open Relocate Modal for specific row
   const handleOpenRelocateModal = (item: Item, mapping?: ItemLocationMapping) => {
     setRelocateItem({ item, currentMapping: mapping });
-    setRelocateDestLocId(String(mapping ? mapping.locationId : ''));
     setRelocateQty(String(mapping ? mapping.quantity : item.currentStock));
     setRelocateMaxCap(String(mapping ? mapping.maxCapacity : 100));
+
+    if (mapping && mapping.locationId) {
+      const locId = mapping.locationId;
+      setRelocateDestLocId(String(locId));
+      const curr = locationMap.get(locId);
+
+      if (curr) {
+        if (curr.type === 'WAREHOUSE') {
+          setRelocateWhId(String(curr.id));
+          setRelocateZoneId('');
+          setRelocateRackId('');
+        } else if (curr.type === 'ZONE') {
+          const parentWh = locations.find(l => l.type === 'WAREHOUSE' && (String(l.id) === String(curr.parentId) || (l.code && curr.code.startsWith(l.code + '-'))));
+          setRelocateWhId(parentWh ? String(parentWh.id) : String(curr.parentId || ''));
+          setRelocateZoneId(String(curr.id));
+          setRelocateRackId('');
+        } else if (curr.type === 'SHELF') {
+          const parentZone = locations.find(l => l.type === 'ZONE' && (String(l.id) === String(curr.parentId) || (l.code && curr.code.startsWith(l.code + '-'))));
+          if (parentZone) {
+            const parentWh = locations.find(l => l.type === 'WAREHOUSE' && (String(l.id) === String(parentZone.parentId) || (l.code && parentZone.code.startsWith(l.code + '-'))));
+            setRelocateWhId(parentWh ? String(parentWh.id) : String(parentZone.parentId || ''));
+            setRelocateZoneId(String(parentZone.id));
+            setRelocateRackId(String(curr.id));
+          } else {
+            const parentWh = locations.find(l => l.type === 'WAREHOUSE' && (String(l.id) === String(curr.parentId) || (l.code && curr.code.startsWith(l.code + '-'))));
+            setRelocateWhId(parentWh ? String(parentWh.id) : String(curr.parentId || ''));
+            setRelocateZoneId('');
+            setRelocateRackId(String(curr.id));
+          }
+        }
+      } else {
+        setRelocateWhId('');
+        setRelocateZoneId('');
+        setRelocateRackId('');
+      }
+    } else {
+      setRelocateDestLocId('');
+      setRelocateWhId('');
+      setRelocateZoneId('');
+      setRelocateRackId('');
+      setRelocateQty('1');
+      setRelocateMaxCap('100');
+    }
+  };
+
+  // Helper to dynamically calculate capacity utilization & remaining space for a location (including child shelves/racks for zones & warehouses)
+  const getLocCapacityInfo = (loc: InventoryLocation) => {
+    if (!loc.id) return { used: 0, max: 100, remaining: 100, isFull: false };
+    const max = loc.capacity || 100;
+
+    // Collect all location IDs that belong to this location (itself + child zones/racks)
+    const targetLocIds = new Set<number>();
+    targetLocIds.add(Number(loc.id));
+
+    if (loc.type === 'WAREHOUSE') {
+      locations.forEach(l => {
+        if (l.id && (String(l.parentId) === String(loc.id) || (loc.code && l.code.startsWith(loc.code + '-')))) {
+          targetLocIds.add(Number(l.id));
+        }
+      });
+    } else if (loc.type === 'ZONE') {
+      locations.forEach(l => {
+        if (l.type === 'SHELF' && l.id && (String(l.parentId) === String(loc.id) || (loc.code && l.code.startsWith(loc.code + '-')))) {
+          targetLocIds.add(Number(l.id));
+        }
+      });
+    }
+
+    const totalAssignedAtLoc = itemLocations
+      .filter(il => targetLocIds.has(Number(il.locationId)))
+      .reduce((sum, il) => sum + (il.quantity || 0), 0);
+
+    let currentMappingQty = 0;
+    if (relocateItem && relocateItem.currentMapping && targetLocIds.has(Number(relocateItem.currentMapping.locationId))) {
+      currentMappingQty = relocateItem.currentMapping.quantity || 0;
+    }
+
+    const effectiveUsed = Math.max(0, totalAssignedAtLoc - currentMappingQty);
+    const remaining = Math.max(0, max - effectiveUsed);
+    const isFull = remaining <= 0;
+
+    return { used: effectiveUsed, max, remaining, isFull };
+  };
+
+  // Helper to dynamically update Available Capacity & Quantity when picking a target location
+  const updateCapacityDefaults = (targetLocId: string) => {
+    if (!targetLocId) return;
+    const targetLoc = locationMap.get(Number(targetLocId)) || locations.find(l => String(l.id) === String(targetLocId));
+    if (targetLoc) {
+      const capInfo = getLocCapacityInfo(targetLoc);
+      setRelocateMaxCap(String(capInfo.remaining));
+
+      if (relocateItem) {
+        if (relocateItem.currentMapping && String(relocateItem.currentMapping.locationId) === String(targetLoc.id)) {
+          setRelocateQty(String(relocateItem.currentMapping.quantity));
+        } else {
+          const itemObj = relocateItem.item;
+          const assignedQty = (itemLocationMapByItemId.get(itemObj.id!) || []).reduce((sum, m) => sum + m.quantity, 0);
+          const unassignedStock = Math.max(0, itemObj.currentStock - assignedQty);
+          const defaultQty = Math.min(unassignedStock > 0 ? unassignedStock : itemObj.currentStock, capInfo.remaining);
+          setRelocateQty(String(Math.max(1, defaultQty)));
+        }
+      }
+    }
   };
 
   // Helper maps for location names & paths
@@ -266,31 +596,48 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
     items.forEach(item => {
       if (!item.id) return;
-      const mappings = itemLocationMapByItemId.get(item.id) || [];
+      const rawMappings = itemLocationMapByItemId.get(item.id) || [];
 
-      if (mappings.length === 0) {
+      // Deduplicate mappings by locationId for this item
+      const uniqueMappingMap = new Map<number, ItemLocationMapping>();
+      rawMappings.forEach(m => {
+        if (!uniqueMappingMap.has(m.locationId)) {
+          uniqueMappingMap.set(m.locationId, m);
+        } else {
+          const existing = uniqueMappingMap.get(m.locationId)!;
+          existing.quantity = Math.max(existing.quantity, m.quantity);
+        }
+      });
+
+      const uniqueMappings = Array.from(uniqueMappingMap.values()).filter(m => m.quantity > 0);
+      const totalAssignedQty = uniqueMappings.reduce((sum, m) => sum + m.quantity, 0);
+
+      // Render assigned location rows
+      uniqueMappings.forEach(m => {
+        const locInfo = getLocationFullPath(m.locationId);
+        rows.push({
+          item,
+          mapping: m,
+          warehouseName: locInfo.warehouse,
+          shelfCode: locInfo.shelf,
+          fullPath: locInfo.fullPath,
+          availableQty: m.quantity,
+          capacityLimit: m.maxCapacity || locationMap.get(m.locationId)?.capacity || 100,
+          isUnassigned: false
+        });
+      });
+
+      // Render remaining unassigned stock row if unassignedQty > 0
+      const unassignedQty = item.currentStock - totalAssignedQty;
+      if (unassignedQty > 0 || uniqueMappings.length === 0) {
         rows.push({
           item,
           warehouseName: 'Unassigned',
           shelfCode: 'No Shelf Assigned',
           fullPath: 'Unassigned (General Stock)',
-          availableQty: item.currentStock,
+          availableQty: Math.max(0, unassignedQty > 0 ? unassignedQty : item.currentStock),
           capacityLimit: 0,
           isUnassigned: true
-        });
-      } else {
-        mappings.forEach(m => {
-          const locInfo = getLocationFullPath(m.locationId);
-          rows.push({
-            item,
-            mapping: m,
-            warehouseName: locInfo.warehouse,
-            shelfCode: locInfo.shelf,
-            fullPath: locInfo.fullPath,
-            availableQty: m.quantity,
-            capacityLimit: m.maxCapacity || locationMap.get(m.locationId)?.capacity || 100,
-            isUnassigned: false
-          });
         });
       }
     });
@@ -420,7 +767,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     try {
       // 1. Deduct from Source Location Mapping
       let srcMapping = await db.itemLocations
-        .filter(il => il.tenantId === tenantId && il.itemId === itemIdNum && il.locationId === srcLocIdNum)
+        .filter(il => Number(il.itemId) === itemIdNum && Number(il.locationId) === srcLocIdNum)
         .first();
 
       const itemObj = items.find(i => i.id === itemIdNum);
@@ -452,7 +799,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
       // 2. Add to Destination Location Mapping
       const destMapping = await db.itemLocations
-        .filter(il => il.tenantId === tenantId && il.itemId === itemIdNum && il.locationId === destLocIdNum)
+        .filter(il => Number(il.itemId) === itemIdNum && Number(il.locationId) === destLocIdNum)
         .first();
 
       const updatedDestQty = (destMapping ? destMapping.quantity : 0) + qty;
@@ -519,20 +866,46 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
     const item = relocateItem.item;
     const destLocIdNum = Number(relocateDestLocId);
-    const qty = Number(relocateQty) || item.currentStock;
-    const cap = Number(relocateMaxCap) || 100;
+    const qty = Number(relocateQty);
+    const cap = Number(relocateMaxCap);
+
+    if (isNaN(qty) || qty <= 0) {
+      showToast('Quantity must be a valid positive number', 'error');
+      return;
+    }
+
+    const selectedDestLoc = locationMap.get(destLocIdNum);
+    if (selectedDestLoc) {
+      const capInfo = getLocCapacityInfo(selectedDestLoc);
+      if (qty > capInfo.remaining) {
+        showToast(
+          `⛔ Cannot assign ${qty} PCS! Location "${selectedDestLoc.name}" has only ${capInfo.remaining} PCS available space remaining (Max: ${capInfo.max} PCS, Used: ${capInfo.used} PCS).`,
+          'error'
+        );
+        return;
+      }
+    }
 
     try {
-      if (relocateItem.currentMapping) {
-        // Update existing mapping
-        await db.itemLocations.update(relocateItem.currentMapping.id!, {
+      // Find if a mapping already exists for this itemId and destination locationId
+      const existingDestMapping = await db.itemLocations
+        .filter(il => Number(il.itemId) === item.id && Number(il.locationId) === destLocIdNum)
+        .first();
+
+      if (existingDestMapping && existingDestMapping.id) {
+        await db.itemLocations.update(existingDestMapping.id, {
+          quantity: qty,
+          maxCapacity: cap,
+          updatedAt: new Date().toISOString()
+        });
+      } else if (relocateItem.currentMapping && relocateItem.currentMapping.id) {
+        await db.itemLocations.update(relocateItem.currentMapping.id, {
           locationId: destLocIdNum,
           quantity: qty,
           maxCapacity: cap,
           updatedAt: new Date().toISOString()
         });
       } else {
-        // Create new location assignment
         await db.itemLocations.add({
           tenantId,
           itemId: item.id!,
@@ -593,6 +966,14 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           >
             <ArrowLeftRight className="w-4 h-4 stroke-[2.5]" />
             <span>⇄ Transfer Stock</span>
+          </button>
+
+          <button
+            onClick={() => setIsTemplateModalOpen(true)}
+            className="px-3.5 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 font-extrabold text-xs border border-amber-200 shadow-sm transition flex items-center gap-2 cursor-pointer"
+          >
+            <Wand2 className="w-4 h-4 text-amber-600 stroke-[2.5]" />
+            <span>⚡ Store Layout Generator</span>
           </button>
 
           <button
@@ -887,59 +1268,271 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
         {/* ── View 2: Location Hierarchy Master ─────────────────────────── */}
         {activeViewTab === 'hierarchy-master' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {locations.filter(l => l.type === 'WAREHOUSE').map(wh => {
-              const zones = locations.filter(l => l.type === 'ZONE' && l.parentId === wh.id);
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {locations.filter(l => l.type === 'WAREHOUSE').map(wh => {
+                const zones = locations.filter(l =>
+                  l.type === 'ZONE' &&
+                  (String(l.parentId) === String(wh.id) || (wh.code && l.code.startsWith(wh.code + '-')))
+                );
 
-              return (
-                <div key={wh.id} className="card bg-white border border-slate-200 rounded-2xl p-5 space-y-4 shadow-sm">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-                        <Warehouse className="w-5 h-5" />
+                const directShelves = locations.filter(l =>
+                  l.type === 'SHELF' &&
+                  (String(l.parentId) === String(wh.id) || (wh.code && l.code.startsWith(wh.code + '-') && !zones.some(z => z.code && l.code.startsWith(z.code + '-'))))
+                );
+
+                const hasChildren = zones.length > 0 || directShelves.length > 0;
+
+                return (
+                  <div key={wh.id} className="card bg-white border border-slate-200 rounded-2xl p-5 space-y-4 shadow-sm hover:shadow-md transition">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                          <Warehouse className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="font-extrabold text-sm text-slate-800">{wh.name}</h3>
+                          <span className="text-[11px] font-mono text-slate-400">{wh.code}</span>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="font-extrabold text-sm text-slate-800">{wh.name}</h3>
-                        <span className="text-[11px] font-mono text-slate-400">{wh.code}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="badge badge-blue">Warehouse ({wh.capacity || 0} Cap)</span>
+                        <button
+                          onClick={() => handleDeleteLocation(wh)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                          title="Delete Warehouse"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
-                    <span className="badge badge-blue">Warehouse</span>
-                  </div>
 
-                  <p className="text-xs text-slate-500">{wh.description || 'Main warehouse facility'}</p>
+                    <p className="text-xs text-slate-500">{wh.description || 'Main warehouse facility'}</p>
 
-                  <div className="space-y-3">
-                    <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Zones & Shelves</div>
-                    {zones.length === 0 ? (
-                      <div className="text-xs text-slate-400 italic py-2">No zones created in this warehouse yet.</div>
-                    ) : (
-                      zones.map(zone => {
-                        const shelves = locations.filter(l => l.type === 'SHELF' && l.parentId === zone.id);
-                        return (
-                          <div key={zone.id} className="bg-slate-50 p-3 rounded-xl border border-slate-200/60 space-y-2">
-                            <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                              <span>{zone.name} ({zone.code})</span>
-                              <span className="text-[10px] text-purple-600 font-extrabold uppercase">Zone</span>
-                            </div>
-                            <div className="space-y-1 pl-2">
-                              {shelves.map(sh => (
-                                <div key={sh.id} className="flex items-center justify-between text-[11px] text-slate-600 bg-white p-1.5 rounded-lg border border-slate-200/50">
-                                  <span className="font-semibold flex items-center gap-1">
-                                    <ChevronRight className="w-3 h-3 text-slate-400" />
-                                    {sh.name}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                          Zones & Racks Hierarchy ({zones.length} Zones)
+                        </span>
+                      </div>
+
+                      {!hasChildren ? (
+                        <div className="text-xs text-slate-400 italic py-2">No zones or shelves created in this warehouse yet.</div>
+                      ) : (
+                        <div className="space-y-3">
+                          {zones.map(zone => {
+                            const shelves = locations.filter(l =>
+                              l.type === 'SHELF' &&
+                              (String(l.parentId) === String(zone.id) || (zone.code && l.code.startsWith(zone.code + '-')))
+                            );
+
+                            return (
+                              <div key={zone.id} className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/80 space-y-2.5">
+                                <div className="flex items-center justify-between text-xs font-bold text-slate-700 border-b border-slate-200/50 pb-2">
+                                  <span className="flex items-center gap-1.5 text-purple-900 font-extrabold">
+                                    <Layers className="w-4 h-4 text-purple-600" />
+                                    {zone.name} <span className="text-[11px] text-purple-600/80 font-mono">({zone.code})</span>
                                   </span>
-                                  <span className="font-mono text-[10px] text-slate-400">Cap: {sh.capacity}</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] text-purple-700 bg-purple-100 px-2 py-0.5 rounded-md font-extrabold uppercase">
+                                      Zone ({zone.capacity || 0} Cap) • {shelves.length} Racks
+                                    </span>
+                                    <button
+                                      onClick={() => handleDeleteLocation(zone)}
+                                      className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-100 transition cursor-pointer"
+                                      title="Delete Zone"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
                                 </div>
-                              ))}
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pl-1">
+                                  {shelves.length === 0 ? (
+                                    <div className="text-[10.5px] text-slate-400 italic py-0.5 col-span-2">No racks in this zone yet.</div>
+                                  ) : (
+                                    shelves.map(sh => {
+                                      const rackMappings = itemLocations.filter(il => Number(il.locationId) === Number(sh.id) && il.quantity > 0);
+                                      const mappedProducts = rackMappings
+                                        .map(il => ({ item: items.find(i => Number(i.id) === Number(il.itemId)), quantity: il.quantity }))
+                                        .filter(m => m.item);
+
+                                      const totalUsedQty = mappedProducts.reduce((sum, p) => sum + p.quantity, 0);
+                                      const maxCap = sh.capacity || 100;
+                                      const fillPct = Math.min(100, Math.round((totalUsedQty / maxCap) * 100));
+
+                                      return (
+                                        <div key={sh.id} className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs space-y-1.5">
+                                          <div className="flex items-center justify-between text-[11px] text-slate-600">
+                                            <span className="font-extrabold flex items-center gap-1 text-slate-800">
+                                              <ChevronRight className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                                              {sh.name} <span className="text-[9.5px] text-slate-400 font-mono">({sh.code})</span>
+                                            </span>
+                                            <div className="flex items-center gap-1">
+                                              <span className={`font-mono text-[9.5px] font-bold px-1.5 py-0.5 rounded ${
+                                                fillPct >= 100 ? 'bg-red-100 text-red-700' : fillPct > 0 ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-500'
+                                              }`}>
+                                                {totalUsedQty}/{maxCap} PCS {fillPct >= 100 ? '• FULL' : ''}
+                                              </span>
+                                              <button
+                                                onClick={() => handleDeleteLocation(sh)}
+                                                className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                                                title="Delete Shelf / Rack"
+                                              >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                              </button>
+                                            </div>
+                                          </div>
+
+                                          {/* Mini Progress Bar */}
+                                          <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+                                            <div
+                                              className={`h-full transition-all duration-300 ${
+                                                fillPct >= 100 ? 'bg-red-500' : fillPct > 0 ? 'bg-purple-600' : 'bg-slate-200'
+                                              }`}
+                                              style={{ width: `${fillPct}%` }}
+                                            />
+                                          </div>
+
+                                          {/* Products List in this Rack */}
+                                          {mappedProducts.length === 0 ? (
+                                            <div className="text-[10px] text-slate-400 italic py-0.5 font-normal">📦 Empty Rack</div>
+                                          ) : (
+                                            <div className="space-y-1 pt-1.5 border-t border-slate-100">
+                                              {mappedProducts.map(({ item, quantity }, pIdx) => {
+                                                const mapping = rackMappings.find(m => Number(m.itemId) === Number(item!.id));
+                                                return (
+                                                  <div
+                                                    key={pIdx}
+                                                    onClick={() => setPreviewItemDetail({ item: item!, quantity, mapping, locationId: sh.id })}
+                                                    className="flex items-center justify-between text-[10.5px] bg-purple-50/70 hover:bg-purple-100/90 px-2 py-1.5 rounded-lg border border-purple-200/80 hover:border-purple-300 transition cursor-pointer shadow-2xs group"
+                                                    title="Click to enlarge & view full item details"
+                                                  >
+                                                    <div className="flex items-center gap-1.5 min-w-0">
+                                                      <Package className="w-3.5 h-3.5 text-purple-600 shrink-0 group-hover:scale-110 transition" />
+                                                      <span className="font-extrabold text-slate-800 truncate">{item!.name}</span>
+                                                      <span className="text-[9.5px] text-slate-400 font-mono">({item!.skuCode})</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-1 shrink-0">
+                                                      <span className="font-black text-purple-900 bg-white px-2 py-0.5 rounded-md shadow-2xs text-[10.5px]">
+                                                        {quantity} {item!.unitType}
+                                                      </span>
+                                                      <Maximize2 className="w-3 h-3 text-purple-500 opacity-0 group-hover:opacity-100 transition" />
+                                                    </div>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {/* Direct Shelves attached to Warehouse */}
+                          {directShelves.length > 0 && (
+                            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/60 space-y-1.5">
+                              <div className="text-[10.5px] font-extrabold uppercase tracking-wider text-slate-500">Direct Warehouse Shelves</div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {directShelves.map(sh => (
+                                  <div key={sh.id} className="flex items-center justify-between text-[11px] text-slate-600 bg-white p-2 rounded-lg border border-slate-200">
+                                    <span className="font-semibold flex items-center gap-1">
+                                      <ChevronRight className="w-3 h-3 text-slate-400" />
+                                      {sh.name} <span className="text-[10px] text-slate-400 font-mono">({sh.code})</span>
+                                    </span>
+                                    <div className="flex items-center gap-1">
+                                      <span className="font-mono text-[10px] text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded">
+                                        Cap: {sh.capacity}
+                                      </span>
+                                      <button
+                                        onClick={() => handleDeleteLocation(sh)}
+                                        className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                                        title="Delete Shelf / Rack"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          </div>
-                        );
-                      })
-                    )}
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Standalone / Unassigned Locations fallback */}
+            {(() => {
+              const warehouseIds = new Set(locations.filter(l => l.type === 'WAREHOUSE').map(l => String(l.id)));
+              const warehouseCodes = new Set(locations.filter(l => l.type === 'WAREHOUSE').map(l => l.code));
+              const zoneIds = new Set(locations.filter(l => l.type === 'ZONE').map(l => String(l.id)));
+              const zoneCodes = new Set(locations.filter(l => l.type === 'ZONE').map(l => l.code));
+
+              const standaloneZones = locations.filter(l => {
+                if (l.type !== 'ZONE') return false;
+                const matchesWhId = l.parentId && warehouseIds.has(String(l.parentId));
+                const matchesWhCode = Array.from(warehouseCodes).some(wc => l.code.startsWith(wc + '-'));
+                return !matchesWhId && !matchesWhCode;
+              });
+
+              const standaloneShelves = locations.filter(l => {
+                if (l.type !== 'SHELF') return false;
+                const matchesParentId = l.parentId && (warehouseIds.has(String(l.parentId)) || zoneIds.has(String(l.parentId)));
+                const matchesCode = Array.from(warehouseCodes).some(wc => l.code.startsWith(wc + '-')) || Array.from(zoneCodes).some(zc => l.code.startsWith(zc + '-'));
+                return !matchesParentId && !matchesCode;
+              });
+
+              if (standaloneZones.length === 0 && standaloneShelves.length === 0) return null;
+
+              return (
+                <div className="card bg-amber-50/60 border border-amber-200 rounded-2xl p-5 space-y-3 shadow-sm">
+                  <div className="flex items-center gap-2 text-amber-900 font-extrabold text-xs uppercase tracking-wider">
+                    <AlertCircle className="w-4 h-4 text-amber-600" />
+                    <span>Unassigned / Standalone Locations ({standaloneZones.length + standaloneShelves.length})</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {standaloneZones.map(z => (
+                      <div key={z.id} className="bg-white p-3 rounded-xl border border-amber-200 text-xs font-bold flex justify-between items-center">
+                        <span>{z.name} ({z.code})</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="badge badge-purple">Zone</span>
+                          <button
+                            onClick={() => handleDeleteLocation(z)}
+                            className="p-1 text-slate-400 hover:text-red-600 transition cursor-pointer"
+                            title="Delete Location"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {standaloneShelves.map(s => (
+                      <div key={s.id} className="bg-white p-3 rounded-xl border border-amber-200 text-xs font-bold flex justify-between items-center">
+                        <span>{s.name} ({s.code})</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="badge badge-blue">Shelf / Rack</span>
+                          <button
+                            onClick={() => handleDeleteLocation(s)}
+                            className="p-1 text-slate-400 hover:text-red-600 transition cursor-pointer"
+                            title="Delete Location"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               );
-            })}
+            })()}
           </div>
         )}
 
@@ -1414,43 +2007,168 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Target Shelf / Location *</label>
-                <select
-                  required
-                  value={relocateDestLocId}
-                  onChange={e => setRelocateDestLocId(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none"
-                >
-                  <option value="">Select Shelf / Location...</option>
-                  {locations.map(l => (
-                    <option key={l.id} value={l.id}>{l.name} ({l.code}) — Cap: {l.capacity}</option>
-                  ))}
-                </select>
-              </div>
+              {(() => {
+                const selectedWhObj = locations.find(l => String(l.id) === String(relocateWhId) || (l.code && l.code === relocateWhId));
+                const selectedZoneObj = locations.find(l => String(l.id) === String(relocateZoneId) || (l.code && l.code === relocateZoneId));
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Quantity at Shelf</label>
-                  <input
-                    type="number"
-                    value={relocateQty}
-                    onChange={e => setRelocateQty(e.target.value)}
-                    placeholder={String(relocateItem.item.currentStock)}
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Max Shelf Capacity</label>
-                  <input
-                    type="number"
-                    value={relocateMaxCap}
-                    onChange={e => setRelocateMaxCap(e.target.value)}
-                    placeholder="100"
-                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none"
-                  />
-                </div>
-              </div>
+                const availableZones = selectedWhObj
+                  ? locations.filter(l =>
+                      l.type === 'ZONE' &&
+                      (String(l.parentId) === String(selectedWhObj.id) || (selectedWhObj.code && l.code.startsWith(selectedWhObj.code + '-')))
+                    )
+                  : [];
+
+                const availableRacks = selectedZoneObj
+                  ? locations.filter(l =>
+                      l.type === 'SHELF' &&
+                      (String(l.parentId) === String(selectedZoneObj.id) || (selectedZoneObj.code && l.code.startsWith(selectedZoneObj.code + '-')))
+                    )
+                  : selectedWhObj
+                  ? locations.filter(l =>
+                      l.type === 'SHELF' &&
+                      (String(l.parentId) === String(selectedWhObj.id) || (selectedWhObj.code && l.code.startsWith(selectedWhObj.code + '-')))
+                    )
+                  : [];
+
+                const isCapacityExceeded = Number(relocateQty) > Number(relocateMaxCap);
+
+                return (
+                  <>
+                    {/* 1. Warehouse Selection */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase mb-1">1. Select Warehouse / Store Branch *</label>
+                      <select
+                        required
+                        value={relocateWhId}
+                        onChange={e => {
+                          const whId = e.target.value;
+                          setRelocateWhId(whId);
+                          setRelocateZoneId('');
+                          setRelocateRackId('');
+                          setRelocateDestLocId(whId);
+                          updateCapacityDefaults(whId);
+                        }}
+                        className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none"
+                      >
+                        <option value="">Select Warehouse...</option>
+                        {locations.filter(l => l.type === 'WAREHOUSE').map(wh => (
+                          <option key={wh.id} value={wh.id}>{wh.name} ({wh.code})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* 2. Zone Selection */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase mb-1">2. Select Zone / Aisle *</label>
+                      <select
+                        disabled={!relocateWhId}
+                        value={relocateZoneId}
+                        onChange={e => {
+                          const zId = e.target.value;
+                          setRelocateZoneId(zId);
+                          setRelocateRackId('');
+                          const activeId = zId || relocateWhId;
+                          setRelocateDestLocId(activeId);
+                          updateCapacityDefaults(activeId);
+                        }}
+                        className={`w-full px-3 py-2.5 rounded-xl border font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none ${
+                          !relocateWhId ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'border-slate-300'
+                        }`}
+                      >
+                        <option value="">
+                          {!relocateWhId ? 'Select Warehouse first...' : availableZones.length === 0 ? 'No Zones in this Warehouse (Pick Direct Rack below)' : 'Select Zone / Aisle...'}
+                        </option>
+                        {availableZones.map(z => {
+                          const capInfo = getLocCapacityInfo(z);
+                          return (
+                            <option key={z.id} value={z.id} disabled={capInfo.isFull}>
+                              {capInfo.isFull ? '🛑 [FULL] ' : ''}{z.name} ({z.code}) — {capInfo.isFull ? 'FULL (0 Available)' : `Cap: ${z.capacity} (${capInfo.remaining} Available)`}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+
+                    {/* 3. Rack / Shelf Selection */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase mb-1">3. Select Rack / Shelf / Bin *</label>
+                      <select
+                        disabled={!relocateWhId}
+                        value={relocateRackId}
+                        onChange={e => {
+                          const rId = e.target.value;
+                          setRelocateRackId(rId);
+                          const activeId = rId || relocateZoneId || relocateWhId;
+                          setRelocateDestLocId(activeId);
+                          updateCapacityDefaults(activeId);
+                        }}
+                        className={`w-full px-3 py-2.5 rounded-xl border font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none ${
+                          !relocateWhId ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'border-slate-300'
+                        }`}
+                      >
+                        <option value="">
+                          {!relocateWhId ? 'Select Warehouse first...' : availableRacks.length === 0 ? 'No Racks in this Zone' : 'Select Rack / Shelf / Bin...'}
+                        </option>
+                        {availableRacks.map(r => {
+                          const capInfo = getLocCapacityInfo(r);
+                          return (
+                            <option key={r.id} value={r.id} disabled={capInfo.isFull}>
+                              {capInfo.isFull ? '🛑 [FULL] ' : ''}{r.name} ({r.code}) — {capInfo.isFull ? 'FULL (0 Available)' : `Cap: ${r.capacity} (${capInfo.remaining} Available)`}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+
+                    {/* Selected Target Path Summary */}
+                    {relocateDestLocId && (() => {
+                      const fullInfo = getLocationFullPath(Number(relocateDestLocId));
+                      return (
+                        <div className="bg-purple-50 p-2.5 rounded-xl border border-purple-200/80 text-xs flex items-center justify-between font-bold">
+                          <span className="text-slate-500 font-medium">Selected Location:</span>
+                          <span className="text-purple-800 font-extrabold flex items-center gap-1">
+                            <MapPin className="w-3.5 h-3.5 text-purple-600" />
+                            {fullInfo.fullPath}
+                          </span>
+                        </div>
+                      );
+                    })()}
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Quantity at Shelf *</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={relocateQty}
+                          onChange={e => setRelocateQty(e.target.value)}
+                          placeholder="20"
+                          className={`w-full px-3 py-2.5 rounded-xl border font-bold text-xs outline-none focus:ring-2 ${
+                            isCapacityExceeded ? 'border-red-500 text-red-700 bg-red-50 focus:ring-red-500' : 'border-slate-300 focus:ring-purple-500'
+                          }`}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Available Capacity</label>
+                        <input
+                          type="number"
+                          value={relocateMaxCap}
+                          onChange={e => setRelocateMaxCap(e.target.value)}
+                          placeholder="10"
+                          className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none"
+                        />
+                      </div>
+
+                      {isCapacityExceeded && (
+                        <div className="col-span-2 bg-red-50 p-2.5 rounded-xl border border-red-200 text-xs font-bold text-red-700 flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                          <span>Quantity ({relocateQty} PCS) exceeds Available Capacity ({relocateMaxCap} PCS)!</span>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
 
               <div className="flex items-center gap-3 pt-2">
                 <button
@@ -1465,6 +2183,387 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                   className="flex-1 py-3 rounded-xl bg-purple-600 hover:bg-purple-700 font-extrabold text-xs text-white shadow-md shadow-purple-200 cursor-pointer"
                 >
                   Save Placement
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal 5: Enlarged Product Detail Preview Modal ──────────────── */}
+      {previewItemDetail && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+                  <Package className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-slate-900">{previewItemDetail.item.name}</h2>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 font-mono font-medium">
+                    <span>SKU: {previewItemDetail.item.skuCode}</span>
+                    {previewItemDetail.item.barcode && <span>• Barcode: {previewItemDetail.item.barcode}</span>}
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setPreviewItemDetail(null)} className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Current Selected Placement Card */}
+            {previewItemDetail.locationId && (() => {
+              const locInfo = getLocationFullPath(previewItemDetail.locationId);
+              return (
+                <div className="bg-gradient-to-r from-purple-50 via-purple-50/50 to-indigo-50/50 p-4 rounded-xl border border-purple-200/80 space-y-2">
+                  <div className="text-[11px] font-black uppercase tracking-wider text-purple-700">Current Shelf Placement</div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <MapPin className="w-4 h-4 text-purple-600" />
+                      <span className="font-extrabold text-xs text-slate-800">{locInfo.fullPath}</span>
+                    </div>
+                    <span className="badge badge-purple text-xs px-2.5 py-1 font-black">
+                      {previewItemDetail.quantity} {previewItemDetail.item.unitType}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Product Overview Grid */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                <span className="text-[10px] font-extrabold uppercase text-slate-400 block mb-1">Total Stock</span>
+                <span className="text-sm font-black text-slate-800">{previewItemDetail.item.currentStock} {previewItemDetail.item.unitType}</span>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                <span className="text-[10px] font-extrabold uppercase text-slate-400 block mb-1">Sales Price</span>
+                <span className="text-sm font-black text-emerald-700">Rs {previewItemDetail.item.salesPrice}</span>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                <span className="text-[10px] font-extrabold uppercase text-slate-400 block mb-1">Purchase Price</span>
+                <span className="text-sm font-black text-slate-700">Rs {previewItemDetail.item.purchasePrice || 0}</span>
+              </div>
+            </div>
+
+            {/* All Mapped Locations Breakdown for this Item */}
+            {(() => {
+              const allItemMappings = itemLocationMapByItemId.get(previewItemDetail.item.id!) || [];
+              const validMappings = allItemMappings.filter(m => m.quantity > 0);
+
+              return (
+                <div className="space-y-2">
+                  <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                    Store Locations Breakdown ({validMappings.length} Placements)
+                  </div>
+                  {validMappings.length === 0 ? (
+                    <div className="text-xs text-slate-400 italic bg-slate-50 p-3 rounded-xl border border-slate-200">
+                      Unassigned General Stock: {previewItemDetail.item.currentStock} {previewItemDetail.item.unitType}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {validMappings.map((m, idx) => {
+                        const info = getLocationFullPath(m.locationId);
+                        const isCurrent = Number(m.locationId) === Number(previewItemDetail.locationId);
+                        return (
+                          <div
+                            key={idx}
+                            className={`flex items-center justify-between p-2.5 rounded-xl border text-xs font-bold ${
+                              isCurrent ? 'bg-purple-50 border-purple-300 ring-1 ring-purple-300' : 'bg-slate-50 border-slate-200'
+                            }`}
+                          >
+                            <span className="flex items-center gap-1.5 text-slate-700">
+                              <MapPin className="w-3.5 h-3.5 text-purple-600" />
+                              {info.fullPath}
+                            </span>
+                            <span className="font-mono text-purple-900 bg-white px-2 py-0.5 rounded border border-slate-200 font-extrabold">
+                              {m.quantity} {previewItemDetail.item.unitType}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const targetItem = previewItemDetail.item;
+                  const targetMapping = previewItemDetail.mapping;
+                  setPreviewItemDetail(null);
+                  handleOpenRelocateModal(targetItem, targetMapping);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 font-extrabold text-xs text-white shadow-sm cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+                <span>Relocate Placement</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewItemDetail(null)}
+                className="py-2.5 px-5 rounded-xl border border-slate-300 font-bold text-xs text-slate-600 hover:bg-slate-100 cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal 4: Store Layout Template Generator Modal ───────────────── */}
+      {isTemplateModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-xl w-full shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+              <div>
+                <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                  <Wand2 className="w-5 h-5 text-amber-600 stroke-[2.5]" />
+                  Store Layout Generator & Template
+                </h2>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  Generate an entire store hierarchy (Warehouse → Zones → Racks) automatically in one click.
+                </p>
+              </div>
+              <button onClick={() => setIsTemplateModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleGenerateStore} className="space-y-5">
+              {/* Presets Picker */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-2">Select Template Preset</label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {[
+                    { id: 'RETAIL', title: 'Standard Retail', desc: '1 WH, 3 Zones, 3 Racks/Zone' },
+                    { id: 'SUPERMARKET', title: 'Supermarket', desc: '1 WH, 4 Zones, 4 Racks/Zone' },
+                    { id: 'BOUTIQUE', title: 'Boutique / Shop', desc: '1 WH, 2 Zones, 2 Racks/Zone' },
+                    { id: 'CUSTOM', title: 'Custom Setup', desc: 'Custom Zone & Rack counts' }
+                  ].map(p => {
+                    const isSelected = presetTemplate === p.id;
+                    return (
+                      <div
+                        key={p.id}
+                        onClick={() => handleSelectPreset(p.id as any)}
+                        className={`p-3 rounded-xl border cursor-pointer transition flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-amber-50/80 border-amber-300 ring-2 ring-amber-400/40 shadow-sm'
+                            : 'bg-white border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={`font-extrabold text-xs ${isSelected ? 'text-amber-900' : 'text-slate-800'}`}>
+                            {p.title}
+                          </span>
+                          {isSelected && <Check className="w-4 h-4 text-amber-600" />}
+                        </div>
+                        <span className="text-[11px] text-slate-500 mt-1 font-medium">{p.desc}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Form Config Fields */}
+              <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200/80">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="col-span-2">
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Warehouse Name *</label>
+                    <input
+                      required
+                      type="text"
+                      value={whName}
+                      onChange={e => {
+                        setWhName(e.target.value);
+                        setPresetTemplate('CUSTOM');
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-xs bg-white outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Code *</label>
+                    <input
+                      required
+                      type="text"
+                      value={whCode}
+                      onChange={e => {
+                        setWhCode(e.target.value);
+                        setPresetTemplate('CUSTOM');
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-xs bg-white uppercase outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Warehouse Capacity</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={whCapacity}
+                      onChange={e => {
+                        setWhCapacity(Number(e.target.value) || 0);
+                        setPresetTemplate('CUSTOM');
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-xs bg-white outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Number of Zones</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={zoneCount}
+                      onChange={e => {
+                        setZoneCount(Math.min(10, Math.max(1, Number(e.target.value) || 1)));
+                        setPresetTemplate('CUSTOM');
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-xs bg-white outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Capacity per Zone</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={zoneCapacity}
+                      onChange={e => {
+                        setZoneCapacity(Number(e.target.value) || 0);
+                        setPresetTemplate('CUSTOM');
+                      }}
+                      className={`w-full px-3 py-2 rounded-xl border font-bold text-xs bg-white outline-none focus:ring-2 ${
+                        isZoneCapExceeded ? 'border-red-500 text-red-700 focus:ring-red-500 bg-red-50' : 'border-slate-300 focus:ring-amber-500'
+                      }`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Racks per Zone</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={racksPerZone}
+                      onChange={e => {
+                        setRacksPerZone(Math.min(10, Math.max(1, Number(e.target.value) || 1)));
+                        setPresetTemplate('CUSTOM');
+                      }}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 font-bold text-xs bg-white outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Rack Capacity</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={rackCapacity}
+                      onChange={e => {
+                        setRackCapacity(Number(e.target.value) || 0);
+                        setPresetTemplate('CUSTOM');
+                      }}
+                      className={`w-full px-3 py-2 rounded-xl border font-bold text-xs bg-white outline-none focus:ring-2 ${
+                        isRackCapExceeded ? 'border-red-500 text-red-700 focus:ring-red-500 bg-red-50' : 'border-slate-300 focus:ring-amber-500'
+                      }`}
+                    />
+                  </div>
+                </div>
+
+                {/* Validation Warnings */}
+                {isZoneCapExceeded && (
+                  <p className="text-[11px] font-bold text-red-600 flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                    <span>Total Zones Capacity ({totalZoneCapAllocated} PCS) exceeds Warehouse Capacity ({whCapacity} PCS)!</span>
+                  </p>
+                )}
+
+                {isRackCapExceeded && (
+                  <p className="text-[11px] font-bold text-red-600 flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                    <span>Total Racks Capacity per Zone ({totalRackCapAllocatedPerZone} PCS) exceeds Zone Capacity ({zoneCapacity} PCS)!</span>
+                  </p>
+                )}
+              </div>
+
+              {/* Hierarchy Live Tree Preview */}
+              <div className="bg-amber-50/50 p-3.5 rounded-xl border border-amber-200/70 space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-amber-900">
+                  <span className="flex items-center gap-1.5">
+                    <FolderTree className="w-4 h-4 text-amber-600" />
+                    Layout Structure Preview
+                  </span>
+                  <span className="badge badge-blue">{totalLocationsToGenerate} Locations to be created</span>
+                </div>
+
+                <div className="bg-white p-3 rounded-lg border border-amber-200/50 space-y-2 text-xs">
+                  <div className="flex items-center justify-between font-bold text-slate-800">
+                    <span className="flex items-center gap-1 text-blue-700">
+                      <Warehouse className="w-3.5 h-3.5" />
+                      {whName || 'Warehouse'} ({whCode || 'WH'})
+                    </span>
+                    <span className="text-[11px] text-slate-500 font-mono">Cap: {whCapacity} PCS</span>
+                  </div>
+
+                  <div className="pl-4 border-l-2 border-amber-200 space-y-2">
+                    {Array.from({ length: Math.min(3, zoneCount) }).map((_, zIdx) => {
+                      const letter = ['A', 'B', 'C', 'D'][zIdx] || `Z${zIdx + 1}`;
+                      return (
+                        <div key={zIdx} className="space-y-1">
+                          <div className="flex items-center justify-between font-bold text-purple-700 text-[11px]">
+                            <span>└─ Zone {letter} ({whCode || 'WH'}-Z{letter})</span>
+                            <span className="font-mono text-[10px] text-slate-500">Cap: {zoneCapacity} PCS</span>
+                          </div>
+                          <div className="pl-4 text-[10.5px] text-slate-600 font-medium">
+                            {racksPerZone > 0 ? (
+                              <span>Racks ({racksPerZone} per zone): Rack {letter}-1 ... Rack {letter}-{racksPerZone} (Cap: {rackCapacity} PCS each)</span>
+                            ) : (
+                              <span className="text-slate-400 italic">No racks</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {zoneCount > 3 && (
+                      <div className="text-[10.5px] text-amber-700 font-bold italic">
+                        ... plus {zoneCount - 3} more Zones with {racksPerZone} racks each
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsTemplateModalOpen(false)}
+                  className="flex-1 py-3 rounded-xl border border-slate-300 font-bold text-xs text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isZoneCapExceeded || isRackCapExceeded}
+                  className={`flex-1 py-3 rounded-xl font-extrabold text-xs text-white shadow-md transition flex items-center justify-center gap-2 ${
+                    isZoneCapExceeded || isRackCapExceeded
+                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                      : 'bg-amber-600 hover:bg-amber-700 shadow-amber-200 cursor-pointer'
+                  }`}
+                >
+                  <Wand2 className="w-4 h-4" />
+                  <span>Generate Entire Store Layout ({totalLocationsToGenerate} Locations)</span>
                 </button>
               </div>
             </form>

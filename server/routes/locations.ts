@@ -49,6 +49,21 @@ locationsRouter.post('/', async (req: Request, res: Response) => {
   }
 });
 
+// DELETE /api/v1/locations/:id — Delete a location
+locationsRouter.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ success: false, error: 'Invalid location ID' });
+
+    await InventoryLocation.destroy({ where: { parentId: id } });
+    await InventoryLocation.destroy({ where: { id } });
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/v1/locations/mappings — Fetch item location mappings for a tenant
 locationsRouter.get('/mappings', async (req: Request, res: Response) => {
   try {
@@ -67,20 +82,22 @@ locationsRouter.post('/mappings', async (req: Request, res: Response) => {
   try {
     const tenantId = req.body.tenantId || (req as any).user?.tenantId || 'default-tenant';
     const { itemId, locationId, quantity, maxCapacity } = req.body;
+    const numItemId = Number(itemId);
+    const numLocId = Number(locationId);
 
     let mapping = await ItemLocationMapping.findOne({
-      where: { tenantId, itemId, locationId }
+      where: { tenantId, itemId: numItemId, locationId: numLocId }
     });
 
     if (mapping) {
-      await mapping.update({ quantity, maxCapacity });
+      await mapping.update({ quantity: Number(quantity) || 0, maxCapacity: Number(maxCapacity) || 100 });
     } else {
       mapping = await ItemLocationMapping.create({
         tenantId,
-        itemId,
-        locationId,
-        quantity: quantity || 0,
-        maxCapacity: maxCapacity || 100
+        itemId: numItemId,
+        locationId: numLocId,
+        quantity: Number(quantity) || 0,
+        maxCapacity: Number(maxCapacity) || 100
       });
     }
 

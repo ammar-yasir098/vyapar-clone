@@ -373,8 +373,19 @@ export function App() {
         if (serverItemLocations && serverItemLocations.length > 0) {
           for (const sMap of serverItemLocations) {
             const rawMap = sMap.dataValues || sMap;
-            const existing = await db.itemLocations.filter(m => m.itemId === rawMap.itemId && m.locationId === rawMap.locationId).first();
-            const mapData = { ...rawMap, tenantId: rawMap.tenantId || activeTenantId };
+            const targetItemId = Number(rawMap.itemId);
+            const targetLocId = Number(rawMap.locationId);
+
+            const existing = await db.itemLocations
+              .filter(m => Number(m.itemId) === targetItemId && Number(m.locationId) === targetLocId)
+              .first();
+
+            const mapData = {
+              ...rawMap,
+              itemId: targetItemId,
+              locationId: targetLocId,
+              tenantId: rawMap.tenantId || activeTenantId
+            };
             if (existing && existing.id) {
               await db.itemLocations.update(existing.id, mapData);
             } else {
