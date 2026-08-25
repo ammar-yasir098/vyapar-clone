@@ -107,6 +107,26 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     };
   }, []);
 
+  // Detailed capacity stats for the currently selected parent location
+  const parentCapacityStats = useMemo(() => {
+    if (!locParentId) return null;
+    const parent = locations.find(l => String(l.id) === String(locParentId));
+    if (!parent) return null;
+
+    const parentCap = parent.capacity ?? 0;
+    const existingChildren = locations.filter(l => String(l.parentId) === String(parent.id));
+    const usedCap = existingChildren.reduce((sum, child) => sum + (child.capacity || 0), 0);
+    const availableCap = Math.max(0, parentCap - usedCap);
+
+    return {
+      parent,
+      parentCap,
+      usedCap,
+      availableCap,
+      childCount: existingChildren.length
+    };
+  }, [locations, locParentId]);
+
   // Filtered items list for transfer modal search
   const filteredTransferItems = useMemo(() => {
     if (!itemSearchQuery.trim()) return items;
@@ -323,9 +343,25 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       return;
     }
 
-    if (locType !== 'WAREHOUSE' && !locParentId) {
-      showToast(`Please select a Parent Location for ${locType === 'ZONE' ? 'Zone / Aisle' : 'Rack / Shelf / Bin'}.`, 'error');
-      return;
+    if (locType !== 'WAREHOUSE') {
+      if (!locParentId) {
+        showToast(`Please select a Parent Location for ${locType === 'ZONE' ? 'Zone / Aisle' : 'Rack / Shelf / Bin'}.`, 'error');
+        return;
+      }
+
+      if (parentCapacityStats) {
+        const { parent, parentCap, usedCap, availableCap, childCount } = parentCapacityStats;
+        const enteredCap = Number(locCapacity) || 0;
+        const childTypeName = locType === 'ZONE' ? 'zones' : 'racks';
+
+        if (enteredCap > availableCap) {
+          showToast(
+            `Capacity (${enteredCap} units) exceeds available space in ${parent.name}. Only ${availableCap} units space left out of ${parentCap} units (${usedCap} units used by ${childCount} existing ${childTypeName}).`,
+            'error'
+          );
+          return;
+        }
+      }
     }
 
     const codeUpper = locCode.trim().toUpperCase();
@@ -984,7 +1020,16 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                 <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Location Type *</label>
                 <select
                   value={locType}
-                  onChange={e => setLocType(e.target.value as LocationType)}
+                  onChange={e => {
+                    const newType = e.target.value as LocationType;
+                    setLocType(newType);
+                    setLocParentId('');
+                    if (newType === 'WAREHOUSE') {
+                      setLocCapacity('500');
+                    } else {
+                      setLocCapacity('');
+                    }
+                  }}
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none"
                 >
                   <option value="WAREHOUSE">Warehouse / Branch</option>
@@ -1004,12 +1049,16 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                   >
                     <option value="">Select Parent Location...</option>
                     {locations
-                      .filter(l => locType === 'ZONE' ? l.type === 'WAREHOUSE' : (l.type === 'ZONE' || l.type === 'WAREHOUSE'))
+                      .filter(l => locType === 'ZONE' ? l.type === 'WAREHOUSE' : l.type === 'ZONE')
                       .map(l => (
                         <option key={l.id} value={l.id}>{l.name} ({l.code})</option>
                       ))}
-                    {locations.filter(l => locType === 'ZONE' ? l.type === 'WAREHOUSE' : (l.type === 'ZONE' || l.type === 'WAREHOUSE')).length === 0 && (
-                      <option value="" disabled>No parent warehouses created yet. Please create a Warehouse first.</option>
+                    {locations.filter(l => locType === 'ZONE' ? l.type === 'WAREHOUSE' : l.type === 'ZONE').length === 0 && (
+                      <option value="" disabled>
+                        {locType === 'ZONE'
+                          ? 'No parent warehouses created yet. Please create a Warehouse first.'
+                          : 'No parent zones created yet. Please create a Zone first.'}
+                      </option>
                     )}
                   </select>
                 </div>
@@ -1042,13 +1091,97 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Storage Capacity (Units)</label>
-                <input
-                  type="number"
-                  value={locCapacity}
-                  onChange={e => setLocCapacity(e.target.value)}
-                  placeholder="500"
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none"
-                />
+                {(() => {
+                  const enteredCap = Number(locCapacity) || 0;
+                  const availableCap = parentCapacityStats?.availableCap ?? 0;
+                  const isExceeded = parentCapacityStats ? enteredCap > availableCap : false;
+
+                  return (
+                    <>
+                      <input
+                        type="number"
+                        value={locCapacity}
+                        onChange={e => setLocCapacity(e.target.value)}
+                        placeholder={locType === 'WAREHOUSE' ? '500' : 'Enter capacity...'}
+                        className={`w-full px-3 py-2.5 rounded-xl border font-bold text-xs focus:ring-2 outline-none ${
+                          parentCapacityStats && isExceeded
+                            ? 'border-red-500 text-red-700 focus:ring-red-500 bg-red-50/30'
+                            : 'border-slate-300 focus:ring-purple-500'
+                        }`}
+                      />
+                      {locType === 'WAREHOUSE' && (
+                        <p className="text-[11px] text-slate-400 font-medium mt-1">
+                          Standard Warehouse capacity: 500 units
+                        </p>
+                      )}
+                      {locType !== 'WAREHOUSE' && parentCapacityStats && (() => {
+                        const { parent, parentCap, usedCap, availableCap, childCount } = parentCapacityStats;
+                        const childTypeLabel = locType === 'ZONE' ? 'zone' : 'rack';
+                        const childTypePlural = locType === 'ZONE' ? 'zones' : 'racks';
+                        const usedPercent = parentCap > 0 ? Math.min(100, Math.round((usedCap / parentCap) * 100)) : 0;
+
+                        return (
+                          <div className={`mt-2 p-2.5 rounded-xl border text-xs space-y-1.5 transition-all ${
+                            isExceeded
+                              ? 'bg-red-50/80 border-red-200 text-red-700'
+                              : 'bg-purple-50/50 border-purple-100 text-slate-700'
+                          }`}>
+                            <div className="flex items-center justify-between font-bold">
+                              <span className="truncate max-w-[200px]">{parent.name} Capacity Breakdown</span>
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] uppercase font-black shrink-0 ${
+                                isExceeded ? 'bg-red-200 text-red-800' : 'bg-emerald-100 text-emerald-800'
+                              }`}>
+                                {isExceeded ? 'Space Exceeded' : `${availableCap} units left`}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-1 text-[11px] font-medium pt-0.5">
+                              <div>
+                                <span className="text-slate-400 block text-[10px]">TOTAL LIMIT</span>
+                                <span className="font-bold text-slate-800">{parentCap} PCS</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block text-[10px]">USED ({childCount} {childTypePlural})</span>
+                                <span className="font-bold text-amber-700">{usedCap} PCS</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block text-[10px]">SPACE LEFT</span>
+                                <span className={`font-bold ${availableCap > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                  {availableCap} PCS
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Progress bar visual */}
+                            <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden flex mt-1">
+                              <div
+                                style={{ width: `${usedPercent}%` }}
+                                className="bg-purple-500 h-full transition-all duration-300"
+                                title={`Used by existing ${childTypePlural}: ${usedCap} units`}
+                              />
+                              {enteredCap > 0 && (
+                                <div
+                                  style={{
+                                    width: `${Math.max(0, Math.min(100 - usedPercent, parentCap > 0 ? Math.round((enteredCap / parentCap) * 100) : 0))}%`
+                                  }}
+                                  className={`h-full transition-all duration-300 ${isExceeded ? 'bg-red-500' : 'bg-emerald-500'}`}
+                                  title={`New ${childTypeLabel}: ${enteredCap} units`}
+                                />
+                              )}
+                            </div>
+
+                            {isExceeded && (
+                              <p className="text-[11px] font-bold text-red-600 flex items-center gap-1 pt-0.5">
+                                <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                                <span>Cannot allocate {enteredCap} units. Only {availableCap} units space remaining in {parent.name}!</span>
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </>
+                  );
+                })()}
               </div>
 
               <div>
