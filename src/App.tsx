@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Building2, Store } from 'lucide-react';
+import { Building2, Store, MapPin } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, seedDatabaseIfEmpty, seedWalkInCustomerForTenant, DEFAULT_BUSINESS } from './db';
 import { Header } from './components/Header';
@@ -856,6 +856,23 @@ export function App() {
 
           {activeTab === 'inventory' && (
             <InventoryScreen items={items} parties={parties} business={businessDetails} onItemUpdated={() => { }} />
+          )}
+
+          {activeTab === 'inventory-location' && (
+            <div className="flex-1 p-8 overflow-y-auto bg-[#f8fafc] flex flex-col items-center justify-center text-center select-none">
+              <div className="card p-10 max-w-md w-full shadow-lg border border-slate-200/80 rounded-2xl bg-white space-y-4">
+                <div className="w-14 h-14 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center mx-auto border border-purple-100 shadow-sm">
+                  <MapPin className="w-7 h-7 stroke-[2.2]" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-extrabold text-slate-800 tracking-tight">Inventory Location</h2>
+                  <p className="text-xs font-semibold text-purple-600 mt-1 uppercase tracking-wider">Warehouse & Shelf Management</p>
+                </div>
+                <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                  Location tracking section. Functionality will be implemented here later.
+                </p>
+              </div>
+            </div>
           )}
 
           {activeTab === 'parties' && (
