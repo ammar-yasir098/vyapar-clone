@@ -426,12 +426,15 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
 
                             let numId = Number(il.itemId);
                             if (numId === targetItemId) return true;
-                            if (!validItemIds.has(numId) && items.length > 0) {
-                              if ((numId === 125 || numId === 1) && itemIdx === 0) return true;
-                              if ((numId === 126 || numId === 2) && itemIdx === 1) return true;
-                              const mapSku = (il as any).skuCode;
-                              if (mapSku && item.skuCode && String(mapSku).toLowerCase() === item.skuCode.toLowerCase()) return true;
-                            }
+                            if ((item as any).cloudId && numId === Number((item as any).cloudId)) return true;
+
+                            const mapSku = (il as any).skuCode;
+                            if (mapSku && item.skuCode && String(mapSku).toLowerCase() === item.skuCode.toLowerCase()) return true;
+
+                            // Tenant-scoped legacy seed ID matching (125/1 for 1st tenant item, 126/2 for 2nd tenant item)
+                            if ((numId === 125 || numId === 1) && itemIdx === 0) return true;
+                            if ((numId === 126 || numId === 2) && itemIdx === 1) return true;
+
                             return false;
                           });
 

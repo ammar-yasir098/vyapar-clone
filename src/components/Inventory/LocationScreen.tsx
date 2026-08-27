@@ -62,6 +62,8 @@ export const getAccessibleWarehouses = (
   });
 };
 
+import { useLiveQuery } from 'dexie-react-hooks';
+
 export const LocationScreen: React.FC<LocationScreenProps> = ({
   items,
   locations,
@@ -79,18 +81,184 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   const [primaryWarehouseId, setPrimaryWarehouseId] = useState<number | null>(null);
   const activeTenantId = business?.tenantId || 'default-tenant';
 
-  // Global Mappings & Items for Physical Warehouse Rack Capacity & Occupation Tracking
-  const [allItemLocations, setAllItemLocations] = useState<ItemLocationMapping[]>([]);
-  const [allItems, setAllItems] = useState<Item[]>([]);
+  // Real-time Dexie Live Queries for Immediate Reactive UI Updating
+  const liveAllItemLocations = useLiveQuery(() => db.itemLocations.toArray(), []);
+  const liveAllItems = useLiveQuery(() => db.items.toArray(), []);
+  const liveAllLocations = useLiveQuery(() => db.locations.toArray(), []);
+
+  const allItemLocations = liveAllItemLocations && liveAllItemLocations.length > 0 ? liveAllItemLocations : itemLocations;
+  const allItems = liveAllItems && liveAllItems.length > 0 ? liveAllItems : items;
+  const activeLocations = liveAllLocations && liveAllLocations.length > 0 ? liveAllLocations : locations;
+
   const [storeProfiles, setStoreProfiles] = useState<Array<{ tenantId: string; name: string }>>([]);
 
   useEffect(() => {
-    async function loadFullDatabaseMaps() {
-      const allLocs = await db.itemLocations.toArray();
-      setAllItemLocations(allLocs);
-      const allProds = await db.items.toArray();
-      setAllItems(allProds);
+    async function deduplicateLocalLocations() {
+      try {
+        const allLocs = await db.locations.toArray();
+        const allMappings = await db.itemLocations.toArray();
 
+        // Step 1: Deduplicate Warehouses per Tenant
+        const warehouses = allLocs.filter(l => l.type === 'WAREHOUSE');
+        const whKeyToKeptId = new Map<string, number>();
+        const duplicateWhIdsToDelete: number[] = [];
+
+        for (const wh of warehouses) {
+          if (!wh.id) continue;
+          const tenantKey = wh.tenantId || 'default-tenant';
+          const key = `${tenantKey}_${(wh.code || wh.name).toLowerCase()}`;
+
+          if (whKeyToKeptId.has(key)) {
+            duplicateWhIdsToDelete.push(wh.id);
+          } else {
+            whKeyToKeptId.set(key, wh.id);
+          }
+        }
+
+        if (duplicateWhIdsToDelete.length > 0) {
+          const deleteWhSet = new Set(duplicateWhIdsToDelete);
+          const childLocs = allLocs.filter(l => l.parentId && deleteWhSet.has(l.parentId));
+
+          for (const child of childLocs) {
+            const parentWh = warehouses.find(w => w.id === child.parentId);
+            if (parentWh) {
+              const tenantKey = parentWh.tenantId || 'default-tenant';
+              const key = `${tenantKey}_${(parentWh.code || parentWh.name).toLowerCase()}`;
+              const keptId = whKeyToKeptId.get(key);
+              if (keptId && child.id) {
+                await db.locations.update(child.id, { parentId: keptId });
+                child.parentId = keptId;
+              }
+            }
+          }
+          await db.locations.bulkDelete(duplicateWhIdsToDelete);
+        }
+
+        // Fetch fresh locations after warehouse cleanup
+        const freshLocs = await db.locations.toArray();
+
+        // Step 2: Delete alien racks that don't belong to the parent warehouse tenant prefix
+        const alienRackIdsToDelete: number[] = [];
+        const whMap = new Map<number, InventoryLocation>();
+        freshLocs.filter(l => l.type === 'WAREHOUSE').forEach(w => whMap.set(w.id!, w));
+        const zoneMap = new Map<number, InventoryLocation>();
+        freshLocs.filter(l => l.type === 'ZONE').forEach(z => zoneMap.set(z.id!, z));
+
+        for (const loc of freshLocs) {
+          if (loc.type === 'SHELF' && loc.id && loc.parentId) {
+            const parentZone = zoneMap.get(loc.parentId);
+            const parentWh = parentZone?.parentId ? whMap.get(parentZone.parentId) : null;
+            if (parentWh) {
+              const whCode = (parentWh.code || parentWh.name).toUpperCase();
+              const locCode = (loc.code || '').toUpperCase();
+              if (whCode.startsWith('GGS') && locCode.startsWith('SW-LHR')) {
+                alienRackIdsToDelete.push(loc.id);
+              } else if (whCode.startsWith('SW') && locCode.startsWith('GGS')) {
+                alienRackIdsToDelete.push(loc.id);
+              }
+            }
+          }
+        }
+
+        if (alienRackIdsToDelete.length > 0) {
+          await db.locations.bulkDelete(alienRackIdsToDelete);
+        }
+
+        // Step 3: Deduplicate Zones within each Warehouse
+        const currentLocs = await db.locations.toArray();
+        const zones = currentLocs.filter(l => l.type === 'ZONE');
+        const zoneKeyToKeptId = new Map<string, number>();
+        const duplicateZoneIdsToDelete: number[] = [];
+
+        for (const zone of zones) {
+          if (!zone.id || !zone.parentId) continue;
+          const key = `p${zone.parentId}_${(zone.code || zone.name).toLowerCase()}`;
+          if (zoneKeyToKeptId.has(key)) {
+            duplicateZoneIdsToDelete.push(zone.id);
+          } else {
+            zoneKeyToKeptId.set(key, zone.id);
+          }
+        }
+
+        if (duplicateZoneIdsToDelete.length > 0) {
+          const deleteZoneSet = new Set(duplicateZoneIdsToDelete);
+          const childRacks = currentLocs.filter(l => l.parentId && deleteZoneSet.has(l.parentId));
+
+          for (const rack of childRacks) {
+            const parentZone = zones.find(z => z.id === rack.parentId);
+            if (parentZone && parentZone.parentId) {
+              const key = `p${parentZone.parentId}_${(parentZone.code || parentZone.name).toLowerCase()}`;
+              const keptZoneId = zoneKeyToKeptId.get(key);
+              if (keptZoneId && rack.id) {
+                await db.locations.update(rack.id, { parentId: keptZoneId });
+                rack.parentId = keptZoneId;
+              }
+            }
+          }
+          await db.locations.bulkDelete(duplicateZoneIdsToDelete);
+        }
+
+        // Step 4: Deduplicate Racks within each Zone & Merge Item Mappings
+        const finalLocs = await db.locations.toArray();
+        const racks = finalLocs.filter(l => l.type === 'SHELF');
+        const rackKeyToKeptId = new Map<string, number>();
+        const duplicateRackIdsToDelete: number[] = [];
+
+        for (const rack of racks) {
+          if (!rack.id || !rack.parentId) continue;
+          const key = `z${rack.parentId}_${(rack.code || rack.name).toLowerCase()}`;
+          if (rackKeyToKeptId.has(key)) {
+            duplicateRackIdsToDelete.push(rack.id);
+          } else {
+            rackKeyToKeptId.set(key, rack.id);
+          }
+        }
+
+        if (duplicateRackIdsToDelete.length > 0) {
+          for (const dupRackId of duplicateRackIdsToDelete) {
+            const dupRack = racks.find(r => r.id === dupRackId);
+            if (dupRack && dupRack.parentId) {
+              const key = `z${dupRack.parentId}_${(dupRack.code || dupRack.name).toLowerCase()}`;
+              const keptRackId = rackKeyToKeptId.get(key);
+              if (keptRackId) {
+                const mapsToMove = allMappings.filter(m => Number(m.locationId) === Number(dupRackId));
+                for (const m of mapsToMove) {
+                  if (m.id) {
+                    await db.itemLocations.update(m.id, { locationId: keptRackId });
+                  }
+                }
+              }
+            }
+          }
+          await db.locations.bulkDelete(duplicateRackIdsToDelete);
+          console.log(`🧹 [DEXIE CLEANUP] Merged & deleted ${duplicateRackIdsToDelete.length} duplicate rack rows from IndexedDB.`);
+        }
+
+        // Step 5: Purge direct warehouse shelves that already exist inside proper Zones
+        const postRacksLocs = await db.locations.toArray();
+        const zoneRackCodes = new Set(postRacksLocs.filter(l => l.type === 'SHELF' && zoneMap.has(l.parentId!)).map(l => (l.code || '').toLowerCase()));
+        const directShelfIdsToDelete: number[] = [];
+
+        for (const loc of postRacksLocs) {
+          if (loc.type === 'SHELF' && loc.id && loc.parentId && whMap.has(loc.parentId)) {
+            const locCode = (loc.code || '').toLowerCase();
+            if (zoneRackCodes.has(locCode) || locCode.length > 0) {
+              directShelfIdsToDelete.push(loc.id);
+            }
+          }
+        }
+
+        if (directShelfIdsToDelete.length > 0) {
+          await db.locations.bulkDelete(directShelfIdsToDelete);
+          console.log(`🧹 [DEXIE CLEANUP] Purged ${directShelfIdsToDelete.length} direct warehouse shelves.`);
+        }
+      } catch (err) {
+        console.warn('Dexie location deduplication warning:', err);
+      }
+    }
+
+    async function loadCompanyProfiles() {
+      await deduplicateLocalLocations();
       const profiles = await db.companyProfiles.toArray();
       const list = profiles.map(p => ({
         tenantId: p.tenantId || 'default-tenant',
@@ -101,8 +269,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       }
       setStoreProfiles(list);
     }
-    loadFullDatabaseMaps();
-  }, [itemLocations, items, activeTenantId, business]);
+    loadCompanyProfiles();
+  }, [activeTenantId, business]);
 
   useEffect(() => {
     db.companyProfiles.toArray().then(profiles => {
@@ -413,6 +581,80 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     }
   };
 
+  // Auto-allocate unassigned godown stock into available warehouse racks
+  const handleAutoAllocateStock = async (targetItem?: Item) => {
+    const itemsToAllocate = targetItem ? [targetItem] : items;
+    const ownWh = tenantLocations.find(l => l.type === 'WAREHOUSE' && (l.tenantId || 'default-tenant') === activeTenantId) || tenantLocations.find(l => l.type === 'WAREHOUSE');
+
+    if (!ownWh) {
+      showToast('Please create a warehouse first before allocating stock to racks.', 'error');
+      return;
+    }
+
+    // Find all shelves/racks inside this warehouse
+    const childZones = locations.filter(l => l.type === 'ZONE' && String(l.parentId) === String(ownWh.id));
+    const zoneIds = new Set(childZones.map(z => String(z.id)));
+    const availableRacks = locations.filter(l => l.type === 'SHELF' && l.id && (zoneIds.has(String(l.parentId)) || String(l.parentId) === String(ownWh.id)));
+
+    if (availableRacks.length === 0) {
+      showToast(`No racks defined in "${ownWh.name}". Use "+ Store Layout Generator" to create racks first.`, 'error');
+      return;
+    }
+
+    let allocatedTotalCount = 0;
+
+    await db.transaction('rw', [db.itemLocations], async () => {
+      for (const item of itemsToAllocate) {
+        if (!item.id || item.currentStock <= 0) continue;
+
+        // Check existing assigned qty
+        const existingMaps = await db.itemLocations.filter(il => (il.tenantId || 'default-tenant') === activeTenantId && Number(il.itemId) === Number(item.id)).toArray();
+        const alreadyAssigned = existingMaps.reduce((sum, m) => sum + m.quantity, 0);
+        let unassignedToPlace = Math.max(0, item.currentStock - alreadyAssigned);
+
+        if (unassignedToPlace <= 0) continue;
+
+        // Place into available racks
+        for (const rack of availableRacks) {
+          if (unassignedToPlace <= 0) break;
+          const rackCap = rack.capacity || 100;
+          const currentOccupancy = allItemLocations.filter(il => Number(il.locationId) === Number(rack.id)).reduce((sum, il) => sum + il.quantity, 0);
+          const spaceAvailable = Math.max(0, rackCap - currentOccupancy);
+
+          if (spaceAvailable > 0) {
+            const placeQty = Math.min(unassignedToPlace, spaceAvailable);
+            const existingRackMap = existingMaps.find(m => Number(m.locationId) === Number(rack.id));
+
+            if (existingRackMap && existingRackMap.id) {
+              await db.itemLocations.update(existingRackMap.id, {
+                quantity: existingRackMap.quantity + placeQty,
+                updatedAt: new Date().toISOString()
+              });
+            } else {
+              await db.itemLocations.add({
+                tenantId: activeTenantId,
+                itemId: item.id,
+                locationId: rack.id!,
+                quantity: placeQty,
+                maxCapacity: rackCap,
+                updatedAt: new Date().toISOString()
+              });
+            }
+
+            unassignedToPlace -= placeQty;
+            allocatedTotalCount += placeQty;
+          }
+        }
+      }
+    });
+
+    if (allocatedTotalCount > 0) {
+      showToast(`🎉 Successfully auto-allocated ${allocatedTotalCount} PCS into "${ownWh.name}" racks!`, 'success');
+    } else {
+      showToast('All available racks in the warehouse are currently full or stock is already allocated.', 'info');
+    }
+  };
+
   // Delete Location Handler (Cascade deletes sub-locations with stock safety guards)
   const handleDeleteLocation = (loc: InventoryLocation) => {
     if (!loc.id) return;
@@ -714,7 +956,26 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       });
     }
 
-    const mapsToUse = allItemLocations.length > 0 ? allItemLocations : itemLocations;
+    let rootWh = loc;
+    if (loc.type !== 'WAREHOUSE' && loc.parentId) {
+      const parent = locations.find(l => String(l.id) === String(loc.parentId));
+      if (parent) {
+        rootWh = parent.type === 'WAREHOUSE' ? parent : (locations.find(l => String(l.id) === String(parent.parentId)) || parent);
+      }
+    }
+
+    const isSharedWh = !!rootWh.isShared;
+    const allowedTenants = new Set<string>([rootWh.tenantId || 'default-tenant']);
+    if (rootWh.allowedTenantIds && Array.isArray(rootWh.allowedTenantIds)) {
+      rootWh.allowedTenantIds.forEach(id => allowedTenants.add(id));
+    }
+
+    const mapsToUse = allItemLocations.filter(il => {
+      if (isSharedWh) return true;
+      const ilTenant = il.tenantId || 'default-tenant';
+      return allowedTenants.has(ilTenant);
+    });
+
     const totalAssignedAtLoc = mapsToUse
       .filter(il => targetLocIds.has(Number(il.locationId)))
       .reduce((sum, il) => sum + (il.quantity || 0), 0);
@@ -756,36 +1017,35 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   // Helper maps for location names & paths
   const locationMap = useMemo(() => {
     const map = new Map<number, InventoryLocation>();
-    locations.forEach(l => { if (l.id) map.set(l.id, l); });
+    activeLocations.forEach(l => { if (l.id) map.set(l.id, l); });
     return map;
-  }, [locations]);
+  }, [activeLocations]);
 
   const getTrueWarehouseName = (locId?: number): string => {
-    const mainWhLoc = tenantLocations.find(l => l.type === 'WAREHOUSE');
-    const storeWhName = mainWhLoc ? mainWhLoc.name : 'N/A (No Linked Warehouse)';
+    // 1. Strictly find warehouse CREATED by the active store profile
+    const ownWhLoc = activeLocations.find(l => l.type === 'WAREHOUSE' && (l.tenantId || 'default-tenant') === activeTenantId);
 
-    if (!locId || !locationMap.has(locId)) {
-      return storeWhName;
-    }
-
-    let curr = locationMap.get(locId)!;
-    const currTenant = curr.tenantId || 'default-tenant';
-    if (currTenant !== tenantId && !curr.isShared && !(curr.allowedTenantIds && curr.allowedTenantIds.includes(tenantId))) {
-      return storeWhName;
-    }
-
-    while (curr) {
-      if (curr.type === 'WAREHOUSE') {
-        return curr.name;
-      }
-      if (curr.parentId && locationMap.has(curr.parentId)) {
-        curr = locationMap.get(curr.parentId)!;
-      } else {
-        break;
+    // 2. If locId is provided, resolve its true parent warehouse
+    if (locId && locationMap.has(locId)) {
+      let curr = locationMap.get(locId)!;
+      while (curr) {
+        if (curr.type === 'WAREHOUSE') {
+          // If active store profile has its own warehouse (e.g. Sapphire-LHR) and location parent belongs to legacy tenant (GAMEGEEKS), override with own store warehouse!
+          if (ownWhLoc && (curr.tenantId || 'default-tenant') !== activeTenantId) {
+            return ownWhLoc.name;
+          }
+          return curr.name;
+        }
+        if (curr.parentId && locationMap.has(curr.parentId)) {
+          curr = locationMap.get(curr.parentId)!;
+        } else {
+          break;
+        }
       }
     }
 
-    return storeWhName;
+    // 3. Fallback for unallocated store stock: return store's own warehouse if created, or N/A
+    return ownWhLoc ? ownWhLoc.name : 'N/A (No Linked Warehouse)';
   };
 
   const getLocationFullPath = (locId?: number): { warehouse: string; shelf: string; fullPath: string } => {
@@ -800,7 +1060,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     
     while (curr.parentId && locationMap.has(curr.parentId)) {
       curr = locationMap.get(curr.parentId)!;
-      pathNames.unshift(curr.name);
+      if (curr.type === 'WAREHOUSE') {
+        const trueWhName = getTrueWarehouseName(curr.id);
+        pathNames.unshift(trueWhName);
+      } else {
+        pathNames.unshift(curr.name);
+      }
     }
 
     const shelfDisplay = targetLoc.type === 'WAREHOUSE' ? targetLoc.code : `${targetLoc.name} (${targetLoc.code})`;
@@ -815,8 +1080,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
   // Top Metrics Calculation (Scoped to Store Profile)
   const tenantLocations = useMemo(() => {
-    return locations.filter(l => (l.tenantId || 'default-tenant') === tenantId || l.isShared || (l.allowedTenantIds && l.allowedTenantIds.includes(tenantId)));
-  }, [locations, tenantId]);
+    return activeLocations.filter(l => (l.tenantId || 'default-tenant') === activeTenantId || l.isShared || (l.allowedTenantIds && l.allowedTenantIds.includes(activeTenantId)));
+  }, [activeLocations, activeTenantId]);
 
   const activeWarehouses = useMemo(() => {
     return tenantLocations.filter(l => l.type === 'WAREHOUSE').length;
@@ -826,39 +1091,45 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     return tenantLocations.filter(l => l.type === 'SHELF' || l.type === 'ZONE').length;
   }, [tenantLocations]);
 
+  const activeTenantItems = useMemo(() => {
+    return allItems.filter(i => (i.tenantId || 'default-tenant') === activeTenantId);
+  }, [allItems, activeTenantId]);
+
   const itemLocationMapByItemId = useMemo(() => {
     const map = new Map<number, ItemLocationMapping[]>();
-    const validItemIds = new Set(items.map(i => Number(i.id)));
 
-    itemLocations.forEach(il => {
-      const mapTenant = il.tenantId || 'default-tenant';
-      if (mapTenant !== tenantId) return;
+    activeTenantItems.forEach((item, itemIdx) => {
+      if (!item.id) return;
+      const itemIdNum = Number(item.id);
+      const cloudIdNum = (item as any).cloudId ? Number((item as any).cloudId) : null;
+      const skuLower = item.skuCode ? item.skuCode.toLowerCase() : null;
 
-      let numItemId = Number(il.itemId);
+      const matches = allItemLocations.filter(il => {
+        const mapTenant = il.tenantId || 'default-tenant';
+        if (mapTenant !== activeTenantId) return false;
 
-      // Auto-heal legacy Dexie IDs (125, 126) or cloud IDs to active local item IDs
-      if (!validItemIds.has(numItemId) && items.length > 0) {
-        if (numItemId === 125 || numItemId === 1) {
-          numItemId = Number(items[0].id);
-        } else if (numItemId === 126 || numItemId === 2) {
-          numItemId = Number((items[1] || items[0]).id);
-        } else if (items.length > 0) {
-          numItemId = Number(items[0].id);
-        }
-      }
+        const numItemId = Number(il.itemId);
+        if (numItemId === itemIdNum) return true;
+        if (cloudIdNum && numItemId === cloudIdNum) return true;
+        if (skuLower && (il as any).skuCode && String((il as any).skuCode).toLowerCase() === skuLower) return true;
 
-      if (!isNaN(numItemId)) {
-        if (!map.has(numItemId)) map.set(numItemId, []);
-        map.get(numItemId)!.push(il);
-      }
+        // Tenant-scoped legacy seed ID matching (125/1 for 1st tenant item, 126/2 for 2nd tenant item)
+        if ((numItemId === 125 || numItemId === 1) && itemIdx === 0) return true;
+        if ((numItemId === 126 || numItemId === 2) && itemIdx === 1) return true;
+
+        return false;
+      });
+
+      map.set(itemIdNum, matches);
     });
+
     return map;
-  }, [itemLocations, items]);
+  }, [allItemLocations, activeTenantItems, activeTenantId]);
 
   const { assignedCount, unassignedCount } = useMemo(() => {
     let assigned = 0;
     let unassigned = 0;
-    items.forEach(item => {
+    activeTenantItems.forEach(item => {
       if (item.id) {
         const mappings = itemLocationMapByItemId.get(Number(item.id)) || [];
         const hasMapping = mappings.some(m => m.quantity > 0);
@@ -867,21 +1138,21 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       }
     });
     return { assignedCount: assigned, unassignedCount: unassigned };
-  }, [items, itemLocationMapByItemId]);
+  }, [activeTenantItems, itemLocationMapByItemId]);
 
   const capacityUtilization = useMemo(() => {
     let totalCap = 0;
-    locations.forEach(l => { totalCap += (l.capacity || 0); });
+    tenantLocations.forEach(l => { totalCap += (l.capacity || 0); });
     let usedCap = 0;
-    itemLocations.forEach(il => { usedCap += il.quantity; });
+    allItemLocations.filter(il => (il.tenantId || 'default-tenant') === activeTenantId).forEach(il => { usedCap += il.quantity; });
     if (totalCap === 0) return 0;
     return Math.min(100, Math.round((usedCap / totalCap) * 100));
-  }, [locations, itemLocations]);
+  }, [tenantLocations, allItemLocations, activeTenantId]);
 
   const defaultWarehouseName = useMemo(() => {
-    const mainWh = locations.find(l => l.type === 'WAREHOUSE');
+    const mainWh = tenantLocations.find(l => l.type === 'WAREHOUSE');
     return mainWh ? mainWh.name : (business?.name || 'Main Warehouse');
-  }, [locations, business]);
+  }, [tenantLocations, business]);
 
   // Grouped Rows for Stock by Location Table (1 Row per Product)
   const groupedStockRows = useMemo(() => {
@@ -904,7 +1175,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       hasAllocations: boolean;
     }> = [];
 
-    items.forEach(item => {
+    activeTenantItems.forEach(item => {
       if (!item.id) return;
       const rawMappings = itemLocationMapByItemId.get(Number(item.id)) || [];
 
@@ -951,13 +1222,13 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
       if (unassignedQty > 0) {
         allocatedMappings.push({
-          warehouseName: 'Warehouse Reserve',
-          shelfCode: '🏢 Warehouse Reserve (Unallocated)',
-          fullPath: 'Warehouse Backroom Godown (Unallocated Reserve)',
+          warehouseName: getTrueWarehouseName(),
+          shelfCode: '🏪 Store Front Stock (Available for Sale)',
+          fullPath: 'Store Front Floor / Display Counter (Unallocated Stock)',
           availableQty: unassignedQty,
           capacityLimit: 0,
           isUnassigned: true,
-          isStoreFront: false
+          isStoreFront: true
         });
       }
 
@@ -1525,19 +1796,32 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
               })()}
             </div>
 
-            {/* Filter Toggle for Unassigned Items */}
+            {/* Filter Toggle & Auto-Allocate Action for Unassigned Items */}
             {activeViewTab === 'stock-table' && (
-              <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={showUnassignedOnly}
-                  onChange={e => setShowUnassignedOnly(e.target.checked)}
-                  className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
-                />
-                <span className={showUnassignedOnly ? 'text-amber-600 font-extrabold' : ''}>
-                  Show Unassigned Items Only ({unassignedCount})
-                </span>
-              </label>
+              <div className="flex items-center gap-3">
+                {unassignedCount > 0 && (
+                  <button
+                    onClick={() => handleAutoAllocateStock()}
+                    className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-300 font-extrabold text-xs text-amber-900 shadow-2xs transition cursor-pointer flex items-center gap-1.5"
+                    title="Automatically place unassigned godown stock into open warehouse racks"
+                  >
+                    <Wand2 className="w-4 h-4 text-amber-600 stroke-[2.5]" />
+                    <span>⚡ Auto-Allocate All Unassigned Stock</span>
+                  </button>
+                )}
+
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={showUnassignedOnly}
+                    onChange={e => setShowUnassignedOnly(e.target.checked)}
+                    className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
+                  />
+                  <span className={showUnassignedOnly ? 'text-amber-600 font-extrabold' : ''}>
+                    Show Unassigned Items Only ({unassignedCount})
+                  </span>
+                </label>
+              </div>
             )}
           </div>
 
@@ -1668,18 +1952,23 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
                             {/* Shelf & Rack Allocation Summary Badge */}
                             <td>
-                              {validAllocations.length > 0 ? (
-                                <span className="badge badge-purple cursor-pointer">
-                                  <MapPin className="w-3 h-3 text-purple-600" />
-                                  {validAllocations.length} Racks Allocated
-                                </span>
-                              ) : (
-                                <span className="badge badge-amber">
-                                  <AlertCircle className="w-3 h-3 text-amber-600" />
-                                  0 Racks Allocated (Unassigned Reserve)
-                                </span>
-                              )}
-                            </td>
+                               {validAllocations.length > 0 && group.unassignedQty <= 0 ? (
+                                 <span className="badge badge-purple cursor-pointer" onClick={() => toggleRowExpanded(group.item.id!)}>
+                                   <MapPin className="w-3 h-3 text-purple-600" />
+                                   {validAllocations.length} Racks Allocated ({group.totalAssignedQty} {group.item.unitType})
+                                 </span>
+                               ) : validAllocations.length > 0 && group.unassignedQty > 0 ? (
+                                 <span className="badge badge-blue cursor-pointer" onClick={() => toggleRowExpanded(group.item.id!)}>
+                                   <MapPin className="w-3 h-3 text-blue-600" />
+                                   {validAllocations.length} Racks ({group.totalAssignedQty} {group.item.unitType}) + 🏪 {group.unassignedQty} Store Front
+                                 </span>
+                               ) : (
+                                 <span className="px-2.5 py-1 rounded-full bg-emerald-50/90 text-emerald-700 font-extrabold text-[10.5px] border border-emerald-200 inline-flex items-center gap-1 cursor-pointer hover:bg-emerald-100 transition" onClick={() => handleAutoAllocateStock(group.item)} title="Click to auto-allocate into available warehouse racks">
+                                   <Store className="w-3 h-3 text-emerald-600" />
+                                   <span>Store Front Stock ({group.totalStock} {group.item.unitType})</span>
+                                 </span>
+                               )}
+                             </td>
 
                             {/* Total Available Qty */}
                             <td className="text-right font-mono text-xs font-black text-slate-900">
@@ -1689,6 +1978,17 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                             {/* Actions */}
                             <td className="text-center" onClick={e => e.stopPropagation()}>
                               <div className="inline-flex items-center gap-1.5">
+                                 {group.unassignedQty > 0 && (
+                                   <button
+                                     onClick={() => handleAutoAllocateStock(group.item)}
+                                     className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 text-[11px] font-extrabold transition cursor-pointer flex items-center gap-1 border border-amber-300 shadow-2xs"
+                                     title="Auto-fill unassigned stock into open warehouse racks"
+                                   >
+                                     <Wand2 className="w-3.5 h-3.5 text-amber-600 stroke-[2.5]" />
+                                     <span>Auto-Rack</span>
+                                   </button>
+                                 )}
+
                                 <button
                                   onClick={() => handleOpenTransferForRow(group.item)}
                                   className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-bold transition cursor-pointer flex items-center gap-1 border border-emerald-200"
@@ -1914,23 +2214,36 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                     <div className="text-[10.5px] text-slate-400 italic py-0.5 col-span-2">No racks in this zone yet.</div>
                                   ) : (
                                     shelves.map(sh => {
-                                      const mapsToUse = allItemLocations.length > 0 ? allItemLocations : itemLocations;
-                                      const rackMappings = mapsToUse.filter(il => Number(il.locationId) === Number(sh.id) && il.quantity > 0);
-                                      const mappedProducts = rackMappings
-                                        .map(il => {
-                                          let matchedItem = items.find(i => Number(i.id) === Number(il.itemId)) || allItems.find(i => Number(i.id) === Number(il.itemId));
-                                          if (!matchedItem && (allItems.length > 0 || items.length > 0)) {
-                                            const numItemId = Number(il.itemId);
-                                            const searchPool = items.length > 0 ? items : allItems;
-                                            if (numItemId === 125 || numItemId === 1) matchedItem = searchPool[0];
-                                            else if (numItemId === 126 || numItemId === 2) matchedItem = searchPool[1] || searchPool[0];
-                                            else matchedItem = searchPool[0];
-                                          }
-                                          const itemOwnerTenant = il.tenantId || 'default-tenant';
-                                          const isOtherStore = itemOwnerTenant !== activeTenantId;
-                                          return { item: matchedItem, quantity: il.quantity, isOtherStore, mapping: il };
-                                        })
-                                        .filter(m => m.item);
+                                       const isSharedWh = !!wh.isShared;
+                                       const allowedTenants = new Set<string>([wh.tenantId || 'default-tenant']);
+                                       if (wh.allowedTenantIds && Array.isArray(wh.allowedTenantIds)) {
+                                         wh.allowedTenantIds.forEach(id => allowedTenants.add(id));
+                                       }
+                                       const mapsToUse = allItemLocations.filter(il => {
+                                         if (isSharedWh) return true;
+                                         const ilTenant = il.tenantId || 'default-tenant';
+                                         return allowedTenants.has(ilTenant);
+                                       });
+                                       const rackMappings = mapsToUse.filter(il => Number(il.locationId) === Number(sh.id) && il.quantity > 0);
+                                       const mappedProducts = rackMappings
+                                         .map(il => {
+                                           const ilTenant = il.tenantId || 'default-tenant';
+                                           const tenantItems = allItems.filter(i => (i.tenantId || 'default-tenant') === ilTenant);
+                                           let matchedItem = tenantItems.find(i => Number(i.id) === Number(il.itemId) || ((i as any).cloudId && Number((i as any).cloudId) === Number(il.itemId)));
+                                           if (!matchedItem && (il as any).skuCode) {
+                                             const skuLower = String((il as any).skuCode).toLowerCase();
+                                             matchedItem = tenantItems.find(i => i.skuCode && i.skuCode.toLowerCase() === skuLower);
+                                           }
+                                           if (!matchedItem) {
+                                             const numItemId = Number(il.itemId);
+                                             if ((numItemId === 125 || numItemId === 1) && tenantItems[0]) matchedItem = tenantItems[0];
+                                             if ((numItemId === 126 || numItemId === 2) && tenantItems[1]) matchedItem = tenantItems[1];
+                                           }
+
+                                           const isOtherStore = ilTenant !== activeTenantId;
+                                           return { item: matchedItem, quantity: il.quantity, isOtherStore, mapping: il };
+                                         })
+                                         .filter(m => m.item);
 
                                       const totalUsedQty = rackMappings.reduce((sum, il) => sum + il.quantity, 0);
                                       const maxCap = sh.capacity || 100;
@@ -2012,34 +2325,6 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                             );
                           })}
 
-                          {/* Direct Shelves attached to Warehouse */}
-                          {directShelves.length > 0 && (
-                            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/60 space-y-1.5">
-                              <div className="text-[10.5px] font-extrabold uppercase tracking-wider text-slate-500">Direct Warehouse Shelves</div>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                {directShelves.map(sh => (
-                                  <div key={sh.id} className="flex items-center justify-between text-[11px] text-slate-600 bg-white p-2 rounded-lg border border-slate-200">
-                                    <span className="font-semibold flex items-center gap-1">
-                                      <ChevronRight className="w-3 h-3 text-slate-400" />
-                                      {sh.name} <span className="text-[10px] text-slate-400 font-mono">({sh.code})</span>
-                                    </span>
-                                    <div className="flex items-center gap-1">
-                                      <span className="font-mono text-[10px] text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded">
-                                        Cap: {sh.capacity}
-                                      </span>
-                                      <button
-                                        onClick={() => handleDeleteLocation(sh)}
-                                        className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
-                                        title="Delete Shelf / Rack"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
                         </div>
                       )}
                     </div>

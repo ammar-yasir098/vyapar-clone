@@ -3,9 +3,37 @@ import { InventoryLocation, ItemLocationMapping, StockTransfer, Item, isDbConnec
 
 export const locationsRouter = Router();
 
+// Clean up duplicate inventory location rows in PostgreSQL (e.g. repeated GAMEGEEKS warehouses)
+export async function cleanupDuplicateLocations() {
+  if (!isDbConnected()) return;
+  try {
+    const allLocs = await InventoryLocation.findAll({ order: [['id', 'ASC']] });
+    const seen = new Set<string>();
+    const duplicateIds: number[] = [];
+
+    for (const l of allLocs) {
+      const tenantKey = l.tenantId || 'default-tenant';
+      const key = `${tenantKey}_${l.code}_${l.type}`;
+      if (seen.has(key)) {
+        duplicateIds.push(l.id);
+      } else {
+        seen.add(key);
+      }
+    }
+
+    if (duplicateIds.length > 0) {
+      await InventoryLocation.destroy({ where: { id: duplicateIds } });
+      console.log(`🧹 [CLEANUP] Automatically removed ${duplicateIds.length} duplicate inventory location rows from PostgreSQL.`);
+    }
+  } catch (err) {
+    console.warn('Cleanup duplicate locations warning:', err);
+  }
+}
+
 // GET /api/v1/locations — Fetch joined inventory locations across all store branches
 locationsRouter.get('/', async (req: Request, res: Response) => {
   try {
+    await cleanupDuplicateLocations().catch(() => {});
     const locations = await InventoryLocation.findAll({
       order: [['id', 'ASC']]
     });
@@ -15,30 +43,39 @@ locationsRouter.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/v1/locations — Create or update location
+// POST /api/v1/locations — Create or update location (With strict deduplication)
 locationsRouter.post('/', async (req: Request, res: Response) => {
   try {
     const tenantId = req.body.tenantId || (req as any).user?.tenantId || 'default-tenant';
-    const { id, name, code, type, parentId, capacity, description } = req.body;
+    const { id, name, code, type, parentId, capacity, description, isShared, allowedTenantIds } = req.body;
 
     let loc;
     if (id) {
       loc = await InventoryLocation.findByPk(id);
-      if (loc) {
-        await loc.update({ name, code, type, parentId, capacity, description });
-      }
+    }
+    if (!loc && code) {
+      loc = await InventoryLocation.findOne({ where: { tenantId, code } });
+    }
+    if (!loc && name && type) {
+      loc = await InventoryLocation.findOne({ where: { tenantId, name, type } });
     }
 
-    if (!loc) {
-      loc = await InventoryLocation.create({
-        tenantId,
-        name,
-        code,
-        type: type || 'WAREHOUSE',
-        parentId: parentId ? Number(parentId) : null,
-        capacity: capacity ? Number(capacity) : 500,
-        description
-      });
+    const payloadData = {
+      tenantId,
+      name,
+      code,
+      type: type || 'WAREHOUSE',
+      parentId: parentId ? Number(parentId) : null,
+      capacity: capacity ? Number(capacity) : 500,
+      description,
+      isShared: !!isShared,
+      allowedTenantIds: allowedTenantIds || []
+    };
+
+    if (loc) {
+      await loc.update(payloadData);
+    } else {
+      loc = await InventoryLocation.create(payloadData);
     }
 
     return res.json({ success: true, data: loc });
@@ -129,7 +166,6 @@ locationsRouter.post('/mappings', async (req: Request, res: Response) => {
       let found = dbItems.find(i => i.id === numItemId);
       if (!found && skuCode) found = dbItems.find(i => i.skuCode === skuCode);
       if (!found && name) found = dbItems.find(i => i.name === name);
-      if (!found) found = dbItems[0];
       if (found) numItemId = found.id;
     }
 
