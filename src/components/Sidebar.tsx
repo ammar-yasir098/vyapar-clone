@@ -173,7 +173,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
   const [isPurchaseOpen, setIsPurchaseOpen] = useState(false);
   const [isCashBankOpen, setIsCashBankOpen] = useState(false);
 
-  const isInventoryActive = ['inventory', 'inventory-location'].includes(activeTab);
+  const isInventoryActive = ['inventory', 'inventory-store', 'inventory-location'].includes(activeTab);
   const isSaleActive      = ['pos','payment-in','estimates','create-estimate','invoices','sale-returns','create-sale-return'].includes(activeTab);
   const isPurchaseActive  = ['purchase','purchase-orders','create-po','payment-out','expenses','purchase-returns','create-purchase-return'].includes(activeTab);
   const isCashBankActive  = ['cash-in-hand','ledger','cash-bank'].includes(activeTab);
@@ -221,8 +221,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
         />
         {isInventoryOpen && (
           <div style={subMenuStyle}>
-            <SubItem dotColor="#8b5cf6" label="Stock"    isActive={activeTab === 'inventory'}          onClick={() => setActiveTab('inventory')}          activeColor="#8b5cf6" />
-            <SubItem dotColor="#3b82f6" label="Location" isActive={activeTab === 'inventory-location'} onClick={() => setActiveTab('inventory-location')} activeColor="#8b5cf6" />
+            <SubItem dotColor="#8b5cf6" label="Stock"             isActive={activeTab === 'inventory'}          onClick={() => setActiveTab('inventory')}          activeColor="#8b5cf6" />
+            <SubItem dotColor="#10b981" label="Store Front Stock" isActive={activeTab === 'inventory-store'}    onClick={() => setActiveTab('inventory-store')}    activeColor="#8b5cf6" />
+            <SubItem dotColor="#3b82f6" label="Location"          isActive={activeTab === 'inventory-location'} onClick={() => setActiveTab('inventory-location')} activeColor="#8b5cf6" />
           </div>
         )}
 

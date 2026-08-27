@@ -229,6 +229,30 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     locationId?: number;
   } | null>(null);
 
+  // Auto-purge orphaned or zone-level item location mappings from IndexedDB
+  React.useEffect(() => {
+    if (locations.length === 0 || itemLocations.length === 0) return;
+
+    const validRackIds = new Set(locations.filter(l => l.type === 'SHELF').map(l => Number(l.id)));
+    const zoneLocIds = new Set(locations.filter(l => l.type === 'ZONE' || l.type === 'WAREHOUSE').map(l => Number(l.id)));
+
+    // Purge records that are either non-existent or pointing to broad ZONE containers
+    const invalidMappings = itemLocations.filter(il => 
+      il.id && (!validRackIds.has(Number(il.locationId)) || zoneLocIds.has(Number(il.locationId)))
+    );
+
+    if (invalidMappings.length > 0) {
+      console.log(`[Auto-Purge] Deleting ${invalidMappings.length} invalid/zone mapping records from IndexedDB...`, invalidMappings);
+      db.transaction('rw', db.itemLocations, async () => {
+        for (const inv of invalidMappings) {
+          if (inv.id) {
+            await db.itemLocations.delete(inv.id);
+          }
+        }
+      }).catch(err => console.error('Error purging invalid mappings:', err));
+    }
+  }, [locations, itemLocations]);
+
   const handleSelectPreset = (preset: 'RETAIL' | 'SUPERMARKET' | 'BOUTIQUE' | 'CUSTOM') => {
     setPresetTemplate(preset);
     if (preset === 'RETAIL') {
@@ -765,6 +789,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         availableQty: number;
         capacityLimit: number;
         isUnassigned: boolean;
+        isStoreFront?: boolean;
       }>;
       hasAllocations: boolean;
     }> = [];
@@ -796,6 +821,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         availableQty: number;
         capacityLimit: number;
         isUnassigned: boolean;
+        isStoreFront?: boolean;
       }> = validMappings.map(m => {
         const locInfo = getLocationFullPath(m.locationId);
         return {
@@ -805,7 +831,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           fullPath: locInfo.fullPath,
           availableQty: m.quantity,
           capacityLimit: m.maxCapacity || locationMap.get(m.locationId)?.capacity || 100,
-          isUnassigned: false
+          isUnassigned: false,
+          isStoreFront: false
         };
       });
 
@@ -814,12 +841,13 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
       if (unassignedQty > 0) {
         allocatedMappings.push({
-          warehouseName: 'Unassigned',
-          shelfCode: 'No Shelf Assigned',
-          fullPath: 'Unassigned (General Stock)',
+          warehouseName: 'Store Front',
+          shelfCode: 'Store Front Stock',
+          fullPath: 'Store Front (POS Retail Floor)',
           availableQty: unassignedQty,
           capacityLimit: 0,
-          isUnassigned: true
+          isUnassigned: false,
+          isStoreFront: true
         });
       }
 
@@ -1592,12 +1620,16 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                           return (
                                             <tr key={mIdx}>
                                               <td>
-                                                <div className="font-bold text-slate-800 flex items-center gap-1.5">
-                                                  <MapPin className={`w-3.5 h-3.5 ${m.isUnassigned ? 'text-amber-500' : 'text-purple-600'}`} />
-                                                  <span>{m.shelfCode}</span>
+                                                <div className={`font-bold flex items-center gap-1.5 ${m.isStoreFront ? 'text-emerald-700 font-extrabold' : 'text-slate-800'}`}>
+                                                  {m.isStoreFront ? (
+                                                    <Store className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                                  ) : (
+                                                    <MapPin className={`w-3.5 h-3.5 ${m.isUnassigned ? 'text-amber-500' : 'text-purple-600'}`} />
+                                                  )}
+                                                  <span>{m.isStoreFront ? '🛒 Store Front Stock' : m.shelfCode}</span>
                                                 </div>
                                               </td>
-                                              <td className="text-slate-500 font-mono text-[11px]">
+                                              <td className={`font-mono text-[11px] ${m.isStoreFront ? 'text-emerald-600 font-bold' : 'text-slate-500'}`}>
                                                 {m.fullPath}
                                               </td>
                                               <td className="text-right font-black text-slate-900 font-mono">
@@ -1742,7 +1774,10 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                 </div>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pl-1">
-                                  {shelves.length === 0 ? (
+                                  {shelves.length === 0 && (() => {
+                                    const directMaps = itemLocations.filter(il => Number(il.locationId) === Number(zone.id) && il.quantity > 0);
+                                    return directMaps.length === 0;
+                                  })() ? (
                                     <div className="text-[10.5px] text-slate-400 italic py-0.5 col-span-2">No racks in this zone yet.</div>
                                   ) : (
                                     shelves.map(sh => {

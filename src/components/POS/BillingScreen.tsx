@@ -323,31 +323,12 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
         synced: false
       });
 
-      // 4. Decrement Item stock levels accurately & keep Store Front shelf stock in sync
+      // 4. Decrement Item stock levels from Store Front Stock (preserving Warehouse Rack allocations)
       for (const cItem of cartItems) {
         const dbItem = await db.items.get(cItem.itemId);
         if (dbItem) {
           const newStock = Math.max(0, dbItem.currentStock - cItem.quantity);
           await db.items.update(cItem.itemId, { currentStock: newStock, updatedAt: new Date().toISOString() });
-          
-          // Deduct from Store Front Shelf mapped location stock first, then warehouse reserve
-          const activeTenant = business?.tenantId || 'default-tenant';
-          const mappedLocs = await db.itemLocations.filter(il => (il.tenantId || 'default-tenant') === activeTenant && Number(il.itemId) === Number(cItem.itemId) && il.quantity > 0).toArray();
-          const allLocs = await db.locations.toArray();
-          const whLocIds = new Set(allLocs.filter(l => l.type === 'WAREHOUSE').map(l => Number(l.id)));
-
-          const storeMappings = mappedLocs.filter(m => !whLocIds.has(Number(m.locationId)));
-          const whMappings = mappedLocs.filter(m => whLocIds.has(Number(m.locationId)));
-          const orderedLocs = [...storeMappings, ...whMappings];
-
-          let remToDeduct = cItem.quantity;
-          for (const mLoc of orderedLocs) {
-            if (remToDeduct <= 0) break;
-            const deduct = Math.min(mLoc.quantity, remToDeduct);
-            const newLocStock = mLoc.quantity - deduct;
-            remToDeduct -= deduct;
-            await db.itemLocations.update(mLoc.id!, { quantity: newLocStock, updatedAt: new Date().toISOString() });
-          }
 
           await db.syncJournal.add({
             versionId: `client-v-${Date.now()}-item-${cItem.itemId}`,
@@ -410,21 +391,13 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                         <div className="font-extrabold text-xs text-emerald-600 font-mono">Rs {Number(item.salesPrice || 0).toFixed(2)}</div>
                         {(() => {
                           const itemMaps = itemLocs.filter(il => Number(il.itemId) === Number(item.id) && il.quantity > 0);
-                          const storeStock = itemMaps.filter(il => !whLocationIds.has(Number(il.locationId))).reduce((sum, il) => sum + il.quantity, 0);
-                          const whStock = itemMaps.filter(il => whLocationIds.has(Number(il.locationId))).reduce((sum, il) => sum + il.quantity, 0);
-
-                          if (itemMaps.length === 0) {
-                            return (
-                              <div className={`text-[10px] font-bold ${(item?.currentStock ?? 0) <= (item?.minStockAlert ?? 0) ? 'text-amber-600' : 'text-slate-500'}`}>
-                                Stock: {item.currentStock} {item.unitType}
-                              </div>
-                            );
-                          }
+                          const whStock = itemMaps.reduce((sum: number, il: any) => sum + il.quantity, 0);
+                          const storeStock = Math.max(0, item.currentStock - whStock);
 
                           return (
-                            <div className="text-[9.5px] font-mono mt-0.5">
+                            <div className="text-[9.5px] font-mono mt-0.5 flex items-center justify-end gap-1">
                               {storeStock > 0 ? (
-                                <span className="font-extrabold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100">
+                                <span className="font-extrabold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
                                   Store: {storeStock} {item.unitType}
                                 </span>
                               ) : (
@@ -433,7 +406,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                                 </span>
                               )}
                               {whStock > 0 && (
-                                <span className="text-slate-500 font-medium ml-1">
+                                <span className="text-slate-500 font-medium text-[9px]">
                                   ({whStock} in Whse)
                                 </span>
                               )}

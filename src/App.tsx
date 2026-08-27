@@ -8,6 +8,7 @@ import { DashboardScreen } from './components/Dashboard/DashboardScreen';
 import { BillingScreen } from './components/POS/BillingScreen';
 import { InventoryScreen } from './components/Inventory/InventoryScreen';
 import { LocationScreen } from './components/Inventory/LocationScreen';
+import { StoreStockScreen } from './components/Inventory/StoreStockScreen';
 import { PartiesScreen } from './components/Parties/PartiesScreen';
 import { PurchaseScreen } from './components/Purchase/PurchaseScreen';
 import { InvoicesScreen } from './components/Invoices/InvoicesScreen';
@@ -967,6 +968,15 @@ export function App() {
 
           {activeTab === 'inventory' && (
             <InventoryScreen items={items} parties={parties} business={businessDetails} onItemUpdated={() => { }} />
+          )}
+
+          {activeTab === 'inventory-store' && (
+            <StoreStockScreen
+              items={items}
+              locations={locations}
+              itemLocations={itemLocations}
+              business={businessDetails}
+            />
           )}
 
           {activeTab === 'inventory-location' && (
