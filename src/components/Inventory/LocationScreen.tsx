@@ -18,6 +18,7 @@ import {
   MapPin,
   X,
   ChevronRight,
+  ChevronDown,
   Sparkles,
   Wand2,
   Store,
@@ -199,6 +200,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   const [transferNotes, setTransferNotes] = useState<string>('');
   const [itemSearchQuery, setItemSearchQuery] = useState<string>('');
   const [isSearchDropdownOpen, setIsSearchDropdownOpen] = useState<boolean>(false);
+  const [expandedItemIds, setExpandedItemIds] = useState<Set<number>>(new Set());
 
   // Relocate Form
   const [relocateDestLocId, setRelocateDestLocId] = useState<string>('');
@@ -636,9 +638,33 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     return map;
   }, [locations]);
 
-  const getLocationFullPath = (locId?: number): { warehouse: string; shelf: string; fullPath: string } => {
+  const getTrueWarehouseName = (locId?: number): string => {
+    const mainWhLoc = locations.find(l => l.type === 'WAREHOUSE');
+    const storeWhName = mainWhLoc ? mainWhLoc.name : (business?.name || 'Main Warehouse');
+
     if (!locId || !locationMap.has(locId)) {
-      return { warehouse: 'Unassigned', shelf: 'Unassigned', fullPath: 'Unassigned' };
+      return storeWhName;
+    }
+
+    let curr = locationMap.get(locId)!;
+    while (curr) {
+      if (curr.type === 'WAREHOUSE') {
+        return curr.name;
+      }
+      if (curr.parentId && locationMap.has(curr.parentId)) {
+        curr = locationMap.get(curr.parentId)!;
+      } else {
+        break;
+      }
+    }
+
+    return storeWhName;
+  };
+
+  const getLocationFullPath = (locId?: number): { warehouse: string; shelf: string; fullPath: string } => {
+    const warehouseName = getTrueWarehouseName(locId);
+    if (!locId || !locationMap.has(locId)) {
+      return { warehouse: warehouseName, shelf: 'Unassigned', fullPath: 'Unassigned' };
     }
     
     const targetLoc = locationMap.get(locId)!;
@@ -650,7 +676,6 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       pathNames.unshift(curr.name);
     }
 
-    const warehouseName = curr.name || 'Warehouse';
     const shelfDisplay = targetLoc.type === 'WAREHOUSE' ? targetLoc.code : `${targetLoc.name} (${targetLoc.code})`;
     const fullPath = pathNames.join(' → ');
 
@@ -719,17 +744,29 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     return Math.min(100, Math.round((usedCap / totalCap) * 100));
   }, [locations, itemLocations]);
 
-  // Unified Rows for Stock by Location Table
-  const stockRows = useMemo(() => {
+  const defaultWarehouseName = useMemo(() => {
+    const mainWh = locations.find(l => l.type === 'WAREHOUSE');
+    return mainWh ? mainWh.name : (business?.name || 'Main Warehouse');
+  }, [locations, business]);
+
+  // Grouped Rows for Stock by Location Table (1 Row per Product)
+  const groupedStockRows = useMemo(() => {
     const rows: Array<{
       item: Item;
-      mapping?: ItemLocationMapping;
-      warehouseName: string;
-      shelfCode: string;
-      fullPath: string;
-      availableQty: number;
-      capacityLimit: number;
-      isUnassigned: boolean;
+      primaryWarehouseName: string;
+      totalStock: number;
+      totalAssignedQty: number;
+      unassignedQty: number;
+      allocatedMappings: Array<{
+        mapping?: ItemLocationMapping;
+        warehouseName: string;
+        shelfCode: string;
+        fullPath: string;
+        availableQty: number;
+        capacityLimit: number;
+        isUnassigned: boolean;
+      }>;
+      hasAllocations: boolean;
     }> = [];
 
     items.forEach(item => {
@@ -747,14 +784,21 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         }
       });
 
-      const uniqueMappings = Array.from(uniqueMappingMap.values()).filter(m => m.quantity > 0 && locationMap.has(Number(m.locationId)));
-      const totalAssignedQty = uniqueMappings.reduce((sum, m) => sum + m.quantity, 0);
+      const validMappings = Array.from(uniqueMappingMap.values()).filter(
+        m => m.quantity > 0 && locationMap.has(Number(m.locationId))
+      );
 
-      // Render assigned location rows
-      uniqueMappings.forEach(m => {
+      const allocatedMappings: Array<{
+        mapping?: ItemLocationMapping;
+        warehouseName: string;
+        shelfCode: string;
+        fullPath: string;
+        availableQty: number;
+        capacityLimit: number;
+        isUnassigned: boolean;
+      }> = validMappings.map(m => {
         const locInfo = getLocationFullPath(m.locationId);
-        rows.push({
-          item,
+        return {
           mapping: m,
           warehouseName: locInfo.warehouse,
           shelfCode: locInfo.shelf,
@@ -762,14 +806,14 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           availableQty: m.quantity,
           capacityLimit: m.maxCapacity || locationMap.get(m.locationId)?.capacity || 100,
           isUnassigned: false
-        });
+        };
       });
 
-      // Render remaining unassigned stock row only if unassignedQty > 0
+      const totalAssignedQty = validMappings.reduce((sum, m) => sum + m.quantity, 0);
       const unassignedQty = Math.max(0, item.currentStock - totalAssignedQty);
-      if (unassignedQty > 0 && uniqueMappings.length === 0) {
-        rows.push({
-          item,
+
+      if (unassignedQty > 0) {
+        allocatedMappings.push({
           warehouseName: 'Unassigned',
           shelfCode: 'No Shelf Assigned',
           fullPath: 'Unassigned (General Stock)',
@@ -778,22 +822,37 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           isUnassigned: true
         });
       }
+
+      // Determine primary warehouse name (e.g. Sapphire-LHR)
+      const primaryWh = getTrueWarehouseName(validMappings[0]?.locationId);
+
+      rows.push({
+        item,
+        primaryWarehouseName: primaryWh,
+        totalStock: item.currentStock,
+        totalAssignedQty,
+        unassignedQty,
+        allocatedMappings,
+        hasAllocations: validMappings.length > 0
+      });
     });
 
     return rows;
-  }, [items, itemLocationMapByItemId, locationMap]);
+  }, [items, itemLocationMapByItemId, locationMap, defaultWarehouseName]);
 
-  // Filtered Stock Rows
-  const filteredStockRows = useMemo(() => {
-    return stockRows.filter(row => {
+  // Filtered Grouped Stock Rows
+  const filteredGroupedStockRows = useMemo(() => {
+    return groupedStockRows.filter(row => {
       // Search term filter
       const matchesSearch =
         !searchTerm ||
         row.item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         row.item.skuCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
         row.item.barcode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.shelfCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.fullPath.toLowerCase().includes(searchTerm.toLowerCase());
+        row.allocatedMappings.some(m =>
+          m.shelfCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          m.fullPath.toLowerCase().includes(searchTerm.toLowerCase())
+        );
 
       // Barcode quick search filter
       const matchesBarcode =
@@ -804,14 +863,27 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       // Warehouse filter
       const matchesWh =
         selectedWarehouseFilter === 'ALL' ||
-        row.warehouseName === selectedWarehouseFilter;
+        row.primaryWarehouseName === selectedWarehouseFilter ||
+        row.allocatedMappings.some(m => m.warehouseName === selectedWarehouseFilter);
 
       // Unassigned filter
-      const matchesUnassigned = !showUnassignedOnly || row.isUnassigned;
+      const matchesUnassigned = !showUnassignedOnly || row.unassignedQty > 0 || !row.hasAllocations;
 
       return matchesSearch && matchesBarcode && matchesWh && matchesUnassigned;
     });
-  }, [stockRows, searchTerm, barcodeSearch, selectedWarehouseFilter, showUnassignedOnly]);
+  }, [groupedStockRows, searchTerm, barcodeSearch, selectedWarehouseFilter, showUnassignedOnly]);
+
+  const toggleRowExpanded = (itemId: number) => {
+    setExpandedItemIds(prev => {
+      const next = new Set(prev);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  };
 
   // Unique Warehouse list for filter
   const warehouseOptions = useMemo(() => {
@@ -1360,95 +1432,227 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
         {/* ── View 1: Stock by Location Table ───────────────────────────── */}
         {activeViewTab === 'stock-table' && (
-          <div className="card bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
+          <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="vyapar-table">
                 <thead>
                   <tr>
-                    <th className="w-12 text-center">#</th>
-                    <th>Item Name</th>
+                    <th className="w-10 text-center"></th>
+                    <th>Item Details</th>
                     <th>SKU / Barcode</th>
                     <th>Warehouse / Branch</th>
-                    <th>Shelf / Bin Code</th>
-                    <th className="text-right">Available Qty</th>
-                    <th className="text-right">Capacity / Max</th>
+                    <th>Shelf & Rack Allocation</th>
+                    <th className="text-right">Total Available Qty</th>
                     <th className="text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredStockRows.length === 0 ? (
+                  {filteredGroupedStockRows.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="text-center py-12 text-slate-400 font-medium">
+                      <td colSpan={7} className="text-center py-12 text-slate-400 font-medium">
                         No inventory stock mapping found matching your search.
                       </td>
                     </tr>
                   ) : (
-                    filteredStockRows.map((row, idx) => (
-                      <tr key={`${row.item.id}-${row.mapping?.id || idx}`}>
-                        {/* Index # */}
-                        <td className="font-mono text-xs font-bold text-slate-400 text-center">{idx + 1}</td>
+                    filteredGroupedStockRows.map(group => {
+                      const isExpanded = expandedItemIds.has(group.item.id!);
+                      const validAllocations = group.allocatedMappings.filter(m => !m.isUnassigned);
 
-                        {/* Item Name */}
-                        <td>
-                          <div className="font-bold text-slate-800">{row.item.name}</div>
-                          <div className="text-[11px] text-slate-400 font-mono">Unit: {row.item.unitType}</div>
-                        </td>
+                      return (
+                        <React.Fragment key={group.item.id}>
+                          {/* Primary Product Row */}
+                          <tr
+                            onClick={() => toggleRowExpanded(group.item.id!)}
+                            className={`cursor-pointer transition-colors hover:bg-slate-50 ${
+                              isExpanded ? 'bg-purple-50/60 font-semibold' : ''
+                            }`}
+                          >
+                            {/* Expand Toggle Chevron */}
+                            <td className="text-center py-3">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleRowExpanded(group.item.id!);
+                                }}
+                                className="p-1 rounded text-slate-400 hover:text-purple-700 hover:bg-purple-100 transition cursor-pointer"
+                              >
+                                <ChevronRight className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-90 text-purple-700 font-bold' : ''}`} />
+                              </button>
+                            </td>
 
-                        {/* SKU / Barcode */}
-                        <td>
-                          <div className="font-mono text-xs font-bold text-slate-700">{row.item.skuCode}</div>
-                          <div className="font-mono text-[11px] text-slate-400">{row.item.barcode}</div>
-                        </td>
+                            {/* Item Details */}
+                            <td>
+                              <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                                <Package className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                                <span>{group.item.name}</span>
+                              </div>
+                              <div className="text-[11px] text-slate-400 font-mono">Unit: {group.item.unitType}</div>
+                            </td>
 
-                        {/* Warehouse / Branch */}
-                        <td>
-                          <span className={`badge ${row.isUnassigned ? 'badge-amber' : 'badge-blue'}`}>
-                            {row.warehouseName}
-                          </span>
-                        </td>
+                            {/* SKU / Barcode */}
+                            <td>
+                              <div className="font-mono text-xs font-bold text-slate-700">{group.item.skuCode}</div>
+                              <div className="font-mono text-[11px] text-slate-400">{group.item.barcode}</div>
+                            </td>
 
-                        {/* Shelf / Bin Code */}
-                        <td>
-                          <div className="font-extrabold text-slate-800 text-xs flex items-center gap-1.5">
-                            <MapPin className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                            <span>{row.shelfCode}</span>
-                          </div>
-                          <div className="text-[10.5px] text-slate-400">{row.fullPath}</div>
-                        </td>
+                            {/* Warehouse / Branch (Shows true Warehouse name like Sapphire-LHR) */}
+                            <td>
+                              <span className="badge badge-blue">
+                                <Building2 className="w-3 h-3 text-blue-600" />
+                                {group.primaryWarehouseName}
+                              </span>
+                            </td>
 
-                        {/* Available Quantity */}
-                        <td className="text-right font-black text-slate-900 text-xs">
-                          {row.availableQty} {row.item.unitType}
-                        </td>
+                            {/* Shelf & Rack Allocation Summary Badge */}
+                            <td>
+                              {validAllocations.length > 0 ? (
+                                <span className="badge badge-purple cursor-pointer">
+                                  <MapPin className="w-3 h-3 text-purple-600" />
+                                  {validAllocations.length} Racks Allocated
+                                </span>
+                              ) : (
+                                <span className="badge badge-amber">
+                                  <AlertCircle className="w-3 h-3 text-amber-600" />
+                                  Unassigned (General Stock)
+                                </span>
+                              )}
+                            </td>
 
-                        {/* Capacity Limit */}
-                        <td className="text-right font-mono text-xs text-slate-600">
-                          {row.capacityLimit > 0 ? `${row.capacityLimit} ${row.item.unitType}` : 'N/A'}
-                        </td>
+                            {/* Total Available Qty */}
+                            <td className="text-right font-mono text-xs font-black text-slate-900">
+                              {group.totalStock} {group.item.unitType}
+                            </td>
 
-                        {/* Actions */}
-                        <td className="text-center">
-                          <div className="inline-flex items-center gap-1.5">
-                            <button
-                              onClick={() => handleOpenTransferForRow(row.item, row.mapping)}
-                              className="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-bold transition cursor-pointer inline-flex items-center gap-1 border border-emerald-200"
-                              title="Transfer stock from this location"
-                            >
-                              <ArrowLeftRight className="w-3.5 h-3.5" />
-                              <span>⇄ Transfer</span>
-                            </button>
+                            {/* Actions */}
+                            <td className="text-center" onClick={e => e.stopPropagation()}>
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  onClick={() => handleOpenTransferForRow(group.item)}
+                                  className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[11px] font-bold transition cursor-pointer flex items-center gap-1 border border-emerald-200"
+                                  title="Transfer stock between locations"
+                                >
+                                  <ArrowLeftRight className="w-3.5 h-3.5" />
+                                  <span>⇄ Transfer</span>
+                                </button>
 
-                            <button
-                              onClick={() => handleOpenRelocateModal(row.item, row.mapping)}
-                              className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 text-[11px] font-bold transition cursor-pointer inline-flex items-center gap-1 border border-purple-200"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                              <span>Relocate</span>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                                <button
+                                  onClick={() => handleOpenRelocateModal(group.item)}
+                                  className="px-2.5 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 text-[11px] font-bold transition cursor-pointer flex items-center gap-1 border border-purple-200"
+                                  title="Relocate or assign to shelf"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                  <span>Relocate</span>
+                                </button>
+
+                                <button
+                                  onClick={() => toggleRowExpanded(group.item.id!)}
+                                  className={`px-2 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer border ${
+                                    isExpanded
+                                      ? 'bg-purple-600 text-white border-purple-600'
+                                      : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                                  }`}
+                                >
+                                  {isExpanded ? 'Hide' : 'Locations'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+
+                          {/* Expandable Embedded Sub-Table Drawer */}
+                          {isExpanded && (
+                            <tr>
+                              <td colSpan={7} className="p-0 bg-slate-50/80 border-b border-purple-100">
+                                <div className="p-3.5 space-y-2.5 bg-purple-50/40 border-l-4 border-purple-600 rounded-r-xl my-1 mx-2">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="font-extrabold text-purple-900 flex items-center gap-1.5">
+                                      <FolderTree className="w-4 h-4 text-purple-600" />
+                                      Storage Allocation Breakdown for "{group.item.name}"
+                                    </span>
+                                    <span className="text-[11px] text-slate-500 font-mono">
+                                      {group.totalAssignedQty} PCS Allocated across {validAllocations.length} Racks
+                                    </span>
+                                  </div>
+
+                                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xs">
+                                    <table className="vyapar-table text-xs">
+                                      <thead>
+                                        <tr>
+                                          <th>Rack / Bin Code</th>
+                                          <th>Hierarchy Path</th>
+                                          <th className="text-right">Available Qty</th>
+                                          <th className="text-right">Rack Capacity</th>
+                                          <th className="text-center">Actions</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {group.allocatedMappings.map((m, mIdx) => {
+                                          const pct = m.capacityLimit > 0 ? Math.min(100, Math.round((m.availableQty / m.capacityLimit) * 100)) : 0;
+
+                                          return (
+                                            <tr key={mIdx}>
+                                              <td>
+                                                <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                                                  <MapPin className={`w-3.5 h-3.5 ${m.isUnassigned ? 'text-amber-500' : 'text-purple-600'}`} />
+                                                  <span>{m.shelfCode}</span>
+                                                </div>
+                                              </td>
+                                              <td className="text-slate-500 font-mono text-[11px]">
+                                                {m.fullPath}
+                                              </td>
+                                              <td className="text-right font-black text-slate-900 font-mono">
+                                                {m.availableQty} {group.item.unitType}
+                                              </td>
+                                              <td className="text-right">
+                                                {m.capacityLimit > 0 ? (
+                                                  <div className="flex items-center justify-end gap-2">
+                                                    <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                                      <div
+                                                        className={`h-full ${pct >= 100 ? 'bg-red-500' : pct > 50 ? 'bg-purple-600' : 'bg-emerald-500'}`}
+                                                        style={{ width: `${pct}%` }}
+                                                      />
+                                                    </div>
+                                                    <span className="font-mono text-[10.5px] font-bold text-slate-600">
+                                                      {pct}% ({m.capacityLimit} Max)
+                                                    </span>
+                                                  </div>
+                                                ) : (
+                                                  <span className="font-mono text-[11px] text-slate-400">N/A</span>
+                                                )}
+                                              </td>
+                                              <td className="text-center">
+                                                <div className="inline-flex items-center gap-1">
+                                                  <button
+                                                    onClick={() => handleOpenTransferForRow(group.item, m.mapping)}
+                                                    className="px-2 py-1 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-[10.5px] font-bold transition cursor-pointer border border-emerald-200 flex items-center gap-1"
+                                                    title="Transfer from this specific rack"
+                                                  >
+                                                    <ArrowLeftRight className="w-3 h-3" />
+                                                    <span>Transfer</span>
+                                                  </button>
+                                                  <button
+                                                    onClick={() => handleOpenRelocateModal(group.item, m.mapping)}
+                                                    className="px-2 py-1 rounded bg-purple-50 hover:bg-purple-100 text-purple-700 text-[10.5px] font-bold transition cursor-pointer border border-purple-200 flex items-center gap-1"
+                                                    title="Relocate from this rack"
+                                                  >
+                                                    <Edit2 className="w-3 h-3" />
+                                                    <span>Relocate</span>
+                                                  </button>
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
