@@ -92,9 +92,15 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
     return false;
   };
 
-  // Map of warehouse locations vs store locations
+  // Map of warehouse locations vs store locations (handles dedicated, central shared, and regional hubs)
   const { whLocationIds, storeLocations, warehouseLocations } = useMemo(() => {
-    const whLocs = locations.filter(l => l.type === 'WAREHOUSE');
+    const whLocs = locations.filter(l => {
+      if (l.type !== 'WAREHOUSE') return false;
+      if (l.tenantId === tenantId) return true;
+      if (l.isShared) return true;
+      if (l.allowedTenantIds && l.allowedTenantIds.includes(tenantId)) return true;
+      return false;
+    });
     const whIds = new Set(whLocs.map(l => Number(l.id)));
     const storeLocs = locations.filter(l => l.type === 'SHELF' || l.type === 'ZONE');
     return {
@@ -102,7 +108,7 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
       storeLocations: storeLocs,
       warehouseLocations: whLocs
     };
-  }, [locations]);
+  }, [locations, tenantId]);
 
   // Main Store Front Location (default for POS retail floor)
   const storeFrontLocation = useMemo(() => {
@@ -118,6 +124,9 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
     const itemIdx = items.findIndex(i => Number(i.id) === targetItemId);
 
     const matches = itemLocations.filter(il => {
+      const mapTenant = il.tenantId || 'default-tenant';
+      if (mapTenant !== tenantId) return false;
+
       let numId = Number(il.itemId);
       // Ensure the location actually exists in locations table
       if (!validLocationIds.has(Number(il.locationId))) return false;
@@ -152,14 +161,21 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
 
   // Aggregate items with Store Front Stock vs Warehouse Stock
   const storeStockRows = useMemo(() => {
+    const locMap = new Map<number, InventoryLocation>();
+    locations.forEach(l => { if (l.id) locMap.set(Number(l.id), l); });
+
     return items.map(item => {
       const validMappings = getItemLocationMappings(item);
 
-      // Total warehouse rack stock = sum of quantities across allocated warehouse racks
-      const whStock = validMappings.reduce((sum: number, m: ItemLocationMapping) => sum + m.quantity, 0);
+      // Store Front Stock = explicit stock transferred/allocated to store front shelves or zones
+      const storeMaps = validMappings.filter(m => {
+        const loc = locMap.get(Number(m.locationId));
+        return loc && (loc.type === 'SHELF' || loc.type === 'ZONE');
+      });
+      const storeStock = storeMaps.reduce((sum: number, m: ItemLocationMapping) => sum + m.quantity, 0);
 
-      // Store Front Stock = Remaining stock available on store floor for POS billing
-      const storeStock = Math.max(0, item.currentStock - whStock);
+      // Warehouse Reserve Stock = Total item stock minus stock transferred to store floor
+      const whStock = Math.max(0, item.currentStock - storeStock);
 
       const alertMin = item.minStockAlert || 5;
       let status: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' = 'IN_STOCK';
@@ -173,14 +189,14 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
         item,
         storeStock,
         whStock,
-        unassignedStock: storeStock,
+        unassignedStock: whStock,
         totalStock: item.currentStock,
         status,
-        storeMaps: [],
-        whMaps: validMappings
+        storeMaps,
+        whMaps: validMappings.filter(m => !storeMaps.includes(m))
       };
     });
-  }, [items, getItemLocationMappings]);
+  }, [items, getItemLocationMappings, locations]);
 
   // Filtered rows for display
   const filteredRows = useMemo(() => {
@@ -619,12 +635,16 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
                         📍 {alloc.name} ({alloc.code}) — {alloc.availableQty} PCS Available
                       </option>
                     ))
-                  ) : (
-                    locations.filter(l => l.type === 'WAREHOUSE').map(wh => (
+                  ) : warehouseLocations.length > 0 ? (
+                    warehouseLocations.map(wh => (
                       <option key={wh.id} value={wh.id}>
                         🏢 {wh.name} ({wh.code}) — General Reserve (0 PCS Rack Allocation)
                       </option>
                     ))
+                  ) : (
+                    <option value="" disabled>      
+                      No warehouse created for this store branch yet
+                    </option>
                   )}
                 </select>
               </div>

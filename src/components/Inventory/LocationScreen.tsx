@@ -47,6 +47,19 @@ interface LocationScreenProps {
   business: BusinessDetails;
 }
 
+export const getAccessibleWarehouses = (
+  storeTenantId: string,
+  locations: InventoryLocation[]
+): InventoryLocation[] => {
+  const warehouses = locations.filter(l => l.type === 'WAREHOUSE');
+  return warehouses.filter(w => {
+    if (w.tenantId === storeTenantId) return true;
+    if (w.isShared) return true;
+    if (w.allowedTenantIds && w.allowedTenantIds.includes(storeTenantId)) return true;
+    return false;
+  });
+};
+
 export const LocationScreen: React.FC<LocationScreenProps> = ({
   items,
   locations,
@@ -56,13 +69,27 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 }) => {
   const { showToast, showConfirm } = useToast();
 
-  const [activeViewTab, setActiveViewTab] = useState<'stock-table' | 'hierarchy-master' | 'transfer-history' | 'replenishment'>('stock-table');
+  const [activeViewTab, setActiveViewTab] = useState<'stock-table' | 'hierarchy-master' | 'transfer-history' | 'replenishment' | 'store-connections'>('stock-table');
   const [searchTerm, setSearchTerm] = useState('');
   const [barcodeSearch, setBarcodeSearch] = useState('');
   const [selectedWarehouseFilter, setSelectedWarehouseFilter] = useState<string>('ALL');
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
   const [primaryWarehouseId, setPrimaryWarehouseId] = useState<number | null>(null);
   const activeTenantId = business?.tenantId || 'default-tenant';
+
+  // Global Mappings & Items for Physical Warehouse Rack Capacity & Occupation Tracking
+  const [allItemLocations, setAllItemLocations] = useState<ItemLocationMapping[]>([]);
+  const [allItems, setAllItems] = useState<Item[]>([]);
+
+  useEffect(() => {
+    async function loadFullDatabaseMaps() {
+      const allLocs = await db.itemLocations.toArray();
+      setAllItemLocations(allLocs);
+      const allProds = await db.items.toArray();
+      setAllItems(allProds);
+    }
+    loadFullDatabaseMaps();
+  }, [itemLocations, items]);
 
   useEffect(() => {
     db.companyProfiles.toArray().then(profiles => {
@@ -373,9 +400,29 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     }
   };
 
-  // Delete Location Handler (Cascade deletes sub-locations)
+  // Delete Location Handler (Cascade deletes sub-locations with stock safety guards)
   const handleDeleteLocation = (loc: InventoryLocation) => {
     if (!loc.id) return;
+
+    // Edge Case Guard: Block deletion if active stock exists in location or child racks
+    const childLocIds = new Set<number>([Number(loc.id)]);
+    if (loc.type === 'WAREHOUSE') {
+      locations.filter(l => Number(l.parentId) === Number(loc.id)).forEach(z => {
+        childLocIds.add(Number(z.id));
+        locations.filter(l => Number(l.parentId) === Number(z.id)).forEach(r => childLocIds.add(Number(r.id)));
+      });
+    } else if (loc.type === 'ZONE') {
+      locations.filter(l => Number(l.parentId) === Number(loc.id)).forEach(r => childLocIds.add(Number(r.id)));
+    }
+
+    const assignedStock = itemLocations
+      .filter(il => childLocIds.has(Number(il.locationId)))
+      .reduce((sum, il) => sum + il.quantity, 0);
+
+    if (assignedStock > 0) {
+      showToast(`Cannot delete "${loc.name}". It currently has ${assignedStock} PCS assigned across linked racks. Please relocate or replenish stock first!`, 'error');
+      return;
+    }
 
     let message = `Are you sure you want to delete "${loc.name}" (${loc.code})?`;
     if (loc.type === 'WAREHOUSE') {
@@ -427,6 +474,43 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         }
       }
     });
+  };
+
+  // Toggle Global Shared Warehouse Status (Case 2: 1 Central Warehouse for All Stores)
+  const handleToggleGlobalShared = async (whId: number, currentSharedState: boolean) => {
+    try {
+      const newSharedState = !currentSharedState;
+      await db.locations.update(whId, { isShared: newSharedState });
+      const targetWh = locations.find(l => Number(l.id) === Number(whId));
+      if (targetWh) {
+        saveServerLocation({ ...targetWh, isShared: newSharedState }).catch(() => {});
+      }
+      showToast(`Warehouse updated! Global Shared status set to ${newSharedState ? 'ENABLED (All Stores Linked)' : 'DISABLED (Dedicated Linkage)'}`, 'success');
+    } catch (e: any) {
+      showToast(`Failed to update shared state: ${e.message}`, 'error');
+    }
+  };
+
+  // Toggle Specific Store Linkage (Case 3: Regional Hubs)
+  const handleToggleStoreLink = async (whId: number, storeTenantId: string) => {
+    try {
+      const targetWh = locations.find(l => Number(l.id) === Number(whId));
+      if (!targetWh) return;
+
+      const currentLinks = targetWh.allowedTenantIds || [];
+      let updatedLinks: string[];
+      if (currentLinks.includes(storeTenantId)) {
+        updatedLinks = currentLinks.filter(id => id !== storeTenantId);
+      } else {
+        updatedLinks = [...currentLinks, storeTenantId];
+      }
+
+      await db.locations.update(whId, { allowedTenantIds: updatedLinks });
+      saveServerLocation({ ...targetWh, allowedTenantIds: updatedLinks }).catch(() => {});
+      showToast('Store & Warehouse linkage updated successfully!', 'success');
+    } catch (e: any) {
+      showToast(`Failed to update store link: ${e.message}`, 'error');
+    }
   };
 
   const tenantId = business.tenantId || 'default-tenant';
@@ -617,7 +701,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       });
     }
 
-    const totalAssignedAtLoc = itemLocations
+    const mapsToUse = allItemLocations.length > 0 ? allItemLocations : itemLocations;
+    const totalAssignedAtLoc = mapsToUse
       .filter(il => targetLocIds.has(Number(il.locationId)))
       .reduce((sum, il) => sum + (il.quantity || 0), 0);
 
@@ -663,14 +748,19 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   }, [locations]);
 
   const getTrueWarehouseName = (locId?: number): string => {
-    const mainWhLoc = locations.find(l => l.type === 'WAREHOUSE');
-    const storeWhName = mainWhLoc ? mainWhLoc.name : (business?.name || 'Main Warehouse');
+    const mainWhLoc = tenantLocations.find(l => l.type === 'WAREHOUSE');
+    const storeWhName = mainWhLoc ? mainWhLoc.name : 'N/A (No Linked Warehouse)';
 
     if (!locId || !locationMap.has(locId)) {
       return storeWhName;
     }
 
     let curr = locationMap.get(locId)!;
+    const currTenant = curr.tenantId || 'default-tenant';
+    if (currTenant !== tenantId && !curr.isShared && !(curr.allowedTenantIds && curr.allowedTenantIds.includes(tenantId))) {
+      return storeWhName;
+    }
+
     while (curr) {
       if (curr.type === 'WAREHOUSE') {
         return curr.name;
@@ -710,20 +800,27 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     };
   };
 
-  // Top Metrics Calculation
+  // Top Metrics Calculation (Scoped to Store Profile)
+  const tenantLocations = useMemo(() => {
+    return locations.filter(l => (l.tenantId || 'default-tenant') === tenantId || l.isShared || (l.allowedTenantIds && l.allowedTenantIds.includes(tenantId)));
+  }, [locations, tenantId]);
+
   const activeWarehouses = useMemo(() => {
-    return locations.filter(l => l.type === 'WAREHOUSE').length;
-  }, [locations]);
+    return tenantLocations.filter(l => l.type === 'WAREHOUSE').length;
+  }, [tenantLocations]);
 
   const definedShelves = useMemo(() => {
-    return locations.filter(l => l.type === 'SHELF' || l.type === 'ZONE').length;
-  }, [locations]);
+    return tenantLocations.filter(l => l.type === 'SHELF' || l.type === 'ZONE').length;
+  }, [tenantLocations]);
 
   const itemLocationMapByItemId = useMemo(() => {
     const map = new Map<number, ItemLocationMapping[]>();
     const validItemIds = new Set(items.map(i => Number(i.id)));
 
     itemLocations.forEach(il => {
+      const mapTenant = il.tenantId || 'default-tenant';
+      if (mapTenant !== tenantId) return;
+
       let numItemId = Number(il.itemId);
 
       // Auto-heal legacy Dexie IDs (125, 126) or cloud IDs to active local item IDs
@@ -841,13 +938,13 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
       if (unassignedQty > 0) {
         allocatedMappings.push({
-          warehouseName: 'Store Front',
-          shelfCode: 'Store Front Stock',
-          fullPath: 'Store Front (POS Retail Floor)',
+          warehouseName: 'Warehouse Reserve',
+          shelfCode: '🏢 Warehouse Reserve (Unallocated)',
+          fullPath: 'Warehouse Backroom Godown (Unallocated Reserve)',
           availableQty: unassignedQty,
           capacityLimit: 0,
-          isUnassigned: false,
-          isStoreFront: true
+          isUnassigned: true,
+          isStoreFront: false
         });
       }
 
@@ -1362,16 +1459,33 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
               </button>
 
               <button
-                onClick={() => setActiveViewTab('transfer-history')}
+                onClick={() => setActiveViewTab('store-connections')}
                 className={`px-4 py-2 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${
-                  activeViewTab === 'transfer-history'
+                  activeViewTab === 'store-connections'
                     ? 'bg-white text-purple-700 shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <ArrowLeftRight className="w-4 h-4" />
-                <span>Stock Transfer Logs ({stockTransfers.length})</span>
+                <Building2 className="w-4 h-4" />
+                <span>🏬 Store & Warehouse Connections</span>
               </button>
+
+              {(() => {
+                const tenantTransfersCount = stockTransfers.filter(st => (st.tenantId || 'default-tenant') === tenantId).length;
+                return (
+                  <button
+                    onClick={() => setActiveViewTab('transfer-history')}
+                    className={`px-4 py-2 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${
+                      activeViewTab === 'transfer-history'
+                        ? 'bg-white text-purple-700 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <ArrowLeftRight className="w-4 h-4" />
+                    <span>Stock Transfer Logs ({tenantTransfersCount})</span>
+                  </button>
+                );
+              })()}
 
               {(() => {
                 const whLocs = locations.filter(l => l.type === 'WAREHOUSE');
@@ -1524,12 +1638,19 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                               <div className="font-mono text-[11px] text-slate-400">{group.item.barcode}</div>
                             </td>
 
-                            {/* Warehouse / Branch (Shows true Warehouse name like Sapphire-LHR) */}
+                            {/* Warehouse / Branch */}
                             <td>
-                              <span className="badge badge-blue">
-                                <Building2 className="w-3 h-3 text-blue-600" />
-                                {group.primaryWarehouseName}
-                              </span>
+                              {group.primaryWarehouseName && group.primaryWarehouseName !== 'N/A (No Linked Warehouse)' ? (
+                                <span className="badge badge-blue">
+                                  <Building2 className="w-3 h-3 text-blue-600" />
+                                  {group.primaryWarehouseName}
+                                </span>
+                              ) : (
+                                <span className="px-2.5 py-1 rounded-full bg-slate-100/90 text-slate-400 font-extrabold text-[10.5px] border border-slate-200/90 inline-flex items-center gap-1">
+                                  <Building2 className="w-3 h-3 text-slate-400" />
+                                  <span>N/A (No Linked Warehouse)</span>
+                                </span>
+                              )}
                             </td>
 
                             {/* Shelf & Rack Allocation Summary Badge */}
@@ -1542,7 +1663,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                               ) : (
                                 <span className="badge badge-amber">
                                   <AlertCircle className="w-3 h-3 text-amber-600" />
-                                  Unassigned (General Stock)
+                                  0 Racks Allocated (Unassigned Reserve)
                                 </span>
                               )}
                             </td>
@@ -1696,7 +1817,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         {activeViewTab === 'hierarchy-master' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {locations.filter(l => l.type === 'WAREHOUSE').map(wh => {
+              {tenantLocations.filter(l => l.type === 'WAREHOUSE').map(wh => {
                 const zones = locations.filter(l =>
                   l.type === 'ZONE' &&
                   (String(l.parentId) === String(wh.id) || (wh.code && l.code.startsWith(wh.code + '-')))
@@ -1772,7 +1893,6 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                     </button>
                                   </div>
                                 </div>
-
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pl-1">
                                   {shelves.length === 0 && (() => {
                                     const directMaps = itemLocations.filter(il => Number(il.locationId) === Number(zone.id) && il.quantity > 0);
@@ -1781,21 +1901,25 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                     <div className="text-[10.5px] text-slate-400 italic py-0.5 col-span-2">No racks in this zone yet.</div>
                                   ) : (
                                     shelves.map(sh => {
-                                      const rackMappings = itemLocations.filter(il => Number(il.locationId) === Number(sh.id) && il.quantity > 0);
+                                      const mapsToUse = allItemLocations.length > 0 ? allItemLocations : itemLocations;
+                                      const rackMappings = mapsToUse.filter(il => Number(il.locationId) === Number(sh.id) && il.quantity > 0);
                                       const mappedProducts = rackMappings
                                         .map(il => {
-                                          let matchedItem = items.find(i => Number(i.id) === Number(il.itemId));
-                                          if (!matchedItem && items.length > 0) {
+                                          let matchedItem = items.find(i => Number(i.id) === Number(il.itemId)) || allItems.find(i => Number(i.id) === Number(il.itemId));
+                                          if (!matchedItem && (allItems.length > 0 || items.length > 0)) {
                                             const numItemId = Number(il.itemId);
-                                            if (numItemId === 125 || numItemId === 1) matchedItem = items[0];
-                                            else if (numItemId === 126 || numItemId === 2) matchedItem = items[1] || items[0];
-                                            else matchedItem = items[0];
+                                            const searchPool = items.length > 0 ? items : allItems;
+                                            if (numItemId === 125 || numItemId === 1) matchedItem = searchPool[0];
+                                            else if (numItemId === 126 || numItemId === 2) matchedItem = searchPool[1] || searchPool[0];
+                                            else matchedItem = searchPool[0];
                                           }
-                                          return { item: matchedItem, quantity: il.quantity };
+                                          const itemOwnerTenant = il.tenantId || 'default-tenant';
+                                          const isOtherStore = itemOwnerTenant !== activeTenantId;
+                                          return { item: matchedItem, quantity: il.quantity, isOtherStore, mapping: il };
                                         })
                                         .filter(m => m.item);
 
-                                      const totalUsedQty = mappedProducts.reduce((sum, p) => sum + p.quantity, 0);
+                                      const totalUsedQty = rackMappings.reduce((sum, il) => sum + il.quantity, 0);
                                       const maxCap = sh.capacity || 100;
                                       const fillPct = Math.min(100, Math.round((totalUsedQty / maxCap) * 100));
 
@@ -1837,8 +1961,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                             <div className="text-[10px] text-slate-400 italic py-0.5 font-normal">📦 Empty Rack</div>
                                           ) : (
                                             <div className="space-y-1 pt-1.5 border-t border-slate-100">
-                                              {mappedProducts.map(({ item, quantity }, pIdx) => {
-                                                const mapping = rackMappings.find(m => Number(m.itemId) === Number(item!.id));
+                                              {mappedProducts.map(({ item, quantity, isOtherStore, mapping }, pIdx) => {
                                                 return (
                                                   <div
                                                     key={pIdx}
@@ -1850,10 +1973,15 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                                       <Package className="w-3.5 h-3.5 text-purple-600 shrink-0 group-hover:scale-110 transition" />
                                                       <span className="font-extrabold text-slate-800 truncate">{item!.name}</span>
                                                       <span className="text-[9.5px] text-slate-400 font-mono">({item!.skuCode})</span>
+                                                      {isOtherStore && (
+                                                        <span className="text-[9px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded ml-1 border border-purple-200 shrink-0" title="Item owned by linked store sharing this warehouse">
+                                                          Shared Store
+                                                        </span>
+                                                      )}
                                                     </div>
                                                     <div className="flex items-center gap-1 shrink-0">
-                                                      <span className="font-black text-purple-900 bg-white px-2 py-0.5 rounded-md shadow-2xs text-[10.5px]">
-                                                        {quantity} {item!.unitType}
+                                                      <span className="font-extrabold text-purple-900 bg-white px-2 py-0.5 rounded-md shadow-2xs text-[10.5px]">
+                                                        {quantity} {item!.unitType || 'PCS'}
                                                       </span>
                                                       <Maximize2 className="w-3 h-3 text-purple-500 opacity-0 group-hover:opacity-100 transition" />
                                                     </div>
@@ -1992,14 +2120,18 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {stockTransfers.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="text-center py-12 text-slate-400 font-medium">
-                        No inter-location stock transfers recorded yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    stockTransfers.map((trf, idx) => {
+                  {(() => {
+                    const tenantTransfers = stockTransfers.filter(st => (st.tenantId || 'default-tenant') === tenantId);
+                    if (tenantTransfers.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={8} className="text-center py-12 text-slate-400 font-medium">
+                            No inter-location stock transfers recorded yet.
+                          </td>
+                        </tr>
+                      );
+                    }
+                    return tenantTransfers.map((trf, idx) => {
                       const item = items.find(i => i.id === trf.itemId);
                       const srcLoc = locationMap.get(trf.sourceLocationId);
                       const destLoc = locationMap.get(trf.destinationLocationId);
@@ -2022,8 +2154,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                           <td className="text-xs text-slate-500">{trf.notes || '-'}</td>
                         </tr>
                       );
-                    })
-                  )}
+                    });
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -2035,7 +2167,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           const whLocs = locations.filter(l => l.type === 'WAREHOUSE');
 
           const replenishmentRows = items.map(item => {
-            const itemMaps = itemLocations.filter(il => Number(il.itemId) === Number(item.id));
+            const itemMaps = itemLocations.filter(il => (il.tenantId || 'default-tenant') === tenantId && Number(il.itemId) === Number(item.id));
             const whStock = itemMaps.filter(il => whLocs.some(w => Number(w.id) === Number(il.locationId))).reduce((sum, il) => sum + il.quantity, 0);
             const storeStock = itemMaps.filter(il => !whLocs.some(w => Number(w.id) === Number(il.locationId))).reduce((sum, il) => sum + il.quantity, 0);
             const whMapping = itemMaps.find(il => whLocs.some(w => Number(w.id) === Number(il.locationId)));
@@ -2170,6 +2302,149 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           );
         })()}
 
+        {/* ── View 5: Store & Warehouse Connections Matrix ─────────────── */}
+        {activeViewTab === 'store-connections' && (
+          <div className="space-y-6">
+            <div className="card bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden p-6 space-y-6">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-extrabold">
+                    <Building2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-sm text-slate-900">🏬 Store & Warehouse Connections Matrix</h3>
+                    <p className="text-xs text-slate-500 font-medium">Link warehouses across dedicated store profiles, centralized hubs, or regional distribution networks</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Case 1, 2, 3 Visual Architecture Presets */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2">
+                  <div className="flex items-center gap-2 font-extrabold text-xs text-slate-800">
+                    <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px]">1</span>
+                    <span>Case 1: Dedicated Store Warehouses</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Each store has its own separate, dedicated warehouse for complete isolation between branches.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 space-y-2">
+                  <div className="flex items-center gap-2 font-extrabold text-xs text-emerald-900">
+                    <span className="w-5 h-5 rounded-full bg-emerald-200 text-emerald-800 flex items-center justify-center text-[10px]">2</span>
+                    <span>Case 2: Centralized Shared Hub</span>
+                  </div>
+                  <p className="text-[11px] text-emerald-700 leading-relaxed">
+                    1 Central Warehouse shared across all stores. Every branch can transfer stock from the central godown.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl border border-purple-200 bg-purple-50/50 space-y-2">
+                  <div className="flex items-center gap-2 font-extrabold text-xs text-purple-900">
+                    <span className="w-5 h-5 rounded-full bg-purple-200 text-purple-800 flex items-center justify-center text-[10px]">3</span>
+                    <span>Case 3: Regional Distribution Hubs</span>
+                  </div>
+                  <p className="text-[11px] text-purple-700 leading-relaxed">
+                    Flexible multi-store linking. Link Warehouse A to Store 1 & 2, and Warehouse B to Store 3.
+                  </p>
+                </div>
+              </div>
+
+              {/* Warehouses Linkage Configuration Table */}
+              <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 text-slate-600 font-extrabold uppercase text-[10px] border-b border-slate-200">
+                    <tr>
+                      <th className="py-3 px-4">Warehouse Name & Code</th>
+                      <th className="py-3 px-4">Creator / Primary Store</th>
+                      <th className="py-3 px-4">Case 2: Global Shared</th>
+                      <th className="py-3 px-4">Case 3: Linked Store Profiles</th>
+                      <th className="py-3 px-4 text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium">
+                    {tenantLocations.filter(l => l.type === 'WAREHOUSE').length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="text-center py-8 text-slate-400 text-xs">
+                          No warehouses created yet for this store workspace. Click "+ Add Location" to create your first warehouse.
+                        </td>
+                      </tr>
+                    ) : (
+                      tenantLocations.filter(l => l.type === 'WAREHOUSE').map(wh => {
+                        const isGlobalShared = !!wh.isShared;
+                        const linkedTenantIds = wh.allowedTenantIds || [];
+
+                        return (
+                          <tr key={wh.id} className="hover:bg-slate-50/80 transition">
+                            <td className="py-3 px-4">
+                              <div className="font-extrabold text-slate-900 flex items-center gap-2">
+                                <Warehouse className="w-4 h-4 text-blue-600 shrink-0" />
+                                <span>{wh.name}</span>
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-mono">CODE: {wh.code} | Cap: {wh.capacity || 0} PCS</div>
+                            </td>
+                            <td className="py-3 px-4 font-bold text-slate-700 font-mono">
+                              {wh.tenantId === activeTenantId ? (
+                                <span className="text-purple-700 font-extrabold bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                                  ★ Active Store ({business?.name || 'Current Store'})
+                                </span>
+                              ) : (
+                                <span className="text-slate-600">{wh.tenantId}</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4">
+                              <button
+                                onClick={() => handleToggleGlobalShared(wh.id!, isGlobalShared)}
+                                className={`px-3 py-1 rounded-xl text-[11px] font-extrabold transition cursor-pointer border flex items-center gap-1.5 ${
+                                  isGlobalShared
+                                    ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                                    : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
+                                }`}
+                              >
+                                {isGlobalShared ? '✓ Global Shared (All Stores)' : '○ Dedicated Warehouse'}
+                              </button>
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  onClick={() => handleToggleStoreLink(wh.id!, activeTenantId)}
+                                  className={`px-2 py-0.5 rounded-lg text-[10.5px] font-bold border cursor-pointer transition ${
+                                    linkedTenantIds.includes(activeTenantId) || isGlobalShared
+                                      ? 'bg-blue-50 text-blue-700 border-blue-200 font-extrabold'
+                                      : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  {linkedTenantIds.includes(activeTenantId) || isGlobalShared ? '☑' : '☐'} {business?.name || 'Current Store'}
+                                </button>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-center font-extrabold">
+                              {isGlobalShared ? (
+                                <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 text-[10.5px]">
+                                  Case 2: Central Shared
+                                </span>
+                              ) : linkedTenantIds.length > 0 ? (
+                                <span className="text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200 text-[10.5px]">
+                                  Case 3: Regional Hub ({linkedTenantIds.length + 1} Stores)
+                                </span>
+                              ) : (
+                                <span className="text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 text-[10.5px]">
+                                  Case 1: Dedicated
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* ── Modal 1: Add Location Master Modal ────────────────────────────── */}
@@ -2219,16 +2494,16 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                     className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none"
                   >
                     <option value="">Select Parent Location...</option>
-                    {locations
+                    {tenantLocations
                       .filter(l => locType === 'ZONE' ? l.type === 'WAREHOUSE' : l.type === 'ZONE')
                       .map(l => (
                         <option key={l.id} value={l.id}>{l.name} ({l.code})</option>
                       ))}
-                    {locations.filter(l => locType === 'ZONE' ? l.type === 'WAREHOUSE' : l.type === 'ZONE').length === 0 && (
+                    {tenantLocations.filter(l => locType === 'ZONE' ? l.type === 'WAREHOUSE' : l.type === 'ZONE').length === 0 && (
                       <option value="" disabled>
                         {locType === 'ZONE'
-                          ? 'No parent warehouses created yet. Please create a Warehouse first.'
-                          : 'No parent zones created yet. Please create a Zone first.'}
+                          ? 'No parent warehouses created yet for this store profile. Please create a Warehouse first.'
+                          : 'No parent zones created yet for this store profile. Please create a Zone first.'}
                       </option>
                     )}
                   </select>
@@ -2492,7 +2767,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                     className="w-full px-3 py-2.5 rounded-xl border border-purple-300 bg-purple-50/30 font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none"
                   >
                     <option value="">From Location...</option>
-                    {locations.map(l => {
+                    {tenantLocations.map(l => {
                       const qtyAtLoc = itemLocations.find(il => il.itemId === Number(transferItemId) && il.locationId === l.id)?.quantity || 0;
                       return (
                         <option key={l.id} value={l.id}>
@@ -2512,7 +2787,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                     className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none"
                   >
                     <option value="">To Location...</option>
-                    {locations.map(l => (
+                    {tenantLocations.map(l => (
                       <option key={l.id} value={l.id}>{l.name} ({l.code})</option>
                     ))}
                   </select>
@@ -2629,9 +2904,13 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                         className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none"
                       >
                         <option value="">Select Warehouse...</option>
-                        {locations.filter(l => l.type === 'WAREHOUSE').map(wh => (
-                          <option key={wh.id} value={wh.id}>{wh.name} ({wh.code})</option>
-                        ))}
+                        {tenantLocations.filter(l => l.type === 'WAREHOUSE').length > 0 ? (
+                          tenantLocations.filter(l => l.type === 'WAREHOUSE').map(wh => (
+                            <option key={wh.id} value={wh.id}>{wh.name} ({wh.code})</option>
+                          ))
+                        ) : (
+                          <option value="" disabled>No warehouse created for this store branch yet</option>
+                        )}
                       </select>
                     </div>
 

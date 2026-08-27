@@ -63,16 +63,21 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
   const [itemLocs, setItemLocs] = useState<ItemLocationMapping[]>([]);
   const [whLocationIds, setWhLocationIds] = useState<Set<number>>(new Set());
 
+  const activeTenantId = business?.tenantId || 'default-tenant';
+
   React.useEffect(() => {
     async function loadLocationData() {
       const locs = await db.locations.toArray();
-      const whIds = new Set(locs.filter(l => l.type === 'WAREHOUSE').map(l => Number(l.id)));
+      const tenantLocs = locs.filter(l => (l.tenantId || 'default-tenant') === activeTenantId || l.isShared || (l.allowedTenantIds && l.allowedTenantIds.includes(activeTenantId)));
+      const whIds = new Set(tenantLocs.filter(l => l.type === 'WAREHOUSE').map(l => Number(l.id)));
       setWhLocationIds(whIds);
+
       const mappings = await db.itemLocations.toArray();
-      setItemLocs(mappings);
+      const tenantMappings = mappings.filter(il => (il.tenantId || 'default-tenant') === activeTenantId);
+      setItemLocs(tenantMappings);
     }
     loadLocationData();
-  }, [items]);
+  }, [items, activeTenantId]);
 
   // Item Activity & History Modal State
   const [selectedItemForHistory, setSelectedItemForHistory] = useState<Item | null>(null);
@@ -416,6 +421,9 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                           const itemIdx = items.findIndex(i => Number(i.id) === targetItemId);
 
                           const itemMaps = itemLocs.filter(il => {
+                            const mapTenant = il.tenantId || 'default-tenant';
+                            if (mapTenant !== activeTenantId) return false;
+
                             let numId = Number(il.itemId);
                             if (numId === targetItemId) return true;
                             if (!validItemIds.has(numId) && items.length > 0) {
@@ -439,8 +447,8 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                           });
 
                           const validMappings = Array.from(uniqueMap.values()).filter(m => m.quantity > 0);
-                          const whStock = validMappings.reduce((sum, m) => sum + m.quantity, 0);
-                          const storeStock = Math.max(0, stock - whStock);
+                          const storeStock = validMappings.reduce((sum, m) => sum + m.quantity, 0);
+                          const whStock = Math.max(0, stock - storeStock);
 
                           return (
                             <div className="flex flex-col gap-1 py-0.5 min-w-[175px]">
