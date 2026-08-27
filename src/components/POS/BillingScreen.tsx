@@ -15,7 +15,7 @@ import {
   Zap,
   Tag
 } from 'lucide-react';
-import { Item, Party, InvoiceItem, Invoice, PaymentMethod, BusinessDetails } from '../../types';
+import { Item, Party, InvoiceItem, Invoice, PaymentMethod, BusinessDetails, ItemLocationMapping } from '../../types';
 import { db } from '../../db';
 import { printA4TaxInvoice, buildWhatsAppInvoiceLink } from '../../services/pdfInvoice';
 import { createServerInvoice } from '../../services/api';
@@ -51,6 +51,21 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   const [newPartyName, setNewPartyName] = useState('');
   const [newPartyPhone, setNewPartyPhone] = useState('');
   const [checkoutInvoice, setCheckoutInvoice] = useState<Invoice | null>(null);
+
+  // Store vs Warehouse Stock Location State
+  const [itemLocs, setItemLocs] = useState<ItemLocationMapping[]>([]);
+  const [whLocationIds, setWhLocationIds] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    async function loadLocationData() {
+      const locs = await db.locations.toArray();
+      const whIds = new Set(locs.filter(l => l.type === 'WAREHOUSE').map(l => Number(l.id)));
+      setWhLocationIds(whIds);
+      const mappings = await db.itemLocations.toArray();
+      setItemLocs(mappings);
+    }
+    loadLocationData();
+  }, [cartItems]);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
@@ -308,18 +323,30 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
         synced: false
       });
 
-      // 4. Decrement Item stock levels accurately & keep location stock in sync
+      // 4. Decrement Item stock levels accurately & keep Store Front shelf stock in sync
       for (const cItem of cartItems) {
         const dbItem = await db.items.get(cItem.itemId);
         if (dbItem) {
-          const newStock = dbItem.currentStock - cItem.quantity;
+          const newStock = Math.max(0, dbItem.currentStock - cItem.quantity);
           await db.items.update(cItem.itemId, { currentStock: newStock, updatedAt: new Date().toISOString() });
           
-          // Also decrement mapped location stock if item is assigned to a shelf
-          const mappedLoc = await db.itemLocations.filter(il => il.itemId === cItem.itemId && il.quantity > 0).first();
-          if (mappedLoc && mappedLoc.id) {
-            const newLocStock = Math.max(0, mappedLoc.quantity - cItem.quantity);
-            await db.itemLocations.update(mappedLoc.id, { quantity: newLocStock, updatedAt: new Date().toISOString() });
+          // Deduct from Store Front Shelf mapped location stock first, then warehouse reserve
+          const activeTenant = business?.tenantId || 'default-tenant';
+          const mappedLocs = await db.itemLocations.filter(il => (il.tenantId || 'default-tenant') === activeTenant && Number(il.itemId) === Number(cItem.itemId) && il.quantity > 0).toArray();
+          const allLocs = await db.locations.toArray();
+          const whLocIds = new Set(allLocs.filter(l => l.type === 'WAREHOUSE').map(l => Number(l.id)));
+
+          const storeMappings = mappedLocs.filter(m => !whLocIds.has(Number(m.locationId)));
+          const whMappings = mappedLocs.filter(m => whLocIds.has(Number(m.locationId)));
+          const orderedLocs = [...storeMappings, ...whMappings];
+
+          let remToDeduct = cItem.quantity;
+          for (const mLoc of orderedLocs) {
+            if (remToDeduct <= 0) break;
+            const deduct = Math.min(mLoc.quantity, remToDeduct);
+            const newLocStock = mLoc.quantity - deduct;
+            remToDeduct -= deduct;
+            await db.itemLocations.update(mLoc.id!, { quantity: newLocStock, updatedAt: new Date().toISOString() });
           }
 
           await db.syncJournal.add({
@@ -381,9 +408,38 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                       </div>
                       <div className="text-right">
                         <div className="font-extrabold text-xs text-emerald-600 font-mono">Rs {Number(item.salesPrice || 0).toFixed(2)}</div>
-                        <div className={`text-[10px] font-bold ${(item?.currentStock ?? 0) <= (item?.minStockAlert ?? 0) ? 'text-amber-600' : 'text-slate-500'}`}>
-                          Stock: {item.currentStock} {item.unitType}
-                        </div>
+                        {(() => {
+                          const itemMaps = itemLocs.filter(il => Number(il.itemId) === Number(item.id) && il.quantity > 0);
+                          const storeStock = itemMaps.filter(il => !whLocationIds.has(Number(il.locationId))).reduce((sum, il) => sum + il.quantity, 0);
+                          const whStock = itemMaps.filter(il => whLocationIds.has(Number(il.locationId))).reduce((sum, il) => sum + il.quantity, 0);
+
+                          if (itemMaps.length === 0) {
+                            return (
+                              <div className={`text-[10px] font-bold ${(item?.currentStock ?? 0) <= (item?.minStockAlert ?? 0) ? 'text-amber-600' : 'text-slate-500'}`}>
+                                Stock: {item.currentStock} {item.unitType}
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="text-[9.5px] font-mono mt-0.5">
+                              {storeStock > 0 ? (
+                                <span className="font-extrabold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100">
+                                  Store: {storeStock} {item.unitType}
+                                </span>
+                              ) : (
+                                <span className="font-extrabold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                                  ⚠️ Out of Store Stock
+                                </span>
+                              )}
+                              {whStock > 0 && (
+                                <span className="text-slate-500 font-medium ml-1">
+                                  ({whStock} in Whse)
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   ))

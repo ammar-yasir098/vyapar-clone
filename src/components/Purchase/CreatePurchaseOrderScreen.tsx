@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ShoppingBag, Plus, Trash2, ArrowLeft, CheckCircle2 } from 'lucide-react';
-import { Item, Party, PurchaseOrderItem, BusinessDetails, PurchaseOrder } from '../../types';
+import { Item, Party, PurchaseOrderItem, BusinessDetails, PurchaseOrder, InventoryLocation } from '../../types';
 import { db } from '../../db';
 import { createServerPurchaseOrder } from '../../services/api';
 import { useToast } from '../Common/ToastContext';
@@ -31,6 +31,19 @@ export const CreatePurchaseOrderScreen: React.FC<CreatePurchaseOrderScreenProps>
   const [selectedItemId, setSelectedItemId] = useState<number | ''>('');
   const [quantity, setQuantity] = useState<number>(1);
   const [unitRate, setUnitRate] = useState<number>(0);
+
+  const [locations, setLocations] = useState<InventoryLocation[]>([]);
+  const [receivingLocationId, setReceivingLocationId] = useState<string>('');
+
+  useEffect(() => {
+    db.locations.toArray().then(locs => {
+      setLocations(locs);
+      const defaultWh = locs.find(l => l.type === 'WAREHOUSE');
+      if (defaultWh?.id) {
+        setReceivingLocationId(String(defaultWh.id));
+      }
+    });
+  }, []);
 
   const safeNum = (val: any): number => {
     if (val === null || val === undefined) return 0;
@@ -118,6 +131,7 @@ export const CreatePurchaseOrderScreen: React.FC<CreatePurchaseOrderScreenProps>
       taxTotal: 0,
       grandTotal: totalPoAmount,
       status: 'PENDING',
+      receivingLocationId: receivingLocationId ? Number(receivingLocationId) : undefined,
       notes,
       createdAt: new Date().toISOString()
     };
@@ -161,8 +175,8 @@ export const CreatePurchaseOrderScreen: React.FC<CreatePurchaseOrderScreenProps>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 flex-1 overflow-hidden">
         {/* Left 2 Cols: Form & Item Entry */}
         <div className="lg:col-span-2 flex flex-col gap-4 overflow-hidden">
-          {/* Supplier Info Form */}
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm grid grid-cols-3 gap-3">
+          {/* Supplier Info Form & Receiving Location */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-3">
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-1">Select Supplier *</label>
               <select
@@ -182,6 +196,23 @@ export const CreatePurchaseOrderScreen: React.FC<CreatePurchaseOrderScreenProps>
                     </option>
                   ))
                 )}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1">Target Receiving Location</label>
+              <select
+                value={receivingLocationId}
+                onChange={e => setReceivingLocationId(e.target.value)}
+                className="input-field text-xs font-bold bg-purple-50/70 border-purple-200 text-purple-900 focus:ring-purple-500"
+              >
+                <option value="">-- Unassigned General Stock --</option>
+                {locations.map(loc => (
+                  <option key={loc.id} value={loc.id}>
+                    {loc.type === 'WAREHOUSE' ? '🏢 Warehouse: ' : loc.type === 'ZONE' ? '📂 Zone: ' : '📦 Shelf: '}
+                    {loc.name} ({loc.code})
+                  </option>
+                ))}
               </select>
             </div>
 

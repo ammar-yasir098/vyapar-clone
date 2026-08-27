@@ -139,7 +139,7 @@ export const PurchaseOrderListScreen: React.FC<PurchaseOrderListScreenProps> = (
 
         await db.purchaseBills.add(newPurchaseBill);
 
-        // 1. Stock Inward: Increase Item stock levels in Dexie DB & log Restock record
+        // 1. Stock Inward: Increase Item stock levels in Dexie DB & update location mapping
         for (const pItem of convertedItems) {
           const dbItem = await db.items.get(pItem.itemId);
           if (dbItem) {
@@ -149,6 +149,29 @@ export const PurchaseOrderListScreen: React.FC<PurchaseOrderListScreenProps> = (
               purchasePrice: pItem.unitPrice,
               updatedAt: new Date().toISOString()
             });
+          }
+
+          if (po.receivingLocationId) {
+            const locIdNum = Number(po.receivingLocationId);
+            const existingMapping = await db.itemLocations
+              .filter(il => Number(il.itemId) === Number(pItem.itemId) && Number(il.locationId) === locIdNum)
+              .first();
+
+            if (existingMapping && existingMapping.id) {
+              const newLocQty = (existingMapping.quantity || 0) + pItem.quantity;
+              await db.itemLocations.update(existingMapping.id, {
+                quantity: newLocQty,
+                updatedAt: new Date().toISOString()
+              });
+            } else {
+              await db.itemLocations.add({
+                tenantId: currentTenantId,
+                itemId: pItem.itemId,
+                locationId: locIdNum,
+                quantity: pItem.quantity,
+                updatedAt: new Date().toISOString()
+              });
+            }
           }
 
           await db.itemRestocks.add({

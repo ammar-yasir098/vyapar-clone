@@ -21,7 +21,7 @@ import {
   ArrowUpRight,
   Sparkles
 } from 'lucide-react';
-import { Item, UnitType, BusinessDetails, Party, ItemRestock } from '../../types';
+import { Item, UnitType, BusinessDetails, Party, ItemRestock, ItemLocationMapping } from '../../types';
 import { db } from '../../db';
 import { createServerItem, updateServerItem, deleteServerItem, adjustServerItemStock } from '../../services/api';
 import { syncManager } from '../../services/sync';
@@ -57,6 +57,21 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
 
   // Edit Item State
   const [editItem, setEditItem] = useState<Item | null>(null);
+
+  // Multi-Location Inventory Breakdown State (Phase 5)
+  const [itemLocs, setItemLocs] = useState<ItemLocationMapping[]>([]);
+  const [whLocationIds, setWhLocationIds] = useState<Set<number>>(new Set());
+
+  React.useEffect(() => {
+    async function loadLocationData() {
+      const locs = await db.locations.toArray();
+      const whIds = new Set(locs.filter(l => l.type === 'WAREHOUSE').map(l => Number(l.id)));
+      setWhLocationIds(whIds);
+      const mappings = await db.itemLocations.toArray();
+      setItemLocs(mappings);
+    }
+    loadLocationData();
+  }, [items]);
 
   // Item Activity & History Modal State
   const [selectedItemForHistory, setSelectedItemForHistory] = useState<Item | null>(null);
@@ -394,20 +409,34 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                         Rs {Number(item.salesPrice || 0).toFixed(2)}
                       </td>
                       <td>
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`font-mono font-bold text-xs ${
-                              isLowStock ? 'text-amber-600' : 'text-slate-800'
-                            }`}
-                          >
-                            {stock} {item.unitType || 'PCS'}
-                          </span>
-                          {isLowStock && (
-                            <span className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0.2 rounded border border-amber-300 font-bold">
-                              LOW
-                            </span>
-                          )}
-                        </div>
+                        {(() => {
+                          const itemMaps = itemLocs.filter(il => Number(il.itemId) === Number(item.id) && il.quantity > 0);
+                          const storeStock = itemMaps.filter(il => !whLocationIds.has(Number(il.locationId))).reduce((sum, il) => sum + il.quantity, 0);
+                          const whStock = itemMaps.filter(il => whLocationIds.has(Number(il.locationId))).reduce((sum, il) => sum + il.quantity, 0);
+
+                          return (
+                            <div className="flex flex-col gap-0.5">
+                              <div className="flex items-center gap-1 font-mono text-xs">
+                                <span className="font-extrabold text-slate-900">{stock} {item.unitType || 'PCS'}</span>
+                                {isLowStock && (
+                                  <span className="text-[9px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-bold">
+                                    LOW
+                                  </span>
+                                )}
+                              </div>
+                              {itemMaps.length > 0 && (
+                                <div className="flex items-center gap-1 text-[9.5px] font-mono">
+                                  <span className="text-purple-700 font-extrabold bg-purple-50 px-1 rounded border border-purple-100">
+                                    Store: {storeStock}
+                                  </span>
+                                  <span className="text-blue-700 font-extrabold bg-blue-50 px-1 rounded border border-blue-100">
+                                    Whse: {whStock}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="font-mono text-xs text-slate-500">
                         {Number(item.igstRate || (Number(item.cgstRate || 0) + Number(item.sgstRate || 0)))}%

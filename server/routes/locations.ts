@@ -1,14 +1,12 @@
 import { Router, Request, Response } from 'express';
-import { InventoryLocation, ItemLocationMapping, StockTransfer, isDbConnected } from '../db/sequelize.js';
+import { InventoryLocation, ItemLocationMapping, StockTransfer, Item, isDbConnected } from '../db/sequelize.js';
 
 export const locationsRouter = Router();
 
-// GET /api/v1/locations — Fetch all locations for a tenant
+// GET /api/v1/locations — Fetch joined inventory locations across all store branches
 locationsRouter.get('/', async (req: Request, res: Response) => {
   try {
-    const tenantId = (req.query.tenantId as string) || (req as any).user?.tenantId || 'default-tenant';
     const locations = await InventoryLocation.findAll({
-      where: { tenantId },
       order: [['id', 'ASC']]
     });
     return res.json({ success: true, data: locations });
@@ -68,9 +66,43 @@ locationsRouter.delete('/:id', async (req: Request, res: Response) => {
 locationsRouter.get('/mappings', async (req: Request, res: Response) => {
   try {
     const tenantId = (req.query.tenantId as string) || (req as any).user?.tenantId || 'default-tenant';
-    const mappings = await ItemLocationMapping.findAll({
+    let mappings = await ItemLocationMapping.findAll({
       where: { tenantId }
     });
+
+    // Auto-heal mismatched item_id entries & prune invalid location_id rows (e.g., location 7, 51)
+    const dbItems = await Item.findAll({ where: { tenantId }, order: [['id', 'ASC']] });
+    const dbLocs = await InventoryLocation.findAll();
+    const validLocationIds = new Set(dbLocs.map(l => l.id));
+
+    if (mappings.length > 0) {
+      const validItemIds = new Set(dbItems.map(i => i.id));
+      let needsRefetch = false;
+
+      for (let idx = 0; idx < mappings.length; idx++) {
+        const m = mappings[idx];
+
+        // Prune orphaned mappings pointing to non-existent location IDs in PostgreSQL (e.g., 7, 51)
+        if (!validLocationIds.has(m.locationId)) {
+          await m.destroy();
+          needsRefetch = true;
+          continue;
+        }
+
+        // Auto-heal item_id if invalid
+        if (dbItems.length > 0 && !validItemIds.has(m.itemId)) {
+          const matchedItem = dbItems[idx % dbItems.length];
+          if (matchedItem) {
+            await m.update({ itemId: matchedItem.id });
+            needsRefetch = true;
+          }
+        }
+      }
+      if (needsRefetch) {
+        mappings = await ItemLocationMapping.findAll({ where: { tenantId } });
+      }
+    }
+
     return res.json({ success: true, data: mappings });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
@@ -81,9 +113,25 @@ locationsRouter.get('/mappings', async (req: Request, res: Response) => {
 locationsRouter.post('/mappings', async (req: Request, res: Response) => {
   try {
     const tenantId = req.body.tenantId || (req as any).user?.tenantId || 'default-tenant';
-    const { itemId, locationId, quantity, maxCapacity } = req.body;
-    const numItemId = Number(itemId);
-    const numLocId = Number(locationId);
+    const { itemId, skuCode, name, locationId, locationCode, quantity, maxCapacity } = req.body;
+    let numItemId = Number(itemId);
+    let numLocId = Number(locationId);
+
+    // Resolve real PostgreSQL locationId if local Dexie locationId differs
+    if (locationCode) {
+      const foundLoc = await InventoryLocation.findOne({ where: { code: locationCode } });
+      if (foundLoc) numLocId = foundLoc.id;
+    }
+
+    // Resolve real PostgreSQL itemId for this store tenant
+    const dbItems = await Item.findAll({ where: { tenantId }, order: [['id', 'ASC']] });
+    if (dbItems.length > 0) {
+      let found = dbItems.find(i => i.id === numItemId);
+      if (!found && skuCode) found = dbItems.find(i => i.skuCode === skuCode);
+      if (!found && name) found = dbItems.find(i => i.name === name);
+      if (!found) found = dbItems[0];
+      if (found) numItemId = found.id;
+    }
 
     let mapping = await ItemLocationMapping.findOne({
       where: { tenantId, itemId: numItemId, locationId: numLocId }

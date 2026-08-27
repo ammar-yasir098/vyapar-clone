@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ShoppingCart, Plus, Trash2, CheckCircle2, User, FileText, ArrowUpRight } from 'lucide-react';
-import { Item, Party, InvoiceItem, PaymentMethod, BusinessDetails, PurchaseBill } from '../../types';
+import { Item, Party, InvoiceItem, PaymentMethod, BusinessDetails, PurchaseBill, InventoryLocation } from '../../types';
 import { db } from '../../db';
 import { createServerPurchase } from '../../services/api';
 import { syncManager } from '../../services/sync';
@@ -30,6 +30,19 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
   const [selectedItemId, setSelectedItemId] = useState<number | ''>('');
   const [quantity, setQuantity] = useState<number>(1);
   const [unitRate, setUnitRate] = useState<number>(0);
+
+  const [locations, setLocations] = useState<InventoryLocation[]>([]);
+  const [receivingLocationId, setReceivingLocationId] = useState<string>('');
+
+  useEffect(() => {
+    db.locations.toArray().then(locs => {
+      setLocations(locs);
+      const defaultWh = locs.find(l => l.type === 'WAREHOUSE');
+      if (defaultWh?.id) {
+        setReceivingLocationId(String(defaultWh.id));
+      }
+    });
+  }, []);
 
   const safeNum = (val: any): number => {
     if (val === null || val === undefined) return 0;
@@ -149,17 +162,16 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
     const dueAmt = paymentMethod === 'CREDIT' ? totalAmount : Math.max(0, totalAmount - paidAmt);
     const status: 'PAID' | 'UNPAID' | 'PARTIAL' = paymentMethod === 'CREDIT' ? 'UNPAID' : (dueAmt === 0 ? 'PAID' : (dueAmt >= totalAmount ? 'UNPAID' : 'PARTIAL'));
 
-    // 0. Save persistent PurchaseBill record in Dexie IndexedDB
-    const billId = `pur-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const newPurchaseBill: PurchaseBill = {
-      billId,
+      billId: `PUR-BILL-${Date.now()}`,
       tenantId: currentTenantId,
       billNumber,
       billDate,
       supplierId: selectedSupplier?.id,
-      supplierName: selectedSupplier?.name || 'Supplier',
+      supplierName: selectedSupplier?.name || 'Walk-in Vendor',
       supplierPhone: selectedSupplier?.phone || '',
       supplierGstin: selectedSupplier?.gstin || '',
+      receivingLocationId: receivingLocationId ? Number(receivingLocationId) : undefined,
       items: purchaseItems.map(i => ({
         itemId: i.itemId,
         itemName: i.itemName,
@@ -172,7 +184,7 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
         totalAmount: i.totalAmount
       })),
       subtotal: totalAmount,
-      taxTotal: 0,
+      taxTotal: taxTotalCost,
       grandTotal: totalAmount,
       paidAmount: paidAmt,
       dueAmount: dueAmt,
@@ -183,7 +195,6 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
 
     await db.purchaseBills.add(newPurchaseBill);
 
-    // 1. Stock Inward: Increase Item stock levels in Dexie DB & log Sync mutation
     for (const pItem of purchaseItems) {
       const dbItem = await db.items.get(pItem.itemId);
       if (dbItem) {
@@ -194,6 +205,29 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
           updatedAt: new Date().toISOString()
         });
         await syncManager.logMutation('ITEM', String(pItem.itemId), 'UPDATE', { id: pItem.itemId, name: dbItem.name, skuCode: dbItem.skuCode, currentStock: newStock, purchasePrice: pItem.unitPrice });
+      }
+
+      if (receivingLocationId) {
+        const locIdNum = Number(receivingLocationId);
+        const existingMapping = await db.itemLocations
+          .filter(il => Number(il.itemId) === Number(pItem.itemId) && Number(il.locationId) === locIdNum)
+          .first();
+
+        if (existingMapping && existingMapping.id) {
+          const newLocQty = (existingMapping.quantity || 0) + pItem.quantity;
+          await db.itemLocations.update(existingMapping.id, {
+            quantity: newLocQty,
+            updatedAt: new Date().toISOString()
+          });
+        } else {
+          await db.itemLocations.add({
+            tenantId: currentTenantId,
+            itemId: pItem.itemId,
+            locationId: locIdNum,
+            quantity: pItem.quantity,
+            updatedAt: new Date().toISOString()
+          });
+        }
       }
 
       await db.itemRestocks.add({
@@ -255,8 +289,8 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 flex-1 overflow-hidden">
         {/* Left 2 Cols: Form & Item Entry */}
         <div className="lg:col-span-2 flex flex-col gap-4 overflow-hidden">
-          {/* Supplier Info Form */}
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm grid grid-cols-3 gap-3">
+          {/* Supplier Info Form & Receiving Location */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-3">
             <div>
               <label className="text-xs font-bold text-slate-600 block mb-1">Select Supplier *</label>
               <select
@@ -270,6 +304,23 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
                 {suppliers.map(s => (
                   <option key={s.id} value={s.id}>
                     {s.name} ({s.phone})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1">Receive Inbound Stock To</label>
+              <select
+                value={receivingLocationId}
+                onChange={e => setReceivingLocationId(e.target.value)}
+                className="input-field text-xs font-bold bg-purple-50/70 border-purple-200 text-purple-900 focus:ring-purple-500"
+              >
+                <option value="">-- Unassigned General Stock --</option>
+                {locations.map(loc => (
+                  <option key={loc.id} value={loc.id}>
+                    {loc.type === 'WAREHOUSE' ? '🏢 Warehouse: ' : loc.type === 'ZONE' ? '📂 Zone: ' : '📦 Shelf: '}
+                    {loc.name} ({loc.code})
                   </option>
                 ))}
               </select>

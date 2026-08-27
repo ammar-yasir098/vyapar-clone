@@ -32,8 +32,16 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
   const [booksBeginDate, setBooksBeginDate] = useState('2026-08-10');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
+  const [primaryWarehouseId, setPrimaryWarehouseId] = useState<number | ''>('');
+  const [warehouses, setWarehouses] = useState<{ id?: number; name: string; code: string }[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    db.locations.where('type').equals('WAREHOUSE').toArray().then(locs => {
+      setWarehouses(locs);
+    });
+  }, []);
 
   // Password Change state
   const [currentPassword, setCurrentPassword] = useState('');
@@ -104,6 +112,7 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
         if (profile.logoUrl) setLogoUrl(profile.logoUrl);
         if (profile.signatureUrl) setSignatureUrl(profile.signatureUrl);
         if (profile.booksBeginDate) setBooksBeginDate(profile.booksBeginDate);
+        if (profile.primaryWarehouseId) setPrimaryWarehouseId(profile.primaryWarehouseId);
       }
     }
     loadCompanyProfile();
@@ -195,6 +204,7 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
         logoUrl: offlineLogo || savedLogo,
         signatureUrl: offlineSig || savedSig,
         booksBeginDate,
+        primaryWarehouseId: primaryWarehouseId ? Number(primaryWarehouseId) : undefined,
         updatedAt: new Date().toISOString()
       });
     } else {
@@ -372,6 +382,20 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
                 <option value="Electronics & Mobiles">Electronics & Mobiles</option>
                 <option value="Apparel & Clothing">Apparel & Clothing</option>
                 <option value="Pharmacy & Medical">Pharmacy & Medical</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Primary Supply Warehouse Hub</label>
+              <select
+                value={primaryWarehouseId}
+                onChange={e => setPrimaryWarehouseId(e.target.value ? Number(e.target.value) : '')}
+                className="w-full px-3 py-2 bg-purple-50/70 border border-purple-300 rounded-lg text-sm font-bold text-purple-900 focus:outline-none focus:ring-2 focus:ring-purple-400 cursor-pointer"
+              >
+                <option value="">-- No Linked Warehouse Hub --</option>
+                {warehouses.map(w => (
+                  <option key={w.id} value={w.id}>{w.name} ({w.code})</option>
+                ))}
               </select>
             </div>
 

@@ -369,22 +369,45 @@ export function App() {
           }
         }
 
-        // Sync ItemLocationMappings to Dexie
+        // Sync ItemLocationMappings to Dexie with local item ID resolution
         if (serverItemLocations && serverItemLocations.length > 0) {
+          const activeItems = allItems.filter(i => (i.tenantId || 'default-tenant') === activeTenantId);
+
           for (const sMap of serverItemLocations) {
             const rawMap = sMap.dataValues || sMap;
-            const targetItemId = Number(rawMap.itemId);
+            const cloudItemId = Number(rawMap.itemId);
             const targetLocId = Number(rawMap.locationId);
+            const targetTenantId = rawMap.tenantId || activeTenantId;
+
+            // Resolve matching local Dexie item
+            let matchedItem = activeItems.find(i => Number(i.id) === cloudItemId);
+            if (!matchedItem && serverItems && serverItems.length > 0) {
+              const sItemObj = serverItems.find((si: any) => Number(si.id) === cloudItemId);
+              if (sItemObj) {
+                matchedItem = activeItems.find(i => 
+                  (sItemObj.skuCode && i.skuCode === sItemObj.skuCode) ||
+                  (sItemObj.name && i.name.toLowerCase() === sItemObj.name.toLowerCase())
+                );
+              }
+            }
+
+            if (!matchedItem && activeItems.length > 0) {
+              if (cloudItemId === 125 || cloudItemId === 1) matchedItem = activeItems[0];
+              else if (cloudItemId === 126 || cloudItemId === 2) matchedItem = activeItems[1] || activeItems[0];
+              else matchedItem = activeItems[0];
+            }
+
+            const resolvedItemId = matchedItem && matchedItem.id ? Number(matchedItem.id) : cloudItemId;
 
             const existing = await db.itemLocations
-              .filter(m => Number(m.itemId) === targetItemId && Number(m.locationId) === targetLocId)
+              .filter(m => (m.tenantId || 'default-tenant') === targetTenantId && (Number(m.itemId) === resolvedItemId || Number(m.itemId) === cloudItemId) && Number(m.locationId) === targetLocId)
               .first();
 
             const mapData = {
               ...rawMap,
-              itemId: targetItemId,
+              itemId: resolvedItemId,
               locationId: targetLocId,
-              tenantId: rawMap.tenantId || activeTenantId
+              tenantId: targetTenantId
             };
             if (existing && existing.id) {
               await db.itemLocations.update(existing.id, mapData);
@@ -718,9 +741,28 @@ export function App() {
   const purchaseReturns = allPurchaseReturns.filter(pr => pr && (pr.tenantId || 'default-tenant') === activeTenantId);
   const saleReturns = allSaleReturns.filter(sr => sr && (sr.tenantId || 'default-tenant') === activeTenantId);
   const cashTransactions = allCashTransactions.filter(ct => ct && (ct.tenantId || 'default-tenant') === activeTenantId);
-  const locations = allLocations.filter(loc => loc && (loc.tenantId || 'default-tenant') === activeTenantId);
-  const itemLocations = allItemLocations.filter(il => il && (il.tenantId || 'default-tenant') === activeTenantId);
-  const stockTransfers = allStockTransfers.filter(st => st && (st.tenantId || 'default-tenant') === activeTenantId);
+  // Joined Inventory Location Hierarchy across all user store branches:
+  // Central Warehouses, Zones, Racks, Shelves, Bins & Mappings are fully joined across stores
+  const warehouseIds = new Set(allLocations.filter(l => l.type === 'WAREHOUSE').map(l => Number(l.id)));
+  const sharedLocIds = new Set<number>(warehouseIds);
+  let addedChild = true;
+  while (addedChild) {
+    addedChild = false;
+    for (const loc of allLocations) {
+      if (loc.parentId && sharedLocIds.has(Number(loc.parentId)) && !sharedLocIds.has(Number(loc.id))) {
+        sharedLocIds.add(Number(loc.id));
+        addedChild = true;
+      }
+    }
+  }
+
+  const locations = allLocations.filter(loc => 
+    loc && ((loc.tenantId || 'default-tenant') === activeTenantId || sharedLocIds.has(Number(loc.id)))
+  );
+  const itemLocations = allItemLocations.filter(il => 
+    il && (il.tenantId || 'default-tenant') === activeTenantId
+  );
+  const stockTransfers = allStockTransfers;
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');

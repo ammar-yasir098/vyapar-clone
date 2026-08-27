@@ -179,7 +179,7 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
         });
       }
 
-      // 2. Increase Item Stock Levels (item.currentStock += returnedQty) & log sync mutation
+      // 2. Increase Item Stock Levels (item.currentStock += returnedQty) & restore Store Front shelf mapping
       for (const item of validItems) {
         if (item.itemId) {
           const dbItem = await db.items.get(item.itemId);
@@ -190,6 +190,17 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
               currentStock: newStock,
               updatedAt: new Date().toISOString()
             });
+
+            // Restore returned stock to store front shelf mapping if exists
+            const mappedLoc = await db.itemLocations.filter(il => Number(il.itemId) === Number(item.itemId)).first();
+            if (mappedLoc && mappedLoc.id) {
+              const newLocStock = (mappedLoc.quantity || 0) + item.returnQuantity;
+              await db.itemLocations.update(mappedLoc.id, {
+                quantity: newLocStock,
+                updatedAt: new Date().toISOString()
+              });
+            }
+
             await syncManager.logMutation('ITEM', String(item.itemId), 'UPDATE', { id: item.itemId, name: dbItem.name, skuCode: dbItem.skuCode, currentStock: newStock });
           }
         }

@@ -145,16 +145,27 @@ export const CreatePurchaseReturnScreen: React.FC<CreatePurchaseReturnScreenProp
         });
       }
 
-      // 2. Reduce Stock in Dexie DB (item.currentStock -= returnQuantity) & log Sync mutation
+      // 2. Reduce Stock in Dexie DB (item.currentStock -= returnQuantity) & location mapping
       for (const rItem of returnItems) {
         if (rItem.itemId) {
           const dbItem = await db.items.get(rItem.itemId);
           if (dbItem) {
-            const newStock = safeNum(dbItem.currentStock) - safeNum(rItem.returnQuantity);
+            const newStock = Math.max(0, safeNum(dbItem.currentStock) - safeNum(rItem.returnQuantity));
             await db.items.update(rItem.itemId, {
               currentStock: newStock,
               updatedAt: new Date().toISOString()
             });
+
+            // Deduct from location mapping stock if exists
+            const mappedLoc = await db.itemLocations.filter(il => Number(il.itemId) === Number(rItem.itemId) && il.quantity > 0).first();
+            if (mappedLoc && mappedLoc.id) {
+              const newLocStock = Math.max(0, (mappedLoc.quantity || 0) - safeNum(rItem.returnQuantity));
+              await db.itemLocations.update(mappedLoc.id, {
+                quantity: newLocStock,
+                updatedAt: new Date().toISOString()
+              });
+            }
+
             await syncManager.logMutation('ITEM', String(rItem.itemId), 'UPDATE', { id: rItem.itemId, name: dbItem.name, skuCode: dbItem.skuCode, currentStock: newStock });
           }
         }

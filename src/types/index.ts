@@ -134,6 +134,7 @@ export interface BusinessDetails {
   pincode?: string;
   logoUrl?: string | null;
   signatureUrl?: string | null;
+  primaryWarehouseId?: number;
 }
 
 export interface CompanyProfileEntity {
@@ -151,6 +152,7 @@ export interface CompanyProfileEntity {
   logoUrl?: string | null;
   signatureUrl?: string | null;
   booksBeginDate?: string;
+  primaryWarehouseId?: number;
   updatedAt?: string;
 }
 
@@ -243,6 +245,7 @@ export interface PurchaseOrder {
   taxTotal: number;
   grandTotal: number;
   status: POStatus;
+  receivingLocationId?: number;
   notes?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -282,6 +285,7 @@ export interface PurchaseBill {
   dueAmount?: number;
   paymentStatus?: 'PAID' | 'UNPAID' | 'PARTIAL';
   paymentMethod?: string;
+  receivingLocationId?: number;
   notes?: string;
   createdAt?: string;
   updatedAt?: string;
