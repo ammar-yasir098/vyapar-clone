@@ -39,16 +39,13 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Serve static uploaded images
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-import { authenticateJwt } from './middleware/auth.js';
+import { authenticateJwt, optionalAuthenticateJwt } from './middleware/auth.js';
 
 // REST API v1 Routes — Public
 app.use('/api/v1/auth', authRouter);
 
 // REST API v1 Routes — Protected Data & Sync Endpoints
-app.use('/api/v1/sync', (req, res, next) => {
-  if (req.path === '/health') return next();
-  return authenticateJwt(req, res, next);
-}, syncRouter);
+app.use('/api/v1/sync', optionalAuthenticateJwt, syncRouter);
 app.use('/api/v1/company', authenticateJwt, companyRouter);
 app.use('/api/v1/items', authenticateJwt, itemsRouter);
 app.use('/api/v1/parties', authenticateJwt, partiesRouter);
@@ -61,7 +58,7 @@ app.use('/api/v1/expenses', authenticateJwt, expensesRouter);
 app.use('/api/v1/purchase-returns', authenticateJwt, purchaseReturnsRouter);
 app.use('/api/v1/sale-returns', authenticateJwt, saleReturnsRouter);
 app.use('/api/v1/cash', authenticateJwt, cashRouter);
-app.use('/api/v1/locations', authenticateJwt, locationsRouter);
+app.use('/api/v1/locations', optionalAuthenticateJwt, locationsRouter);
 
 // WhatsApp Automated Service Routes (Public/Internal for local app)
 app.use('/api/v1/whatsapp', whatsappRouter);

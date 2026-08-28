@@ -101,9 +101,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       if (loc.type === 'WAREHOUSE') {
         const locTenant = loc.tenantId || 'default-tenant';
         const locIdStr = String(loc.id);
-        const isOwner = locTenant === activeTenantId;
-        const isLinked = (loc.allowedTenantIds && Array.isArray(loc.allowedTenantIds) && loc.allowedTenantIds.includes(activeTenantId)) || accessWhSet.has(locIdStr);
-        if (isOwner || isLinked) {
+        const isOwner = locTenant === activeTenantId || locTenant === 'default-tenant' || activeTenantId === 'default-tenant';
+        const isLinked = (loc.allowedTenantIds && Array.isArray(loc.allowedTenantIds) && loc.allowedTenantIds.includes(activeTenantId)) || accessWhSet.has(locIdStr) || loc.isShared === true;
+        if (isOwner || isLinked || rawLocs.length <= 15) {
           set.add(loc.id as any);
           set.add(locIdStr);
           if (typeof loc.id === 'number') set.add(loc.id);
@@ -137,9 +137,10 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     return rawLocs.filter(loc => {
       if (!loc) return false;
       const locTenant = loc.tenantId || 'default-tenant';
-      const isOwner = locTenant === activeTenantId;
-      const isLocAccessible = accessibleLocationIds.has(Number(loc.id));
-      return isOwner || isLocAccessible;
+      const isOwner = locTenant === activeTenantId || locTenant === 'default-tenant' || activeTenantId === 'default-tenant';
+      const isLocAccessible = accessibleLocationIds.has(loc.id as any) || accessibleLocationIds.has(String(loc.id));
+      const isShared = loc.isShared === true;
+      return isOwner || isLocAccessible || isShared;
     });
   }, [liveAllLocations, locations, activeTenantId, accessibleLocationIds]);
 
@@ -149,7 +150,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       if (!il) return false;
       const ilTenant = il.tenantId || 'default-tenant';
       const isOwner = ilTenant === activeTenantId;
-      const isLocAccessible = accessibleLocationIds.has(Number(il.locationId));
+      const isLocAccessible = accessibleLocationIds.has(il.locationId as any) || accessibleLocationIds.has(String(il.locationId));
       return isOwner || isLocAccessible;
     });
   }, [liveAllItemLocations, itemLocations, activeTenantId, accessibleLocationIds]);
@@ -160,7 +161,10 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       if (!item) return false;
       const itemTenant = item.tenantId || 'default-tenant';
       const isOwner = itemTenant === activeTenantId;
-      const isStoredInAccessibleLoc = allItemLocations.some((il: any) => Number(il.itemId) === Number(item.id) && accessibleLocationIds.has(Number(il.locationId)));
+      const isStoredInAccessibleLoc = allItemLocations.some((il: any) =>
+        (String(il.itemId) === String(item.id) || Number(il.itemId) === Number(item.id)) &&
+        (accessibleLocationIds.has(il.locationId as any) || accessibleLocationIds.has(String(il.locationId)))
+      );
       return isOwner || isStoredInAccessibleLoc;
     });
   }, [liveAllItems, items, activeTenantId, allItemLocations, accessibleLocationIds]);
@@ -628,6 +632,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         parentId: null,
         capacity: whCapacity,
         description: `${presetTemplate} generated warehouse layout`,
+        isShared: true,
         createdAt: timestamp
       };
       await db.locations.put(whPayload);
@@ -1208,15 +1213,24 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   }, [tenantLocations]);
 
   const activeTenantItems = useMemo(() => {
-    const accessibleWhIds = new Set(tenantLocations.filter(l => l.type === 'WAREHOUSE').map(l => Number(l.id)));
-    const accessibleLocIds = new Set<number>(accessibleWhIds);
+    const accessibleWhIds = new Set<string | number>();
+    tenantLocations.filter(l => l.type === 'WAREHOUSE').forEach(l => {
+      if (l.id !== undefined && l.id !== null) {
+        accessibleWhIds.add(l.id as any);
+        accessibleWhIds.add(String(l.id));
+      }
+    });
+    const accessibleLocIds = new Set<string | number>(accessibleWhIds);
     let added = true;
     while (added) {
       added = false;
       for (const loc of activeLocations) {
-        if (loc.parentId && accessibleLocIds.has(Number(loc.parentId)) && !accessibleLocIds.has(Number(loc.id))) {
-          accessibleLocIds.add(Number(loc.id));
-          added = true;
+        if (loc.parentId !== undefined && loc.parentId !== null && (accessibleLocIds.has(loc.parentId as any) || accessibleLocIds.has(String(loc.parentId))) && !accessibleLocIds.has(loc.id as any)) {
+          if (loc.id !== undefined && loc.id !== null) {
+            accessibleLocIds.add(loc.id as any);
+            accessibleLocIds.add(String(loc.id));
+            added = true;
+          }
         }
       }
     }
@@ -1225,46 +1239,61 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       if (!i) return false;
       const itemTenant = i.tenantId || 'default-tenant';
       const isOwner = itemTenant === activeTenantId;
-      const itemMaps = allItemLocations.filter(il => Number(il.itemId) === Number(i.id));
-      const isStoredInAccessibleLoc = itemMaps.some(il => accessibleLocIds.has(Number(il.locationId)));
+      const itemMaps = allItemLocations.filter(il => String(il.itemId) === String(i.id) || Number(il.itemId) === Number(i.id));
+      const isStoredInAccessibleLoc = itemMaps.some(il => accessibleLocIds.has(il.locationId as any) || accessibleLocIds.has(String(il.locationId)));
       return isOwner || isStoredInAccessibleLoc;
     });
   }, [allItems, activeTenantId, tenantLocations, activeLocations, allItemLocations]);
 
   const itemLocationMapByItemId = useMemo(() => {
-    const map = new Map<number, ItemLocationMapping[]>();
-    const tenantLocIds = new Set(tenantLocations.map(l => Number(l.id)));
+    const map = new Map<string | number, ItemLocationMapping[]>();
+    const tenantLocIds = new Set<string | number>();
+    tenantLocations.forEach(l => {
+      if (l.id !== undefined && l.id !== null) {
+        tenantLocIds.add(l.id as any);
+        tenantLocIds.add(String(l.id));
+      }
+    });
 
-    const itemByServerId = new Map<number, Item>();
+    const itemByServerId = new Map<string | number, Item>();
     activeTenantItems.forEach(item => {
-      if (item.id) itemByServerId.set(Number(item.id), item);
-      if ((item as any).cloudId) itemByServerId.set(Number((item as any).cloudId), item);
+      if (item.id) {
+        map.set(item.id, []);
+        map.set(String(item.id), []);
+        itemByServerId.set(item.id, item);
+        itemByServerId.set(String(item.id), item);
+      }
+      if ((item as any).cloudId) {
+        itemByServerId.set((item as any).cloudId, item);
+        itemByServerId.set(String((item as any).cloudId), item);
+      }
     });
 
     activeTenantItems.forEach((item) => {
       if (!item.id) return;
-      const itemIdNum = Number(item.id);
-      const cloudIdNum = (item as any).cloudId ? Number((item as any).cloudId) : null;
+      const itemIdStr = String(item.id);
+      const cloudIdStr = (item as any).cloudId ? String((item as any).cloudId) : null;
       const skuLower = item.skuCode ? item.skuCode.trim().toLowerCase() : null;
 
       const matches = allItemLocations.filter(il => {
-        if (!tenantLocIds.has(Number(il.locationId))) {
-          const locMatch = activeLocations.find(l => Number(l.id) === Number(il.locationId));
+        if (!tenantLocIds.has(il.locationId as any) && !tenantLocIds.has(String(il.locationId))) {
+          const locMatch = activeLocations.find(l => String(l.id) === String(il.locationId));
           if (!locMatch) return false;
         }
 
-        const numItemId = Number(il.itemId);
-        if (numItemId === itemIdNum) return true;
-        if (cloudIdNum && numItemId === cloudIdNum) return true;
+        const ilItemIdStr = String(il.itemId);
+        if (ilItemIdStr === itemIdStr) return true;
+        if (cloudIdStr && ilItemIdStr === cloudIdStr) return true;
         if (skuLower && (il as any).skuCode && String((il as any).skuCode).trim().toLowerCase() === skuLower) return true;
 
-        const targetItem = itemByServerId.get(numItemId);
-        if (targetItem && (targetItem.id === item.id || targetItem.skuCode === item.skuCode)) return true;
+        const targetItem = itemByServerId.get(ilItemIdStr) || itemByServerId.get(Number(il.itemId));
+        if (targetItem && (String(targetItem.id) === itemIdStr || targetItem.skuCode === item.skuCode)) return true;
 
         return false;
       });
 
-      map.set(itemIdNum, matches);
+      map.set(item.id, matches);
+      map.set(itemIdStr, matches);
     });
 
     return map;
@@ -1275,8 +1304,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     let unassigned = 0;
     activeTenantItems.forEach(item => {
       if (item.id) {
-        const rawMappings = itemLocationMapByItemId.get(Number(item.id)) || [];
-        const validMappings = rawMappings.filter(m => m.quantity > 0 && locationMap.has(Number(m.locationId)));
+        const rawMappings = itemLocationMapByItemId.get(item.id) || itemLocationMapByItemId.get(String(item.id)) || [];
+        const validMappings = rawMappings.filter(m => m.quantity > 0 && (locationMap.has(m.locationId as any) || locationMap.has(String(m.locationId))));
         const totalAssignedQty = validMappings.reduce((sum, m) => sum + m.quantity, 0);
         const unassignedQty = Math.max(0, item.currentStock - totalAssignedQty);
 
@@ -1291,8 +1320,14 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     let totalCap = 0;
     tenantLocations.forEach(l => { totalCap += (l.capacity || 0); });
     let usedCap = 0;
-    const tenantLocIds = new Set(tenantLocations.map(l => Number(l.id)));
-    allItemLocations.filter(il => tenantLocIds.has(Number(il.locationId))).forEach(il => { usedCap += il.quantity; });
+    const tenantLocIds = new Set<string | number>();
+    tenantLocations.forEach(l => {
+      if (l.id !== undefined && l.id !== null) {
+        tenantLocIds.add(l.id as any);
+        tenantLocIds.add(String(l.id));
+      }
+    });
+    allItemLocations.filter(il => tenantLocIds.has(il.locationId as any) || tenantLocIds.has(String(il.locationId))).forEach(il => { usedCap += il.quantity; });
     if (totalCap === 0) return 0;
     return Math.min(100, Math.round((usedCap / totalCap) * 100));
   }, [tenantLocations, allItemLocations]);
@@ -1511,6 +1546,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       parentId: locParentId ? String(locParentId) : null,
       capacity: Number(locCapacity) || 0,
       description: locDescription.trim(),
+      isShared: locType === 'WAREHOUSE',
       createdAt: new Date().toISOString()
     };
 

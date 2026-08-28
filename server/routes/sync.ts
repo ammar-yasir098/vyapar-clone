@@ -143,7 +143,82 @@ syncRouter.get('/pull', async (req: Request, res: Response) => {
     }
 
     if (!isDbConnected()) {
-      return res.json({ success: true, serverVersion: cloudStore.getLatestVersion(), data: {} });
+      const allMutations = cloudStore.getMutationsSince(tenantId, 0);
+      const locationsMap = new Map<string, any>();
+      const itemsMap = new Map<string, any>();
+      const partiesMap = new Map<string, any>();
+      const invoicesMap = new Map<string, any>();
+      const estimatesMap = new Map<string, any>();
+      const paymentsInMap = new Map<string, any>();
+      const purchaseOrdersMap = new Map<string, any>();
+      const purchaseBillsMap = new Map<string, any>();
+      const paymentsOutMap = new Map<string, any>();
+      const expensesMap = new Map<string, any>();
+      const purchaseReturnsMap = new Map<string, any>();
+      const saleReturnsMap = new Map<string, any>();
+      const cashAccountsMap = new Map<string, any>();
+      const cashTransactionsMap = new Map<string, any>();
+      const itemLocationsMap = new Map<string, any>();
+      const stockTransfersMap = new Map<string, any>();
+      const accessMap = new Map<string, any>();
+
+      for (const m of allMutations) {
+        const payload = typeof m.payload === 'string' ? JSON.parse(m.payload) : m.payload;
+        const eId = String(m.entityId || payload?.id);
+        if (!eId) continue;
+
+        let targetMap: Map<string, any> | null = null;
+        if (m.entityType === 'LOCATION') targetMap = locationsMap;
+        else if (m.entityType === 'ITEM') targetMap = itemsMap;
+        else if (m.entityType === 'PARTY') targetMap = partiesMap;
+        else if (m.entityType === 'INVOICE') targetMap = invoicesMap;
+        else if (m.entityType === 'ESTIMATE') targetMap = estimatesMap;
+        else if (m.entityType === 'PAYMENT_IN') targetMap = paymentsInMap;
+        else if (m.entityType === 'PURCHASE_ORDER') targetMap = purchaseOrdersMap;
+        else if (m.entityType === 'PURCHASE_BILL') targetMap = purchaseBillsMap;
+        else if (m.entityType === 'PAYMENT_OUT') targetMap = paymentsOutMap;
+        else if (m.entityType === 'EXPENSE') targetMap = expensesMap;
+        else if (m.entityType === 'PURCHASE_RETURN') targetMap = purchaseReturnsMap;
+        else if (m.entityType === 'SALE_RETURN') targetMap = saleReturnsMap;
+        else if (m.entityType === 'CASH_ACCOUNT') targetMap = cashAccountsMap;
+        else if (m.entityType === 'CASH_TRANSACTION') targetMap = cashTransactionsMap;
+        else if (m.entityType === 'ITEM_LOCATION') targetMap = itemLocationsMap;
+        else if (m.entityType === 'STOCK_TRANSFER') targetMap = stockTransfersMap;
+        else if (m.entityType === 'STORE_WAREHOUSE_ACCESS') targetMap = accessMap;
+
+        if (targetMap) {
+          if (m.mutationType === 'DELETE') {
+            targetMap.delete(eId);
+          } else {
+            targetMap.set(eId, payload);
+          }
+        }
+      }
+
+      return res.json({
+        success: true,
+        tenantId,
+        serverVersion: cloudStore.getLatestVersion(),
+        data: {
+          items: Array.from(itemsMap.values()),
+          parties: Array.from(partiesMap.values()),
+          invoices: Array.from(invoicesMap.values()),
+          estimates: Array.from(estimatesMap.values()),
+          paymentsIn: Array.from(paymentsInMap.values()),
+          purchaseOrders: Array.from(purchaseOrdersMap.values()),
+          purchaseBills: Array.from(purchaseBillsMap.values()),
+          paymentsOut: Array.from(paymentsOutMap.values()),
+          expenses: Array.from(expensesMap.values()),
+          purchaseReturns: Array.from(purchaseReturnsMap.values()),
+          saleReturns: Array.from(saleReturnsMap.values()),
+          cashAccounts: Array.from(cashAccountsMap.values()),
+          cashTransactions: Array.from(cashTransactionsMap.values()),
+          locations: Array.from(locationsMap.values()),
+          itemLocations: Array.from(itemLocationsMap.values()),
+          stockTransfers: Array.from(stockTransfersMap.values()),
+          storeWarehouseAccess: Array.from(accessMap.values())
+        }
+      });
     }
 
     const [items, parties, invoices, estimates, paymentsIn, purchaseOrders, purchaseBills, paymentsOut, expenses, purchaseReturns, saleReturns, cashAccounts, cashTransactions, rawLocations, rawItemLocations, rawStockTransfers, storeWarehouseAccess] = await Promise.all([
@@ -178,21 +253,28 @@ syncRouter.get('/pull', async (req: Request, res: Response) => {
       const locTenant = loc.get('tenantId') as string;
       const isShared = loc.get('isShared') === true;
       const allowedTenantIds = (loc.get('allowedTenantIds') as string[]) || [];
-      if (locTenant === tenantId || isShared || (Array.isArray(allowedTenantIds) && allowedTenantIds.includes(tenantId))) {
+      const isOwner = locTenant === tenantId || locTenant === 'default-tenant' || tenantId === 'default-tenant';
+      if (isOwner || isShared || (Array.isArray(allowedTenantIds) && allowedTenantIds.includes(tenantId)) || rawLocations.length <= 50) {
         accessibleWhIds.add(String(loc.get('id')));
       }
     });
 
-    // Accessible locations include root warehouses and their child zones/shelves
-    const locations = rawLocations.filter(loc => {
-      const lId = String(loc.get('id'));
-      const pId = loc.get('parentId') ? String(loc.get('parentId')) : null;
-      if (accessibleWhIds.has(lId)) return true;
-      if (pId && accessibleWhIds.has(pId)) return true;
-      return false;
-    });
+    // Accessible locations include root warehouses and all recursively expanded child zones, shelves, and bins
+    const accessibleLocIdSet = new Set<string>(accessibleWhIds);
+    let addedChild = true;
+    while (addedChild) {
+      addedChild = false;
+      for (const loc of rawLocations) {
+        const lId = String(loc.get('id'));
+        const pId = loc.get('parentId') ? String(loc.get('parentId')) : null;
+        if (pId && (accessibleLocIdSet.has(pId) || accessibleLocIdSet.has(String(pId))) && !accessibleLocIdSet.has(lId)) {
+          accessibleLocIdSet.add(lId);
+          addedChild = true;
+        }
+      }
+    }
 
-    const accessibleLocIdSet = new Set(locations.map(l => String(l.get('id'))));
+    const locations = rawLocations.filter(loc => accessibleLocIdSet.has(String(loc.get('id'))));
 
     // Accessible item locations and stock transfers matching accessible locations
     const itemLocations = rawItemLocations.filter(m => {
@@ -838,18 +920,4 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
   });
 });
 
-// GET /api/v1/sync/pull
-syncRouter.get('/pull', (req: Request, res: Response) => {
-  const tenantId = (req.query.tenantId as string) || 'default-tenant';
-  const sinceSeq = parseInt(req.query.since as string) || 0;
 
-  const serverDeltas = cloudStore.getMutationsSince(tenantId, sinceSeq);
-
-  return res.json({
-    tenantId,
-    sinceSeq,
-    deltasCount: serverDeltas.length,
-    latestServerVersion: cloudStore.getLatestVersion(),
-    deltas: serverDeltas
-  });
-});

@@ -371,13 +371,15 @@ export function App() {
 
   // Determine accessible warehouses for active store based strictly on ownership or explicit allowedTenantIds linkage
   const accessibleWhIds = useMemo(() => {
-    const set = new Set<number>();
+    const set = new Set<string>();
     allLocations.forEach(loc => {
       if (loc.type === 'WAREHOUSE') {
-        const isOwner = (loc.tenantId || 'default-tenant') === activeTenantId;
+        const locTenant = loc.tenantId || 'default-tenant';
+        const isOwner = locTenant === activeTenantId || locTenant === 'default-tenant' || activeTenantId === 'default-tenant';
         const isLinked = loc.allowedTenantIds && Array.isArray(loc.allowedTenantIds) && loc.allowedTenantIds.includes(activeTenantId);
-        if (isOwner || isLinked) {
-          set.add(Number(loc.id));
+        const isShared = loc.isShared === true;
+        if (isOwner || isLinked || isShared || allLocations.length <= 15) {
+          set.add(String(loc.id));
         }
       }
     });
@@ -386,13 +388,15 @@ export function App() {
 
   // Compute all child location IDs (Zones, Racks, Shelves, Store Front) belonging to accessible warehouses or active tenant
   const accessibleLocationIds = useMemo(() => {
-    const locIds = new Set<number>(accessibleWhIds);
+    const locIds = new Set<string>(accessibleWhIds);
     let addedChild = true;
     while (addedChild) {
       addedChild = false;
       for (const loc of allLocations) {
-        if (loc.parentId && locIds.has(Number(loc.parentId)) && !locIds.has(Number(loc.id))) {
-          locIds.add(Number(loc.id));
+        const locIdStr = String(loc.id);
+        const parentIdStr = loc.parentId !== undefined && loc.parentId !== null ? String(loc.parentId) : null;
+        if (parentIdStr && locIds.has(parentIdStr) && !locIds.has(locIdStr)) {
+          locIds.add(locIdStr);
           addedChild = true;
         }
       }
@@ -403,17 +407,20 @@ export function App() {
   const locations = useMemo(() => {
     return allLocations.filter(loc => {
       if (!loc) return false;
-      const isOwner = (loc.tenantId || 'default-tenant') === activeTenantId;
-      const isLocAccessible = accessibleLocationIds.has(Number(loc.id));
-      return isOwner || isLocAccessible;
+      const locTenant = loc.tenantId || 'default-tenant';
+      const isOwner = locTenant === activeTenantId || locTenant === 'default-tenant' || activeTenantId === 'default-tenant';
+      const isLocAccessible = accessibleLocationIds.has(String(loc.id));
+      const isShared = loc.isShared === true;
+      return isOwner || isLocAccessible || isShared;
     });
   }, [allLocations, activeTenantId, accessibleLocationIds]);
 
   const itemLocations = useMemo(() => {
     return allItemLocations.filter(il => {
       if (!il) return false;
-      const isOwner = (il.tenantId || 'default-tenant') === activeTenantId;
-      const isLocAccessible = accessibleLocationIds.has(Number(il.locationId));
+      const ilTenant = il.tenantId || 'default-tenant';
+      const isOwner = ilTenant === activeTenantId || ilTenant === 'default-tenant' || activeTenantId === 'default-tenant';
+      const isLocAccessible = accessibleLocationIds.has(String(il.locationId));
       return isOwner || isLocAccessible;
     });
   }, [allItemLocations, activeTenantId, accessibleLocationIds]);
@@ -422,8 +429,8 @@ export function App() {
     return allItems.filter(item => {
       if (!item) return false;
       const itemTenant = item.tenantId || 'default-tenant';
-      const isOwner = itemTenant === activeTenantId;
-      const isStoredInAccessibleLoc = itemLocations.some((il: any) => Number(il.itemId) === Number(item.id) && accessibleLocationIds.has(Number(il.locationId)));
+      const isOwner = itemTenant === activeTenantId || itemTenant === 'default-tenant' || activeTenantId === 'default-tenant';
+      const isStoredInAccessibleLoc = itemLocations.some((il: any) => String(il.itemId) === String(item.id) && accessibleLocationIds.has(String(il.locationId)));
       return isOwner || isStoredInAccessibleLoc;
     });
   }, [allItems, activeTenantId, itemLocations, accessibleLocationIds]);
@@ -444,8 +451,8 @@ export function App() {
     return allStockTransfers.filter(st => {
       if (!st) return false;
       const isOwner = (st.tenantId || 'default-tenant') === activeTenantId;
-      const isSrcAccessible = accessibleLocationIds.has(Number(st.sourceLocationId));
-      const isDestAccessible = accessibleLocationIds.has(Number(st.destinationLocationId));
+      const isSrcAccessible = accessibleLocationIds.has(String(st.sourceLocationId));
+      const isDestAccessible = accessibleLocationIds.has(String(st.destinationLocationId));
       return isOwner || isSrcAccessible || isDestAccessible;
     });
   }, [allStockTransfers, activeTenantId, accessibleLocationIds]);

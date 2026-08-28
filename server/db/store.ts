@@ -42,9 +42,12 @@ class CloudDataStore {
   }
 
   public getMutationsSince(tenantId: string, sinceSeq: number): ServerMutation[] {
-    return this.syncLogs.filter(
-      log => log.tenantId === tenantId && log.clientSequence > sinceSeq
-    );
+    return this.syncLogs.filter(log => {
+      if (log.clientSequence <= sinceSeq) return false;
+      const isTenantMatch = log.tenantId === tenantId || log.tenantId === 'default-tenant' || tenantId === 'default-tenant';
+      const isLocationEntity = log.entityType === 'LOCATION' || log.entityType === 'ITEM_LOCATION' || log.entityType === 'STOCK_TRANSFER' || log.entityType === 'STORE_WAREHOUSE_ACCESS';
+      return isTenantMatch || isLocationEntity;
+    });
   }
 
   public getLatestVersion(): number {

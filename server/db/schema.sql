@@ -163,11 +163,54 @@ CREATE TABLE IF NOT EXISTS payment_in (
 
 -- 10. STORE WAREHOUSE ACCESS PERMISSIONS
 CREATE TABLE IF NOT EXISTS store_warehouse_access (
-    id VARCHAR(64) PRIMARY KEY,
+    id VARCHAR(255) PRIMARY KEY,
     tenant_id VARCHAR(64) NOT NULL DEFAULT 'default-tenant',
-    store_id VARCHAR(64) NOT NULL,
-    warehouse_id VARCHAR(64) NOT NULL,
+    store_id VARCHAR(255) NOT NULL,
+    warehouse_id VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 11. INVENTORY LOCATIONS (WAREHOUSES, ZONES, SHELVES, BINS)
+CREATE TABLE IF NOT EXISTS inventory_locations (
+    id VARCHAR(255) PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default-tenant',
+    name VARCHAR(255) NOT NULL,
+    code VARCHAR(64) NOT NULL,
+    type VARCHAR(32) DEFAULT 'WAREHOUSE',
+    parent_id VARCHAR(255),
+    capacity INT DEFAULT 500,
+    description TEXT,
+    is_shared BOOLEAN DEFAULT FALSE,
+    allowed_tenant_ids JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 12. ITEM LOCATION MAPPINGS
+CREATE TABLE IF NOT EXISTS item_location_mappings (
+    id VARCHAR(255) PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default-tenant',
+    item_id VARCHAR(255) NOT NULL,
+    location_id VARCHAR(255) NOT NULL,
+    quantity NUMERIC(12,2) DEFAULT 0.00,
+    max_capacity NUMERIC(12,2) DEFAULT 100.00,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 13. STOCK TRANSFERS
+CREATE TABLE IF NOT EXISTS stock_transfers (
+    id VARCHAR(255) PRIMARY KEY,
+    transfer_number VARCHAR(64) NOT NULL,
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default-tenant',
+    source_location_id VARCHAR(255) NOT NULL,
+    destination_location_id VARCHAR(255) NOT NULL,
+    item_id VARCHAR(255) NOT NULL,
+    quantity NUMERIC(12,2) NOT NULL DEFAULT 1.00,
+    transfer_date DATE NOT NULL,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- MULTI-TENANT PERFORMANCE INDEXES
@@ -176,6 +219,7 @@ CREATE INDEX IF NOT EXISTS idx_parties_tenant_id ON parties(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant_id ON invoices(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_estimates_tenant_id ON estimates(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_payment_in_tenant_id ON payment_in(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_locations_tenant_id ON inventory_locations(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_store_wh_access_tenant_store ON store_warehouse_access(tenant_id, store_id);
 CREATE INDEX IF NOT EXISTS idx_store_wh_access_store_wh ON store_warehouse_access(store_id, warehouse_id);
 

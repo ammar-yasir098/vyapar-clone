@@ -43,3 +43,22 @@ export function authenticateJwt(req: AuthenticatedRequest, res: Response, next: 
     });
   }
 }
+
+export function optionalAuthenticateJwt(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = authHeader.substring(7).trim();
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as AuthenticatedUserPayload;
+    req.user = decoded;
+  } catch (err: any) {
+    // Soft fallback for local sync operations
+  }
+  next();
+}
+

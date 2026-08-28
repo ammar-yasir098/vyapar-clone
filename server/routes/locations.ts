@@ -12,8 +12,9 @@ export async function cleanupDuplicateLocations() {
     const duplicateIds: (string | number)[] = [];
 
     for (const l of allLocs) {
+      if (!l.code || String(l.code).trim() === '') continue;
       const tenantKey = l.tenantId || 'default-tenant';
-      const key = `${tenantKey}_${l.code}_${l.type}`;
+      const key = `${tenantKey}_${String(l.code).trim().toLowerCase()}_${l.type}`;
       if (seen.has(key)) {
         duplicateIds.push(l.id);
       } else {
@@ -101,11 +102,11 @@ locationsRouter.post('/', async (req: Request, res: Response) => {
 // DELETE /api/v1/locations/:id — Delete a location
 locationsRouter.delete('/:id', async (req: Request, res: Response) => {
   try {
-    const id = Number(req.params.id);
+    const id = req.params.id;
     if (!id) return res.status(400).json({ success: false, error: 'Invalid location ID' });
 
-    await InventoryLocation.destroy({ where: { parentId: id } });
-    await InventoryLocation.destroy({ where: { id } });
+    await InventoryLocation.destroy({ where: { parentId: String(id) } });
+    await InventoryLocation.destroy({ where: { id: String(id) } });
 
     return res.json({ success: true });
   } catch (err: any) {
@@ -124,10 +125,10 @@ locationsRouter.get('/mappings', async (req: Request, res: Response) => {
     // Auto-heal mismatched item_id entries & prune invalid location_id rows (e.g., location 7, 51)
     const dbItems = await Item.findAll({ where: { tenantId }, order: [['id', 'ASC']] });
     const dbLocs = await InventoryLocation.findAll();
-    const validLocationIds = new Set(dbLocs.map(l => l.id));
+    const validLocationIds = new Set<string | number>(dbLocs.map(l => l.id));
 
     if (mappings.length > 0) {
-      const validItemIds = new Set(dbItems.map(i => i.id));
+      const validItemIds = new Set<string | number>(dbItems.map(i => i.id));
       let needsRefetch = false;
 
       for (let idx = 0; idx < mappings.length; idx++) {
@@ -164,36 +165,45 @@ locationsRouter.get('/mappings', async (req: Request, res: Response) => {
 locationsRouter.post('/mappings', async (req: Request, res: Response) => {
   try {
     const tenantId = req.body.tenantId || (req as any).user?.tenantId || 'default-tenant';
-    const { itemId, skuCode, name, locationId, locationCode, quantity, maxCapacity } = req.body;
-    let numItemId = Number(itemId);
-    let numLocId = Number(locationId);
+    const { id, itemId, skuCode, name, locationId, locationCode, quantity, maxCapacity } = req.body;
+    let targetItemId: string | number = itemId;
+    let targetLocId: string | number = locationId;
 
     // Resolve real PostgreSQL locationId if local Dexie locationId differs
     if (locationCode) {
       const foundLoc = await InventoryLocation.findOne({ where: { code: locationCode } });
-      if (foundLoc) numLocId = foundLoc.id;
+      if (foundLoc) targetLocId = foundLoc.id;
     }
 
     // Resolve real PostgreSQL itemId for this store tenant
     const dbItems = await Item.findAll({ where: { tenantId }, order: [['id', 'ASC']] });
     if (dbItems.length > 0) {
-      let found = dbItems.find(i => i.id === numItemId);
+      let found = dbItems.find(i => String(i.id) === String(targetItemId) || i.id === targetItemId);
       if (!found && skuCode) found = dbItems.find(i => i.skuCode === skuCode);
       if (!found && name) found = dbItems.find(i => i.name === name);
-      if (found) numItemId = found.id;
+      if (found) targetItemId = found.id;
     }
 
-    let mapping = await ItemLocationMapping.findOne({
-      where: { tenantId, itemId: numItemId, locationId: numLocId }
-    });
+    const mappingId = id ? String(id) : `map-${targetItemId}-${targetLocId}`;
+    let mapping = await ItemLocationMapping.findByPk(mappingId);
+
+    if (!mapping) {
+      mapping = await ItemLocationMapping.findOne({
+        where: { tenantId, itemId: targetItemId, locationId: targetLocId }
+      });
+    }
 
     if (mapping) {
-      await mapping.update({ quantity: Number(quantity) || 0, maxCapacity: Number(maxCapacity) || 100 });
+      await mapping.update({
+        quantity: Number(quantity) || 0,
+        maxCapacity: Number(maxCapacity) || 100
+      });
     } else {
       mapping = await ItemLocationMapping.create({
+        id: mappingId,
         tenantId,
-        itemId: numItemId,
-        locationId: numLocId,
+        itemId: targetItemId,
+        locationId: targetLocId,
         quantity: Number(quantity) || 0,
         maxCapacity: Number(maxCapacity) || 100
       });

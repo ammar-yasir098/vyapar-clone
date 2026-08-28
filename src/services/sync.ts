@@ -19,6 +19,20 @@ export class ClientSyncManager {
   private lastSyncedAt?: string;
   private listeners: Set<Listener> = new Set();
 
+  constructor() {
+    if (typeof window !== 'undefined') {
+      setInterval(() => {
+        this.triggerSync().catch(() => {});
+        this.pullServerChanges().catch(() => {});
+      }, 5000);
+
+      window.addEventListener('focus', () => {
+        this.triggerSync().catch(() => {});
+        this.pullServerChanges().catch(() => {});
+      });
+    }
+  }
+
   public subscribe(listener: Listener) {
     this.listeners.add(listener);
     this.notify();
