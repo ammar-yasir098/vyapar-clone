@@ -14,7 +14,7 @@ export interface SyncStatus {
 
 type Listener = (status: SyncStatus) => void;
 
-class ClientSyncManager {
+export class ClientSyncManager {
   private isSyncing = false;
   private lastSyncedAt?: string;
   private listeners: Set<Listener> = new Set();
@@ -41,9 +41,30 @@ class ClientSyncManager {
   /**
    * Logs a local mutation to the sync journal queue.
    */
-  /**
-   * Logs a local mutation to the sync journal queue.
-   */
+  public static async logMutation(
+    entityType: SyncJournal['entityType'],
+    entityId: string,
+    mutationType: 'INSERT' | 'UPDATE' | 'DELETE',
+    payload: any
+  ): Promise<void> {
+    const journalRecord: SyncJournal = {
+      versionId: `client-v-${Date.now()}`,
+      clientSequence: Date.now(),
+      entityType,
+      entityId,
+      mutationType,
+      payload: JSON.stringify(payload),
+      timestamp: new Date().toISOString(),
+      synced: false
+    };
+
+    await db.syncJournal.add(journalRecord);
+    if (typeof syncManager !== 'undefined' && syncManager) {
+      syncManager.notify();
+      syncManager.triggerSync();
+    }
+  }
+
   public async logMutation(
     entityType: SyncJournal['entityType'],
     entityId: string,
@@ -152,7 +173,11 @@ class ClientSyncManager {
         purchaseReturns,
         saleReturns,
         cashAccounts,
-        cashTransactions
+        cashTransactions,
+        locations,
+        itemLocations,
+        stockTransfers,
+        storeWarehouseAccess
       } = json.data;
 
       // 1. Merge items safely with non-empty SKU or case-insensitive name match
@@ -160,6 +185,7 @@ class ClientSyncManager {
         for (const sItem of items) {
           const sTenant = sItem.tenantId || activeTenantId;
           if (sTenant !== activeTenantId) continue;
+          const sId = Number(sItem.id);
 
           const skuMatch = sItem.skuCode && sItem.skuCode.trim() !== '';
           const nameMatch = sItem.name && sItem.name.trim() !== '';
@@ -168,6 +194,8 @@ class ClientSyncManager {
             .filter(i => {
               const tMatch = (i.tenantId || 'default-tenant') === activeTenantId;
               if (!tMatch) return false;
+              if (sId && Number(i.id) === sId) return true;
+              if ((i as any).cloudId && Number((i as any).cloudId) === sId) return true;
               if (skuMatch && i.skuCode && i.skuCode.trim().toLowerCase() === sItem.skuCode.trim().toLowerCase()) return true;
               if (nameMatch && i.name && i.name.trim().toLowerCase() === sItem.name.trim().toLowerCase()) return true;
               return false;
@@ -175,10 +203,9 @@ class ClientSyncManager {
             .first();
 
           if (existing && existing.id) {
-            await db.items.update(existing.id, { ...sItem, id: existing.id, tenantId: activeTenantId });
+            await db.items.update(existing.id, { ...sItem, id: existing.id, cloudId: sId, tenantId: activeTenantId });
           } else {
-            const { id, ...itemData } = sItem;
-            await db.items.add({ ...itemData, tenantId: activeTenantId });
+            await db.items.put({ ...sItem, id: sId, cloudId: sId, tenantId: activeTenantId });
           }
         }
       }
@@ -458,6 +485,172 @@ class ClientSyncManager {
         }
       }
 
+      // 14. Merge inventory locations (warehouses, zones, shelves)
+      if (Array.isArray(locations) && locations.length > 0) {
+        for (const sLoc of locations) {
+          const locId = sLoc.id ? String(sLoc.id) : `wh-${Date.now()}`;
+          const sTenant = sLoc.tenantId || activeTenantId;
+          const locCode = sLoc.code ? sLoc.code.trim().toUpperCase() : null;
+          
+          const existing = await db.locations
+            .filter(l => {
+              if (l.id && String(l.id) === locId) return true;
+              if (locCode && l.code && l.code.trim().toUpperCase() === locCode && (l.tenantId || 'default-tenant') === sTenant) return true;
+              return false;
+            })
+            .first();
+
+          if (existing && existing.id && String(existing.id) !== locId) {
+            await db.locations.delete(existing.id);
+          }
+
+          await db.locations.put({
+            ...sLoc,
+            id: locId,
+            parentId: sLoc.parentId ? String(sLoc.parentId) : null,
+            tenantId: sTenant
+          });
+        }
+      }
+
+      // 15. Merge item location mappings
+      if (Array.isArray(itemLocations) && itemLocations.length > 0) {
+        for (const sMap of itemLocations) {
+          const mapId = sMap.id ? String(sMap.id) : `map-${sMap.itemId}-${sMap.locationId}`;
+          const sTenant = sMap.tenantId || activeTenantId;
+          const itemId = String(sMap.itemId);
+          const locationId = String(sMap.locationId);
+
+          await db.itemLocations.put({
+            ...sMap,
+            id: mapId,
+            tenantId: sTenant,
+            itemId,
+            locationId,
+            quantity: Number(sMap.quantity) || 0
+          });
+        }
+      }
+
+      // 16. Merge stock transfers (Idempotent put by UUID)
+      if (Array.isArray(stockTransfers) && stockTransfers.length > 0) {
+        for (const sTrf of stockTransfers) {
+          const trfId = sTrf.id ? String(sTrf.id) : `trf-${Date.now()}`;
+          const trfNum = sTrf.transferNumber || sTrf.transfer_number || `TRF-${Date.now()}`;
+          const sTenant = sTrf.tenantId || activeTenantId;
+
+          await db.stockTransfers.put({
+            ...sTrf,
+            id: trfId,
+            transferNumber: trfNum,
+            tenantId: sTenant,
+            sourceLocationId: String(sTrf.sourceLocationId || sTrf.source_location_id),
+            destinationLocationId: String(sTrf.destinationLocationId || sTrf.destination_location_id),
+            itemId: String(sTrf.itemId || sTrf.item_id),
+            quantity: Number(sTrf.quantity) || 1,
+            transferDate: sTrf.transferDate || sTrf.transfer_date || new Date().toISOString().split('T')[0]
+          });
+        }
+      }
+
+      // 17. Merge store warehouse access links
+      if (Array.isArray(storeWarehouseAccess) && storeWarehouseAccess.length > 0) {
+        for (const sAcc of storeWarehouseAccess) {
+          const accId = sAcc.id ? String(sAcc.id) : `access-${sAcc.storeId}-${sAcc.warehouseId}`;
+          const sTenant = sAcc.tenantId || activeTenantId;
+          await db.storeWarehouseAccess.put({
+            ...sAcc,
+            id: accId,
+            tenantId: sTenant,
+            storeId: String(sAcc.storeId),
+            warehouseId: String(sAcc.warehouseId)
+          });
+        }
+      }
+
+      // 17. Server Deletion Reconciliation: Purge local records for active store tenant if deleted on server
+      try {
+        const pendingJournal = await db.syncJournal.toArray();
+        const pendingIdsByTable = new Map<string, Set<string>>();
+        for (const j of pendingJournal) {
+          if (!j.synced) {
+            const tableKey = j.entityType;
+            if (!pendingIdsByTable.has(tableKey)) pendingIdsByTable.set(tableKey, new Set());
+            pendingIdsByTable.get(tableKey)!.add(String(j.entityId));
+          }
+        }
+
+        // Reconcile Items
+        if (Array.isArray(items)) {
+          const sSkus = new Set(items.map(i => (i.skuCode || '').trim().toLowerCase()).filter(Boolean));
+          const sNames = new Set(items.map(i => (i.name || '').trim().toLowerCase()).filter(Boolean));
+          const pendingItemIds = pendingIdsByTable.get('ITEM') || new Set();
+
+          const localItems = await db.items.filter(i => (i.tenantId || 'default-tenant') === activeTenantId).toArray();
+          const staleItemIds = localItems
+            .filter(i => {
+              if (!i.id) return false;
+              if (pendingItemIds.has(String(i.id))) return false;
+              const sku = (i.skuCode || '').trim().toLowerCase();
+              const name = (i.name || '').trim().toLowerCase();
+              const inSkus = sku && sSkus.has(sku);
+              const inNames = name && sNames.has(name);
+              return !inSkus && !inNames;
+            })
+            .map(i => Number(i.id));
+
+          if (staleItemIds.length > 0) {
+            await db.items.bulkDelete(staleItemIds);
+          }
+        }
+
+        // Reconcile Parties
+        if (Array.isArray(parties)) {
+          const sPartyNames = new Set(parties.map(p => (p.name || '').trim().toLowerCase()).filter(Boolean));
+          const pendingPartyIds = pendingIdsByTable.get('PARTY') || new Set();
+
+          const localParties = await db.parties.filter(p => (p.tenantId || 'default-tenant') === activeTenantId).toArray();
+          const stalePartyIds = localParties
+            .filter(p => {
+              if (!p.id) return false;
+              if (pendingPartyIds.has(String(p.id))) return false;
+              const pName = (p.name || '').trim().toLowerCase();
+              return pName && !sPartyNames.has(pName);
+            })
+            .map(p => Number(p.id));
+
+          if (stalePartyIds.length > 0) {
+            await db.parties.bulkDelete(stalePartyIds);
+          }
+        }
+
+        // Reconcile Invoices
+        if (Array.isArray(invoices)) {
+          const sInvNums = new Set(invoices.map(i => (i.invoiceNumber || i.invoice_number || '').trim().toLowerCase()).filter(Boolean));
+          const sInvIds = new Set(invoices.map(i => (i.invoiceId || i.invoice_id || '').trim().toLowerCase()).filter(Boolean));
+          const pendingInvIds = pendingIdsByTable.get('INVOICE') || new Set();
+
+          const localInvoices = await db.invoices.filter(i => (i.tenantId || 'default-tenant') === activeTenantId).toArray();
+          const staleInvIds = localInvoices
+            .filter(i => {
+              if (!i.id) return false;
+              if (pendingInvIds.has(String(i.id))) return false;
+              const num = (i.invoiceNumber || '').trim().toLowerCase();
+              const idStr = (i.invoiceId || '').trim().toLowerCase();
+              const inNums = num && sInvNums.has(num);
+              const inIds = idStr && sInvIds.has(idStr);
+              return !inNums && !inIds;
+            })
+            .map(i => Number(i.id));
+
+          if (staleInvIds.length > 0) {
+            await db.invoices.bulkDelete(staleInvIds);
+          }
+        }
+      } catch (reconcileErr) {
+        console.warn('Deletion reconciliation error during pull:', reconcileErr);
+      }
+
       // Automatically purge local duplicates & cross-tenant leaks after pulling server changes
       await deduplicateLocalDatabase();
     } catch (err) {
@@ -598,13 +791,24 @@ export async function deduplicateLocalDatabase() {
     }
     if (dupCashAccIds.length > 0) await db.cashAccounts.bulkDelete(dupCashAccIds);
 
-    // 5. Deduplicate Item Location Mappings by (tenantId, itemId, locationId)
+    // 5. Deduplicate Item Location Mappings by (tenantId, itemId/skuCode, locationId)
     const mappings = await db.itemLocations.toArray();
+    const allLocalItems = await db.items.toArray();
+    const itemSkuMap = new Map<number, string>();
+    allLocalItems.forEach(i => {
+      if (i.id && i.skuCode) itemSkuMap.set(Number(i.id), i.skuCode.trim().toLowerCase());
+      if ((i as any).cloudId && i.skuCode) itemSkuMap.set(Number((i as any).cloudId), i.skuCode.trim().toLowerCase());
+    });
+
     const seenMappings = new Set<string>();
     const dupMappingIds: number[] = [];
+
     for (const m of mappings) {
       const tId = m.tenantId || 'default-tenant';
-      const key = `${tId}_item_${m.itemId}_loc_${m.locationId}`;
+      const sku = (m as any).skuCode ? String((m as any).skuCode).trim().toLowerCase() : itemSkuMap.get(Number(m.itemId));
+      const productKey = sku ? `sku_${sku}` : `item_${m.itemId}`;
+      const key = `${tId}_${productKey}_loc_${m.locationId}`;
+
       if (seenMappings.has(key)) {
         if (m.id) dupMappingIds.push(Number(m.id));
       } else {

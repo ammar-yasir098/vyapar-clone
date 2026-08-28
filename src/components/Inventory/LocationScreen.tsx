@@ -36,7 +36,8 @@ import {
   StockTransfer,
   LocationType
 } from '../../types';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
+import { ClientSyncManager } from '../../services/sync';
 import { saveServerLocation, deleteServerLocation, saveServerItemLocation, createServerStockTransfer } from '../../services/api';
 import { useToast } from '../Common/ToastContext';
 import { seed100SampleItems } from '../../utils/sampleDataSeeder';
@@ -62,7 +63,6 @@ export const getAccessibleWarehouses = (
 };
 
 import { useLiveQuery } from 'dexie-react-hooks';
-import { getActiveTenantId } from '../../db';
 
 export const LocationScreen: React.FC<LocationScreenProps> = ({
   items,
@@ -78,41 +78,54 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   const [barcodeSearch, setBarcodeSearch] = useState('');
   const [selectedWarehouseFilter, setSelectedWarehouseFilter] = useState<string>('ALL');
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
-  const [primaryWarehouseId, setPrimaryWarehouseId] = useState<number | null>(null);
+  const [primaryWarehouseId, setPrimaryWarehouseId] = useState<string | number | null>(null);
   const activeTenantId = getActiveTenantId(business);
 
   // Real-time Dexie Live Queries for Immediate Reactive UI Updating
   const liveAllItemLocations = useLiveQuery(() => db.itemLocations.toArray(), []);
   const liveAllItems = useLiveQuery(() => db.items.toArray(), []);
   const liveAllLocations = useLiveQuery(() => db.locations.toArray(), []);
+  const liveStoreAccess = useLiveQuery(() => db.storeWarehouseAccess.toArray(), []);
 
-  // Compute accessible warehouses for active store based strictly on ownership or explicit allowedTenantIds linkage
+  // Compute accessible warehouses for active store based strictly on ownership, allowedTenantIds, or storeWarehouseAccess table
   const accessibleWhIds = useMemo(() => {
-    const set = new Set<number>();
+    const set = new Set<string | number>();
+    const accessWhSet = new Set<string>();
+    if (liveStoreAccess && liveStoreAccess.length > 0) {
+      liveStoreAccess.forEach(acc => {
+        if (acc.storeId === activeTenantId) accessWhSet.add(String(acc.warehouseId));
+      });
+    }
     const rawLocs = liveAllLocations && liveAllLocations.length > 0 ? liveAllLocations : locations;
     rawLocs.forEach(loc => {
       if (loc.type === 'WAREHOUSE') {
         const locTenant = loc.tenantId || 'default-tenant';
+        const locIdStr = String(loc.id);
         const isOwner = locTenant === activeTenantId;
-        const isLinked = loc.allowedTenantIds && Array.isArray(loc.allowedTenantIds) && loc.allowedTenantIds.includes(activeTenantId);
+        const isLinked = (loc.allowedTenantIds && Array.isArray(loc.allowedTenantIds) && loc.allowedTenantIds.includes(activeTenantId)) || accessWhSet.has(locIdStr);
         if (isOwner || isLinked) {
-          set.add(Number(loc.id));
+          set.add(loc.id as any);
+          set.add(locIdStr);
+          if (typeof loc.id === 'number') set.add(loc.id);
         }
       }
     });
     return set;
-  }, [liveAllLocations, locations, activeTenantId]);
+  }, [liveAllLocations, locations, liveStoreAccess, activeTenantId]);
 
   const accessibleLocationIds = useMemo(() => {
-    const locIds = new Set<number>(accessibleWhIds);
+    const locIds = new Set<string | number>(accessibleWhIds);
     const rawLocs = liveAllLocations && liveAllLocations.length > 0 ? liveAllLocations : locations;
     let addedChild = true;
     while (addedChild) {
       addedChild = false;
       for (const loc of rawLocs) {
-        if (loc.parentId && locIds.has(Number(loc.parentId)) && !locIds.has(Number(loc.id))) {
-          locIds.add(Number(loc.id));
-          addedChild = true;
+        if (loc.parentId !== undefined && loc.parentId !== null && (locIds.has(loc.parentId as any) || locIds.has(String(loc.parentId))) && !locIds.has(loc.id as any)) {
+          if (loc.id !== undefined && loc.id !== null) {
+            locIds.add(loc.id as any);
+            locIds.add(String(loc.id));
+            addedChild = true;
+          }
         }
       }
     }
@@ -162,8 +175,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
         // Step 1: Deduplicate Warehouses per Tenant
         const warehouses = allLocs.filter(l => l.type === 'WAREHOUSE');
-        const whKeyToKeptId = new Map<string, number>();
-        const duplicateWhIdsToDelete: number[] = [];
+        const whKeyToKeptId = new Map<string, string | number>();
+        const duplicateWhIdsToDelete: (string | number)[] = [];
 
         for (const wh of warehouses) {
           if (!wh.id) continue;
@@ -193,18 +206,28 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
               }
             }
           }
-          await db.locations.bulkDelete(duplicateWhIdsToDelete);
+          await db.locations.bulkDelete(duplicateWhIdsToDelete as any[]);
         }
 
         // Fetch fresh locations after warehouse cleanup
         const freshLocs = await db.locations.toArray();
 
         // Step 2: Delete alien racks that don't belong to the parent warehouse tenant prefix
-        const alienRackIdsToDelete: number[] = [];
-        const whMap = new Map<number, InventoryLocation>();
-        freshLocs.filter(l => l.type === 'WAREHOUSE').forEach(w => whMap.set(w.id!, w));
-        const zoneMap = new Map<number, InventoryLocation>();
-        freshLocs.filter(l => l.type === 'ZONE').forEach(z => zoneMap.set(z.id!, z));
+        const alienRackIdsToDelete: (string | number)[] = [];
+        const whMap = new Map<string | number, InventoryLocation>();
+        freshLocs.filter(l => l.type === 'WAREHOUSE').forEach(w => {
+          if (w.id) {
+            whMap.set(w.id, w);
+            whMap.set(String(w.id), w);
+          }
+        });
+        const zoneMap = new Map<string | number, InventoryLocation>();
+        freshLocs.filter(l => l.type === 'ZONE').forEach(z => {
+          if (z.id) {
+            zoneMap.set(z.id, z);
+            zoneMap.set(String(z.id), z);
+          }
+        });
 
         for (const loc of freshLocs) {
           if (loc.type === 'SHELF' && loc.id && loc.parentId) {
@@ -223,14 +246,14 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         }
 
         if (alienRackIdsToDelete.length > 0) {
-          await db.locations.bulkDelete(alienRackIdsToDelete);
+          await db.locations.bulkDelete(alienRackIdsToDelete as any[]);
         }
 
         // Step 3: Deduplicate Zones within each Warehouse
         const currentLocs = await db.locations.toArray();
         const zones = currentLocs.filter(l => l.type === 'ZONE');
-        const zoneKeyToKeptId = new Map<string, number>();
-        const duplicateZoneIdsToDelete: number[] = [];
+        const zoneKeyToKeptId = new Map<string, string | number>();
+        const duplicateZoneIdsToDelete: (string | number)[] = [];
 
         for (const zone of zones) {
           if (!zone.id || !zone.parentId) continue;
@@ -257,14 +280,14 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
               }
             }
           }
-          await db.locations.bulkDelete(duplicateZoneIdsToDelete);
+          await db.locations.bulkDelete(duplicateZoneIdsToDelete as any[]);
         }
 
         // Step 4: Deduplicate Racks within each Zone & Merge Item Mappings
         const finalLocs = await db.locations.toArray();
         const racks = finalLocs.filter(l => l.type === 'SHELF');
-        const rackKeyToKeptId = new Map<string, number>();
-        const duplicateRackIdsToDelete: number[] = [];
+        const rackKeyToKeptId = new Map<string, string | number>();
+        const duplicateRackIdsToDelete: (string | number)[] = [];
 
         for (const rack of racks) {
           if (!rack.id || !rack.parentId) continue;
@@ -283,7 +306,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
               const key = `z${dupRack.parentId}_${(dupRack.code || dupRack.name).toLowerCase()}`;
               const keptRackId = rackKeyToKeptId.get(key);
               if (keptRackId) {
-                const mapsToMove = allMappings.filter(m => Number(m.locationId) === Number(dupRackId));
+                const mapsToMove = allMappings.filter(m => String(m.locationId) === String(dupRackId));
                 for (const m of mapsToMove) {
                   if (m.id) {
                     await db.itemLocations.update(m.id, { locationId: keptRackId });
@@ -292,14 +315,14 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
               }
             }
           }
-          await db.locations.bulkDelete(duplicateRackIdsToDelete);
+          await db.locations.bulkDelete(duplicateRackIdsToDelete as any[]);
           console.log(`🧹 [DEXIE CLEANUP] Merged & deleted ${duplicateRackIdsToDelete.length} duplicate rack rows from IndexedDB.`);
         }
 
         // Step 5: Purge direct warehouse shelves that already exist inside proper Zones
         const postRacksLocs = await db.locations.toArray();
         const zoneRackCodes = new Set(postRacksLocs.filter(l => l.type === 'SHELF' && zoneMap.has(l.parentId!)).map(l => (l.code || '').toLowerCase()));
-        const directShelfIdsToDelete: number[] = [];
+        const directShelfIdsToDelete: (string | number)[] = [];
 
         for (const loc of postRacksLocs) {
           if (loc.type === 'SHELF' && loc.id && loc.parentId && whMap.has(loc.parentId)) {
@@ -311,7 +334,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         }
 
         if (directShelfIdsToDelete.length > 0) {
-          await db.locations.bulkDelete(directShelfIdsToDelete);
+          await db.locations.bulkDelete(directShelfIdsToDelete as any[]);
           console.log(`🧹 [DEXIE CLEANUP] Purged ${directShelfIdsToDelete.length} direct warehouse shelves.`);
         }
       } catch (err) {
@@ -415,28 +438,37 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
             if (row.storeMapping && row.storeMapping.id) {
               const newStoreQty = (row.storeMapping.quantity || 0) + transferQty;
               await db.itemLocations.update(row.storeMapping.id, { quantity: newStoreQty, updatedAt: new Date().toISOString() });
+              ClientSyncManager.logMutation('ITEM_LOCATION', String(row.storeMapping.id), 'UPDATE', { ...row.storeMapping, quantity: newStoreQty, updatedAt: new Date().toISOString() });
             } else {
-              await db.itemLocations.add({
+              const newMapId = `map-${row.item.id}-${destLocId}`;
+              const mapPayload = {
+                id: newMapId,
                 tenantId,
-                itemId: row.item.id!,
-                locationId: destLocId,
+                itemId: String(row.item.id!),
+                locationId: String(destLocId),
                 quantity: transferQty,
                 updatedAt: new Date().toISOString()
-              });
+              };
+              await db.itemLocations.put(mapPayload);
+              ClientSyncManager.logMutation('ITEM_LOCATION', newMapId, 'INSERT', mapPayload);
             }
 
+            const trfId = `trf-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
             const trfNum = `TRF-${Date.now().toString().slice(-6)}-${count + 1}`;
-            await db.stockTransfers.add({
+            const trfPayload = {
+              id: trfId,
               transferNumber: trfNum,
               tenantId,
-              sourceLocationId: srcLocId,
-              destinationLocationId: destLocId,
-              itemId: row.item.id!,
+              sourceLocationId: String(srcLocId),
+              destinationLocationId: String(destLocId),
+              itemId: String(row.item.id!),
               quantity: transferQty,
               transferDate: new Date().toISOString().split('T')[0],
               notes: 'Batch automated store replenishment from Central Warehouse',
               createdAt: new Date().toISOString()
-            });
+            };
+            await db.stockTransfers.put(trfPayload);
+            ClientSyncManager.logMutation('STOCK_TRANSFER', trfId, 'INSERT', trfPayload);
 
             count++;
           }
@@ -496,7 +528,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     item: Item;
     quantity: number;
     mapping?: ItemLocationMapping;
-    locationId?: number;
+    locationId?: string | number;
   } | null>(null);
 
   // Auto-purge orphaned or zone-level item location mappings from IndexedDB
@@ -586,7 +618,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       const timestamp = new Date().toISOString();
 
       // 1. Create Main Warehouse
+      const whId = `wh-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
       const whPayload = {
+        id: whId,
         tenantId,
         name: whName.trim(),
         code: codeUpper,
@@ -596,8 +630,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         description: `${presetTemplate} generated warehouse layout`,
         createdAt: timestamp
       };
-      const whId = await db.locations.add(whPayload);
-      saveServerLocation({ ...whPayload, id: whId }).catch(() => { });
+      await db.locations.put(whPayload);
+      saveServerLocation(whPayload).catch(() => { });
+      ClientSyncManager.logMutation('LOCATION', whId, 'INSERT', whPayload);
 
       // 2. Create Zones and Racks
       const zoneLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
@@ -605,7 +640,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         const letter = zoneLetters[z % zoneLetters.length] || `Z${z + 1}`;
         const zoneName = `Zone ${letter}`;
         const zoneCode = `${codeUpper}-Z${letter}`;
+        const zoneId = `zone-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
         const zonePayload = {
+          id: zoneId,
           tenantId,
           name: zoneName,
           code: zoneCode,
@@ -615,13 +652,16 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           description: `Zone ${letter} in ${whName}`,
           createdAt: timestamp
         };
-        const zoneId = await db.locations.add(zonePayload);
-        saveServerLocation({ ...zonePayload, id: zoneId }).catch(() => { });
+        await db.locations.put(zonePayload);
+        saveServerLocation(zonePayload).catch(() => { });
+        ClientSyncManager.logMutation('LOCATION', zoneId, 'INSERT', zonePayload);
 
         for (let r = 1; r <= racksPerZone; r++) {
           const rackName = `Rack ${letter}-${r}`;
           const rackCode = `${zoneCode}-R${r}`;
+          const rackId = `rack-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
           const rackPayload = {
+            id: rackId,
             tenantId,
             name: rackName,
             code: rackCode,
@@ -631,8 +671,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
             description: `Rack ${r} in ${zoneName}`,
             createdAt: timestamp
           };
-          const rackId = await db.locations.add(rackPayload);
-          saveServerLocation({ ...rackPayload, id: rackId }).catch(() => { });
+          await db.locations.put(rackPayload);
+          saveServerLocation(rackPayload).catch(() => { });
+          ClientSyncManager.logMutation('LOCATION', rackId, 'INSERT', rackPayload);
         }
       }
 
@@ -645,8 +686,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
   // Auto-allocate unassigned godown stock into available warehouse racks
   const handleAutoAllocateStock = async (targetItem?: Item) => {
-    const itemsToAllocate = targetItem ? [targetItem] : items;
-    const ownWh = tenantLocations.find(l => l.type === 'WAREHOUSE' && (l.tenantId || 'default-tenant') === activeTenantId) || tenantLocations.find(l => l.type === 'WAREHOUSE');
+    const itemsToAllocate = targetItem ? [targetItem] : activeTenantItems;
+    const ownWh = activeLocations.find(l => l.type === 'WAREHOUSE' && (l.tenantId || 'default-tenant') === activeTenantId) || activeLocations.find(l => l.type === 'WAREHOUSE');
 
     if (!ownWh) {
       showToast('Please create a warehouse first before allocating stock to racks.', 'error');
@@ -654,9 +695,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     }
 
     // Find all shelves/racks inside this warehouse
-    const childZones = locations.filter(l => l.type === 'ZONE' && String(l.parentId) === String(ownWh.id));
+    const childZones = activeLocations.filter(l => l.type === 'ZONE' && (String(l.parentId) === String(ownWh.id) || (ownWh.code && l.code.startsWith(ownWh.code + '-'))));
     const zoneIds = new Set(childZones.map(z => String(z.id)));
-    const availableRacks = locations.filter(l => l.type === 'SHELF' && l.id && (zoneIds.has(String(l.parentId)) || String(l.parentId) === String(ownWh.id)));
+    const availableRacks = activeLocations.filter(l => l.type === 'SHELF' && l.id && (zoneIds.has(String(l.parentId)) || String(l.parentId) === String(ownWh.id) || (ownWh.code && l.code.startsWith(ownWh.code + '-'))));
 
     if (availableRacks.length === 0) {
       showToast(`No racks defined in "${ownWh.name}". Use "+ Store Layout Generator" to create racks first.`, 'error');
@@ -670,7 +711,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         if (!item.id || item.currentStock <= 0) continue;
 
         // Check existing assigned qty
-        const existingMaps = await db.itemLocations.filter(il => (il.tenantId || 'default-tenant') === activeTenantId && Number(il.itemId) === Number(item.id)).toArray();
+        const existingMaps = await db.itemLocations.filter(il => (il.tenantId || 'default-tenant') === activeTenantId && (Number(il.itemId) === Number(item.id) || (item.skuCode && (il as any).skuCode && String((il as any).skuCode).toLowerCase() === item.skuCode.toLowerCase()))).toArray();
         const alreadyAssigned = existingMaps.reduce((sum, m) => sum + m.quantity, 0);
         let unassignedToPlace = Math.max(0, item.currentStock - alreadyAssigned);
 
@@ -688,19 +729,27 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
             const existingRackMap = existingMaps.find(m => Number(m.locationId) === Number(rack.id));
 
             if (existingRackMap && existingRackMap.id) {
+              const newQty = existingRackMap.quantity + placeQty;
               await db.itemLocations.update(existingRackMap.id, {
-                quantity: existingRackMap.quantity + placeQty,
+                quantity: newQty,
                 updatedAt: new Date().toISOString()
               });
+              ClientSyncManager.logMutation('ITEM_LOCATION', String(existingRackMap.id), 'UPDATE', { ...existingRackMap, quantity: newQty, updatedAt: new Date().toISOString() });
+              saveServerItemLocation({ tenantId: activeTenantId, itemId: item.id, skuCode: item.skuCode, name: item.name, locationId: rack.id!, locationCode: rack.code, quantity: newQty, maxCapacity: rackCap }).catch(() => { });
             } else {
-              await db.itemLocations.add({
+              const mapId = `map-${item.id}-${rack.id}`;
+              const mapPayload = {
+                id: mapId,
                 tenantId: activeTenantId,
-                itemId: item.id,
-                locationId: rack.id!,
+                itemId: String(item.id!),
+                locationId: String(rack.id!),
                 quantity: placeQty,
                 maxCapacity: rackCap,
                 updatedAt: new Date().toISOString()
-              });
+              };
+              await db.itemLocations.put(mapPayload);
+              ClientSyncManager.logMutation('ITEM_LOCATION', mapId, 'INSERT', mapPayload);
+              saveServerItemLocation({ tenantId: activeTenantId, itemId: item.id, skuCode: item.skuCode, name: item.name, locationId: rack.id!, locationCode: rack.code, quantity: placeQty, maxCapacity: rackCap }).catch(() => { });
             }
 
             unassignedToPlace -= placeQty;
@@ -724,12 +773,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     // Edge Case Guard: Block deletion if active stock exists in location or child racks
     const childLocIds = new Set<number>([Number(loc.id)]);
     if (loc.type === 'WAREHOUSE') {
-      locations.filter(l => Number(l.parentId) === Number(loc.id)).forEach(z => {
+      activeLocations.filter(l => Number(l.parentId) === Number(loc.id)).forEach(z => {
         childLocIds.add(Number(z.id));
-        locations.filter(l => Number(l.parentId) === Number(z.id)).forEach(r => childLocIds.add(Number(r.id)));
+        activeLocations.filter(l => Number(l.parentId) === Number(z.id)).forEach(r => childLocIds.add(Number(r.id)));
       });
     } else if (loc.type === 'ZONE') {
-      locations.filter(l => Number(l.parentId) === Number(loc.id)).forEach(r => childLocIds.add(Number(r.id)));
+      activeLocations.filter(l => Number(l.parentId) === Number(loc.id)).forEach(r => childLocIds.add(Number(r.id)));
     }
 
     const assignedStock = itemLocations
@@ -755,30 +804,30 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       confirmText: 'Delete Location',
       onConfirm: async () => {
         try {
-          const idsToDelete: number[] = [loc.id!];
+          const idsToDelete: (string | number)[] = [loc.id!];
 
           if (loc.type === 'WAREHOUSE') {
-            const childZones = locations.filter(l => String(l.parentId) === String(loc.id));
+            const childZones = activeLocations.filter(l => String(l.parentId) === String(loc.id));
             childZones.forEach(z => {
               if (z.id) idsToDelete.push(z.id);
-              const childRacks = locations.filter(l => String(l.parentId) === String(z.id));
+              const childRacks = activeLocations.filter(l => String(l.parentId) === String(z.id));
               childRacks.forEach(r => {
                 if (r.id && !idsToDelete.includes(r.id)) idsToDelete.push(r.id);
               });
             });
-            const directRacks = locations.filter(l => l.type === 'SHELF' && String(l.parentId) === String(loc.id));
+            const directRacks = activeLocations.filter(l => l.type === 'SHELF' && String(l.parentId) === String(loc.id));
             directRacks.forEach(r => {
               if (r.id && !idsToDelete.includes(r.id)) idsToDelete.push(r.id);
             });
           } else if (loc.type === 'ZONE') {
-            const childRacks = locations.filter(l => String(l.parentId) === String(loc.id));
+            const childRacks = activeLocations.filter(l => String(l.parentId) === String(loc.id));
             childRacks.forEach(r => {
               if (r.id && !idsToDelete.includes(r.id)) idsToDelete.push(r.id);
             });
           }
 
           // Delete from IndexedDB
-          await db.locations.bulkDelete(idsToDelete);
+          await db.locations.bulkDelete(idsToDelete as any[]);
 
           // Delete from Server
           idsToDelete.forEach(id => {
@@ -794,11 +843,11 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   };
 
   // Toggle Global Shared Warehouse Status (Case 2: 1 Central Warehouse for All Stores)
-  const handleToggleGlobalShared = async (whId: number, currentSharedState: boolean) => {
+  const handleToggleGlobalShared = async (whId: string | number, currentSharedState: boolean) => {
     try {
       const newSharedState = !currentSharedState;
       await db.locations.update(whId, { isShared: newSharedState });
-      const targetWh = locations.find(l => Number(l.id) === Number(whId));
+      const targetWh = locations.find(l => String(l.id) === String(whId));
       if (targetWh) {
         saveServerLocation({ ...targetWh, isShared: newSharedState }).catch(() => { });
       }
@@ -809,9 +858,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   };
 
   // Toggle Specific Store Linkage (Case 3: Regional Hubs)
-  const handleToggleStoreLink = async (whId: number, storeTenantId: string) => {
+  const handleToggleStoreLink = async (whId: string | number, storeTenantId: string) => {
     try {
-      const targetWh = locations.find(l => Number(l.id) === Number(whId));
+      const targetWh = locations.find(l => String(l.id) === String(whId));
       if (!targetWh) return;
 
       const currentLinks = targetWh.allowedTenantIds || [];
@@ -830,7 +879,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     }
   };
 
-  const tenantId = business.tenantId || 'default-tenant';
+  const tenantId = activeTenantId;
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   // Click outside & Escape key handler to close search autocomplete dropdown
@@ -859,7 +908,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     const cleanupDuplicates = async () => {
       const allMappings = await db.itemLocations.toArray();
       const seen = new Set<string>();
-      const idsToDelete: number[] = [];
+      const idsToDelete: (string | number)[] = [];
 
       for (const m of allMappings) {
         if (!m.id) continue;
@@ -873,7 +922,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       }
 
       if (idsToDelete.length > 0) {
-        await db.itemLocations.bulkDelete(idsToDelete);
+        await db.itemLocations.bulkDelete(idsToDelete as any[]);
       }
     };
     cleanupDuplicates().catch(() => { });
@@ -1078,17 +1127,22 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
   // Helper maps for location names & paths
   const locationMap = useMemo(() => {
-    const map = new Map<number, InventoryLocation>();
-    activeLocations.forEach(l => { if (l.id) map.set(l.id, l); });
+    const map = new Map<string | number, InventoryLocation>();
+    activeLocations.forEach(l => {
+      if (l.id !== undefined && l.id !== null) {
+        map.set(l.id, l);
+        map.set(String(l.id), l);
+      }
+    });
     return map;
   }, [activeLocations]);
 
-  const getTrueWarehouseName = (locId?: number): string => {
+  const getTrueWarehouseName = (locId?: string | number): string => {
     // 1. Strictly find warehouse CREATED by the active store profile
     const ownWhLoc = activeLocations.find(l => l.type === 'WAREHOUSE' && (l.tenantId || 'default-tenant') === activeTenantId);
 
     // 2. If locId is provided, resolve its true parent warehouse
-    if (locId && locationMap.has(locId)) {
+    if (locId !== undefined && locId !== null && locationMap.has(locId)) {
       let curr = locationMap.get(locId)!;
       while (curr) {
         if (curr.type === 'WAREHOUSE') {
@@ -1098,7 +1152,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           }
           return curr.name;
         }
-        if (curr.parentId && locationMap.has(curr.parentId)) {
+        if (curr.parentId !== undefined && curr.parentId !== null && locationMap.has(curr.parentId)) {
           curr = locationMap.get(curr.parentId)!;
         } else {
           break;
@@ -1110,9 +1164,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     return ownWhLoc ? ownWhLoc.name : 'N/A (No Linked Warehouse)';
   };
 
-  const getLocationFullPath = (locId?: number): { warehouse: string; shelf: string; fullPath: string } => {
+  const getLocationFullPath = (locId?: string | number): { warehouse: string; shelf: string; fullPath: string } => {
     const warehouseName = getTrueWarehouseName(locId);
-    if (!locId || !locationMap.has(locId)) {
+    if (locId === undefined || locId === null || !locationMap.has(locId)) {
       return { warehouse: warehouseName, shelf: 'Unassigned', fullPath: 'Unassigned' };
     }
 
@@ -1120,7 +1174,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     let curr = targetLoc;
     const pathNames: string[] = [curr.name];
 
-    while (curr.parentId && locationMap.has(curr.parentId)) {
+    while (curr.parentId !== undefined && curr.parentId !== null && locationMap.has(curr.parentId)) {
       curr = locationMap.get(curr.parentId)!;
       if (curr.type === 'WAREHOUSE') {
         const trueWhName = getTrueWarehouseName(curr.id);
@@ -1181,19 +1235,31 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     const map = new Map<number, ItemLocationMapping[]>();
     const tenantLocIds = new Set(tenantLocations.map(l => Number(l.id)));
 
-    activeTenantItems.forEach((item, itemIdx) => {
+    const itemByServerId = new Map<number, Item>();
+    activeTenantItems.forEach(item => {
+      if (item.id) itemByServerId.set(Number(item.id), item);
+      if ((item as any).cloudId) itemByServerId.set(Number((item as any).cloudId), item);
+    });
+
+    activeTenantItems.forEach((item) => {
       if (!item.id) return;
       const itemIdNum = Number(item.id);
       const cloudIdNum = (item as any).cloudId ? Number((item as any).cloudId) : null;
-      const skuLower = item.skuCode ? item.skuCode.toLowerCase() : null;
+      const skuLower = item.skuCode ? item.skuCode.trim().toLowerCase() : null;
 
       const matches = allItemLocations.filter(il => {
-        if (!tenantLocIds.has(Number(il.locationId))) return false;
+        if (!tenantLocIds.has(Number(il.locationId))) {
+          const locMatch = activeLocations.find(l => Number(l.id) === Number(il.locationId));
+          if (!locMatch) return false;
+        }
 
         const numItemId = Number(il.itemId);
         if (numItemId === itemIdNum) return true;
         if (cloudIdNum && numItemId === cloudIdNum) return true;
-        if (skuLower && (il as any).skuCode && String((il as any).skuCode).toLowerCase() === skuLower) return true;
+        if (skuLower && (il as any).skuCode && String((il as any).skuCode).trim().toLowerCase() === skuLower) return true;
+
+        const targetItem = itemByServerId.get(numItemId);
+        if (targetItem && (targetItem.id === item.id || targetItem.skuCode === item.skuCode)) return true;
 
         return false;
       });
@@ -1202,7 +1268,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     });
 
     return map;
-  }, [allItemLocations, activeTenantItems, tenantLocations]);
+  }, [allItemLocations, activeTenantItems, tenantLocations, activeLocations]);
 
   const { assignedCount, unassignedCount } = useMemo(() => {
     let assigned = 0;
@@ -1275,7 +1341,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       const rawMappings = itemLocationMapByItemId.get(Number(item.id)) || [];
 
       // Deduplicate mappings by locationId for this item
-      const uniqueMappingMap = new Map<number, ItemLocationMapping>();
+      const uniqueMappingMap = new Map<string | number, ItemLocationMapping>();
       rawMappings.forEach(m => {
         if (!uniqueMappingMap.has(m.locationId)) {
           uniqueMappingMap.set(m.locationId, m);
@@ -1285,9 +1351,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         }
       });
 
-      const validMappings = Array.from(uniqueMappingMap.values()).filter(
-        m => m.quantity > 0 && locationMap.has(Number(m.locationId))
-      );
+      const validMappings = Array.from(uniqueMappingMap.values()).filter(m => {
+        if (m.quantity <= 0) return false;
+        const locIdNum = Number(m.locationId);
+        if (locationMap.has(locIdNum)) return true;
+        return activeLocations.some(l => Number(l.id) === locIdNum);
+      });
 
       const allocatedMappings: Array<{
         mapping?: ItemLocationMapping;
@@ -1432,20 +1501,23 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       return;
     }
 
+    const locId = `loc-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     const payload = {
+      id: locId,
       tenantId,
       name: locName.trim(),
       code: codeUpper,
       type: locType,
-      parentId: locParentId ? Number(locParentId) : null,
+      parentId: locParentId ? String(locParentId) : null,
       capacity: Number(locCapacity) || 0,
       description: locDescription.trim(),
       createdAt: new Date().toISOString()
     };
 
     try {
-      await db.locations.add(payload);
+      await db.locations.put(payload);
       saveServerLocation(payload).catch(() => { });
+      ClientSyncManager.logMutation('LOCATION', locId, 'INSERT', payload);
 
       showToast(`Location "${locName}" created successfully!`, 'success');
       setIsAddLocationOpen(false);
@@ -1488,14 +1560,18 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
       // Auto-fallback: If item has stock in store but no explicit source mapping record yet
       if (!srcMapping && itemObj && itemObj.currentStock >= qty) {
-        const newSrcId = await db.itemLocations.add({
+        const newSrcId = `map-${transferItemId}-${transferSourceLocId}`;
+        const newMapPayload = {
+          id: newSrcId,
           tenantId,
-          itemId: itemIdNum,
-          locationId: srcLocIdNum,
+          itemId: String(transferItemId),
+          locationId: String(transferSourceLocId),
           quantity: itemObj.currentStock,
           maxCapacity: 500,
           updatedAt: new Date().toISOString()
-        });
+        };
+        await db.itemLocations.put(newMapPayload);
+        ClientSyncManager.logMutation('ITEM_LOCATION', newSrcId, 'INSERT', newMapPayload);
         srcMapping = await db.itemLocations.get(newSrcId);
       }
 
@@ -1509,11 +1585,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         quantity: updatedSrcQty,
         updatedAt: new Date().toISOString()
       });
+      ClientSyncManager.logMutation('ITEM_LOCATION', String(srcMapping.id), 'UPDATE', { ...srcMapping, quantity: updatedSrcQty, updatedAt: new Date().toISOString() });
       saveServerItemLocation({ tenantId, itemId: itemIdNum, skuCode: itemObj?.skuCode, name: itemObj?.name, locationId: srcLocIdNum, quantity: updatedSrcQty }).catch(() => { });
 
       // 2. Add to Destination Location Mapping
       const destMapping = await db.itemLocations
-        .filter(il => (il.tenantId || 'default-tenant') === tenantId && Number(il.itemId) === itemIdNum && Number(il.locationId) === destLocIdNum)
+        .filter(il => (il.tenantId || 'default-tenant') === tenantId && String(il.itemId) === String(transferItemId) && String(il.locationId) === String(transferDestLocId))
         .first();
 
       const updatedDestQty = (destMapping ? destMapping.quantity : 0) + qty;
@@ -1522,33 +1599,41 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           quantity: updatedDestQty,
           updatedAt: new Date().toISOString()
         });
+        ClientSyncManager.logMutation('ITEM_LOCATION', String(destMapping.id), 'UPDATE', { ...destMapping, quantity: updatedDestQty, updatedAt: new Date().toISOString() });
       } else {
-        await db.itemLocations.add({
+        const newDestMapId = `map-${transferItemId}-${transferDestLocId}`;
+        const destMapPayload = {
+          id: newDestMapId,
           tenantId,
-          itemId: itemIdNum,
-          locationId: destLocIdNum,
+          itemId: String(transferItemId),
+          locationId: String(transferDestLocId),
           quantity: qty,
           maxCapacity: 200,
           updatedAt: new Date().toISOString()
-        });
+        };
+        await db.itemLocations.put(destMapPayload);
+        ClientSyncManager.logMutation('ITEM_LOCATION', newDestMapId, 'INSERT', destMapPayload);
       }
       saveServerItemLocation({ tenantId, itemId: itemIdNum, skuCode: itemObj?.skuCode, name: itemObj?.name, locationId: destLocIdNum, quantity: updatedDestQty }).catch(() => { });
 
       // 3. Log Stock Transfer History
+      const trfId = `trf-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
       const trfNum = `TRF-${Date.now().toString().slice(-6)}`;
       const transferPayload = {
+        id: trfId,
         transferNumber: trfNum,
         tenantId,
-        sourceLocationId: srcLocIdNum,
-        destinationLocationId: destLocIdNum,
-        itemId: itemIdNum,
+        sourceLocationId: String(transferSourceLocId),
+        destinationLocationId: String(transferDestLocId),
+        itemId: String(transferItemId),
         quantity: qty,
         transferDate: new Date().toISOString().split('T')[0],
         notes: transferNotes || 'Internal inter-location stock transfer',
         createdAt: new Date().toISOString()
       };
-      await db.stockTransfers.add(transferPayload);
+      await db.stockTransfers.put(transferPayload);
       createServerStockTransfer(transferPayload).catch(() => { });
+      ClientSyncManager.logMutation('STOCK_TRANSFER', trfId, 'INSERT', transferPayload);
 
       const selectedItem = items.find(i => i.id === itemIdNum);
       const srcLoc = locationMap.get(srcLocIdNum);
@@ -1646,15 +1731,20 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
             maxCapacity: cap,
             updatedAt: new Date().toISOString()
           });
+          ClientSyncManager.logMutation('ITEM_LOCATION', String(existingDestMapping.id), 'UPDATE', { ...existingDestMapping, quantity: qty, maxCapacity: cap, updatedAt: new Date().toISOString() });
         } else {
-          await db.itemLocations.add({
+          const mapId = `map-${item.id}-${destLocIdNum}`;
+          const mapPayload = {
+            id: mapId,
             tenantId,
-            itemId: item.id!,
-            locationId: destLocIdNum,
+            itemId: String(item.id!),
+            locationId: String(destLocIdNum),
             quantity: qty,
             maxCapacity: cap,
             updatedAt: new Date().toISOString()
-          });
+          };
+          await db.itemLocations.put(mapPayload);
+          ClientSyncManager.logMutation('ITEM_LOCATION', mapId, 'INSERT', mapPayload);
         }
       }
 
@@ -2315,21 +2405,27 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                         return allowedTenants.has(ilTenant);
                                       });
                                       const rackMappings = mapsToUse.filter(il => Number(il.locationId) === Number(sh.id) && il.quantity > 0);
-                                      const mappedProducts = rackMappings
-                                        .map(il => {
-                                          const ilTenant = il.tenantId || 'default-tenant';
-                                          let matchedItem = allItems.find(i => Number(i.id) === Number(il.itemId) || ((i as any).cloudId && Number((i as any).cloudId) === Number(il.itemId)));
-                                          if (!matchedItem && (il as any).skuCode) {
-                                            const skuLower = String((il as any).skuCode).toLowerCase();
-                                            matchedItem = allItems.find(i => i.skuCode && i.skuCode.toLowerCase() === skuLower);
-                                          }
+                                      const uniqueMappedProductsMap = new Map<string, { item?: Item; quantity: number; isOtherStore: boolean; mapping: ItemLocationMapping }>();
 
-                                          const isOtherStore = ilTenant !== activeTenantId;
-                                          return { item: matchedItem, quantity: il.quantity, isOtherStore, mapping: il };
-                                        })
-                                        .filter(m => m.item);
+                                      rackMappings.forEach(il => {
+                                        const ilTenant = il.tenantId || 'default-tenant';
+                                        let matchedItem = allItems.find(i => Number(i.id) === Number(il.itemId) || ((i as any).cloudId && Number((i as any).cloudId) === Number(il.itemId)));
+                                        if (!matchedItem && (il as any).skuCode) {
+                                          const skuLower = String((il as any).skuCode).toLowerCase();
+                                          matchedItem = allItems.find(i => i.skuCode && i.skuCode.toLowerCase() === skuLower);
+                                        }
+                                        const isOtherStore = ilTenant !== activeTenantId;
+                                        const productKey = matchedItem ? (matchedItem.skuCode || `id_${matchedItem.id}`) : `item_${il.itemId}`;
+                                        if (!uniqueMappedProductsMap.has(productKey)) {
+                                          uniqueMappedProductsMap.set(productKey, { item: matchedItem, quantity: il.quantity, isOtherStore, mapping: il });
+                                        } else {
+                                          const existing = uniqueMappedProductsMap.get(productKey)!;
+                                          existing.quantity = Math.max(existing.quantity, il.quantity);
+                                        }
+                                      });
 
-                                      const totalUsedQty = rackMappings.reduce((sum, il) => sum + il.quantity, 0);
+                                      const mappedProducts = Array.from(uniqueMappedProductsMap.values()).filter(m => m.item);
+                                      const totalUsedQty = mappedProducts.reduce((sum, m) => sum + m.quantity, 0);
                                       const maxCap = sh.capacity || 100;
                                       const fillPct = Math.min(100, Math.round((totalUsedQty / maxCap) * 100));
 

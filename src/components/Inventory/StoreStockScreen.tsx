@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { Item, InventoryLocation, ItemLocationMapping, BusinessDetails } from '../../types';
 import { db, getActiveTenantId } from '../../db';
+import { ClientSyncManager } from '../../services/sync';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { saveServerItemLocation, createServerStockTransfer } from '../../services/api';
 
 interface StoreStockScreenProps {
@@ -92,22 +94,37 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
     return false;
   };
 
+  const liveStoreAccess = useLiveQuery(() => db.storeWarehouseAccess.toArray(), []);
+
   // Map of warehouse locations vs store locations (handles dedicated, central shared, and regional hubs)
   const { whLocationIds, storeLocations, warehouseLocations } = useMemo(() => {
+    const accessWhSet = new Set<string>();
+    if (liveStoreAccess && liveStoreAccess.length > 0) {
+      liveStoreAccess.forEach(acc => {
+        if (acc.storeId === tenantId) accessWhSet.add(String(acc.warehouseId));
+      });
+    }
+
     const whLocs = locations.filter(l => {
       if (l.type !== 'WAREHOUSE') return false;
       if (l.tenantId === tenantId) return true;
       if (l.allowedTenantIds && l.allowedTenantIds.includes(tenantId)) return true;
+      if (accessWhSet.has(String(l.id))) return true;
       return false;
     });
-    const whIds = new Set(whLocs.map(l => Number(l.id)));
+    const whIds = new Set<string | number>();
+    whLocs.forEach(l => {
+      whIds.add(l.id as any);
+      whIds.add(String(l.id));
+      if (typeof l.id === 'number') whIds.add(l.id);
+    });
     const storeLocs = locations.filter(l => l.type === 'SHELF' || l.type === 'ZONE');
     return {
       whLocationIds: whIds,
       storeLocations: storeLocs,
       warehouseLocations: whLocs
     };
-  }, [locations, tenantId]);
+  }, [locations, tenantId, liveStoreAccess]);
 
   // Main Store Front Location (default for POS retail floor)
   const storeFrontLocation = useMemo(() => {
@@ -137,7 +154,7 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
     });
 
     // Deduplicate by locationId for this item
-    const uniqueMap = new Map<number, ItemLocationMapping>();
+    const uniqueMap = new Map<string | number, ItemLocationMapping>();
     matches.forEach(m => {
       if (!uniqueMap.has(m.locationId)) {
         uniqueMap.set(m.locationId, { ...m });
@@ -256,13 +273,13 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
     }];
   }, [replenishItem, itemLocations, locations, items, getItemLocationMappings]);
 
-  const getOrCreateStoreFrontLocationId = async (): Promise<number> => {
+  const getOrCreateStoreFrontLocationId = async (): Promise<string | number> => {
     let storeLoc = locations.find(l => 
       (l.tenantId || 'default-tenant') === tenantId && 
       (l.isStoreFront || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE_FRONT')
     );
 
-    if (storeLoc?.id) return Number(storeLoc.id);
+    if (storeLoc?.id) return storeLoc.id;
 
     const allTenantLocs = await db.locations.toArray();
     storeLoc = allTenantLocs.find(l => 
@@ -270,19 +287,23 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
       (l.isStoreFront || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE_FRONT')
     );
 
-    if (storeLoc?.id) return Number(storeLoc.id);
+    if (storeLoc?.id) return storeLoc.id;
 
-    const newLocId = await db.locations.add({
+    const newLocId = `sf-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    const newLocPayload = {
+      id: newLocId,
       tenantId,
       name: 'Store Front Floor / Display Counter',
       code: 'STORE-FRONT',
-      type: 'SHELF',
+      type: 'SHELF' as const,
       isStoreFront: true,
       description: 'POS Ready Store Floor Display Stock',
       createdAt: new Date().toISOString()
-    });
+    };
+    await db.locations.put(newLocPayload);
+    ClientSyncManager.logMutation('LOCATION', newLocId, 'INSERT', newLocPayload);
 
-    return Number(newLocId);
+    return newLocId;
   };
 
   // Open Replenish Modal for an Item
@@ -316,15 +337,15 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
     }
 
     const srcLocNum = Number(sourceLocId);
-    const targetDestLocId = destLocId ? Number(destLocId) : await getOrCreateStoreFrontLocationId();
+    const targetDestLocId = destLocId ? destLocId : await getOrCreateStoreFrontLocationId();
 
     setIsSubmitting(true);
     try {
       // 1. Check available stock in source location
       const validMappings = getItemLocationMappings(replenishItem);
-      const srcMapping = validMappings.find((m: ItemLocationMapping) => Number(m.locationId) === srcLocNum) ||
+      const srcMapping = validMappings.find((m: ItemLocationMapping) => String(m.locationId) === String(sourceLocId)) ||
         await db.itemLocations
-          .filter(il => (il.tenantId || 'default-tenant') === tenantId && Number(il.itemId) === Number(replenishItem.id) && Number(il.locationId) === srcLocNum)
+          .filter(il => (il.tenantId || 'default-tenant') === tenantId && String(il.itemId) === String(replenishItem.id) && String(il.locationId) === String(sourceLocId))
           .first();
 
       const availSrcQty = srcMapping ? srcMapping.quantity : replenishItem.currentStock;
@@ -341,12 +362,13 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
           quantity: newSrcQty,
           updatedAt: new Date().toISOString()
         });
+        ClientSyncManager.logMutation('ITEM_LOCATION', String(srcMapping.id), 'UPDATE', { ...srcMapping, quantity: newSrcQty, updatedAt: new Date().toISOString() });
       }
-      saveServerItemLocation({ tenantId, itemId: Number(replenishItem.id), skuCode: replenishItem.skuCode, name: replenishItem.name, locationId: srcLocNum, quantity: newSrcQty }).catch(() => {});
+      saveServerItemLocation({ tenantId, itemId: Number(replenishItem.id), skuCode: replenishItem.skuCode, name: replenishItem.name, locationId: sourceLocId as any, quantity: newSrcQty }).catch(() => {});
 
       // 3. Add to destination store front location
       const destMapping = await db.itemLocations
-        .filter(il => (il.tenantId || 'default-tenant') === tenantId && Number(il.itemId) === Number(replenishItem.id) && Number(il.locationId) === targetDestLocId)
+        .filter(il => (il.tenantId || 'default-tenant') === tenantId && String(il.itemId) === String(replenishItem.id) && String(il.locationId) === String(targetDestLocId))
         .first();
 
       const newDestQty = (destMapping ? destMapping.quantity : 0) + qty;
@@ -355,40 +377,48 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
           quantity: newDestQty,
           updatedAt: new Date().toISOString()
         });
+        ClientSyncManager.logMutation('ITEM_LOCATION', String(destMapping.id), 'UPDATE', { ...destMapping, quantity: newDestQty, updatedAt: new Date().toISOString() });
       } else {
-        await db.itemLocations.add({
+        const destMapId = `map-${replenishItem.id}-${targetDestLocId}`;
+        const mapPayload = {
+          id: destMapId,
           tenantId,
-          itemId: Number(replenishItem.id),
-          locationId: targetDestLocId,
+          itemId: String(replenishItem.id),
+          locationId: String(targetDestLocId),
           quantity: newDestQty,
           maxCapacity: 100,
           updatedAt: new Date().toISOString()
-        });
+        };
+        await db.itemLocations.put(mapPayload);
+        ClientSyncManager.logMutation('ITEM_LOCATION', destMapId, 'INSERT', mapPayload);
       }
-      saveServerItemLocation({ tenantId, itemId: Number(replenishItem.id), skuCode: replenishItem.skuCode, name: replenishItem.name, locationId: targetDestLocId, quantity: newDestQty }).catch(() => {});
+      saveServerItemLocation({ tenantId, itemId: Number(replenishItem.id), skuCode: replenishItem.skuCode, name: replenishItem.name, locationId: targetDestLocId as any, quantity: newDestQty }).catch(() => {});
 
       // 4. Record Stock Transfer Log
+      const trfId = `trf-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
       const transferNo = `TRF-STORE-${Date.now().toString().slice(-6)}`;
-      const srcLocObj = locations.find(l => Number(l.id) === srcLocNum);
-      const destLocObj = locations.find(l => Number(l.id) === targetDestLocId);
+      const srcLocObj = locations.find(l => String(l.id) === String(sourceLocId));
+      const destLocObj = locations.find(l => String(l.id) === String(targetDestLocId));
 
       const srcLocName = srcLocObj ? `${srcLocObj.name} (${srcLocObj.code})` : 'Warehouse Reserve';
       const destLocName = destLocObj ? destLocObj.name : 'Store Front Floor / Display Counter';
 
       const transferPayload = {
+        id: trfId,
         tenantId,
         transferNumber: transferNo,
-        itemId: Number(replenishItem.id),
-        sourceLocationId: srcLocNum,
-        destinationLocationId: targetDestLocId,
+        itemId: String(replenishItem.id),
+        sourceLocationId: String(sourceLocId),
+        destinationLocationId: String(targetDestLocId),
         quantity: qty,
         transferDate: new Date().toISOString().split('T')[0],
         notes: `Store Front Replenishment: Transferred ${qty} PCS of ${replenishItem.name} from ${srcLocName} to ${destLocName}`,
         createdAt: new Date().toISOString()
       };
 
-      const trfId = await db.stockTransfers.add(transferPayload);
-      createServerStockTransfer({ ...transferPayload, id: trfId }).catch(() => {});
+      await db.stockTransfers.put(transferPayload);
+      createServerStockTransfer(transferPayload).catch(() => {});
+      ClientSyncManager.logMutation('STOCK_TRANSFER', trfId, 'INSERT', transferPayload);
 
       showToast(`Successfully transferred ${qty} PCS of "${replenishItem.name}" to Store Front!`, 'success');
       setReplenishItem(null);

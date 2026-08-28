@@ -157,7 +157,9 @@ export async function seed100SampleItems(tenantId: string = 'default-tenant'): P
     // Fetch available locations for tenant
     let locations = await db.locations.filter(l => (l.tenantId || 'default-tenant') === tenantId).toArray();
     if (locations.length === 0) {
-      const mainStoreId = await db.locations.add({
+      const mainStoreId = `wh-main-${tenantId}`;
+      await db.locations.put({
+        id: mainStoreId,
         tenantId,
         name: 'Main Store / Godown',
         code: 'WH-MAIN',
@@ -167,7 +169,9 @@ export async function seed100SampleItems(tenantId: string = 'default-tenant'): P
         createdAt: new Date().toISOString()
       });
 
-      const aisleAId = await db.locations.add({
+      const aisleAId = `zone-a1-${tenantId}`;
+      await db.locations.put({
+        id: aisleAId,
         tenantId,
         name: 'Aisle 1 - General FMCG',
         code: 'ZONE-A1',
@@ -178,7 +182,9 @@ export async function seed100SampleItems(tenantId: string = 'default-tenant'): P
         createdAt: new Date().toISOString()
       });
 
-      await db.locations.add({
+      const shelfAId = `shelf-a1-01-${tenantId}`;
+      await db.locations.put({
+        id: shelfAId,
         tenantId,
         name: 'Shelf A1-Bin 01',
         code: 'SH-A1-01',

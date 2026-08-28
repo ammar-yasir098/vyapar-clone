@@ -110,7 +110,7 @@ export interface SyncJournal {
   id?: number;
   versionId: string;
   clientSequence: number;
-  entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'ESTIMATE' | 'PAYMENT_IN' | 'PURCHASE_ORDER' | 'PURCHASE_BILL' | 'PAYMENT_OUT' | 'EXPENSE' | 'PURCHASE_RETURN' | 'SALE_RETURN' | 'CASH_ACCOUNT' | 'CASH_TRANSACTION';
+  entityType: 'INVOICE' | 'ITEM' | 'PARTY' | 'ESTIMATE' | 'PAYMENT_IN' | 'PURCHASE_ORDER' | 'PURCHASE_BILL' | 'PAYMENT_OUT' | 'EXPENSE' | 'PURCHASE_RETURN' | 'SALE_RETURN' | 'CASH_ACCOUNT' | 'CASH_TRANSACTION' | 'LOCATION' | 'ITEM_LOCATION' | 'STOCK_TRANSFER' | 'STORE_WAREHOUSE_ACCESS';
   entityId: string;
   mutationType: 'INSERT' | 'UPDATE' | 'DELETE';
   payload: string; // JSON string
@@ -417,12 +417,12 @@ export interface CashTransaction {
 export type LocationType = 'WAREHOUSE' | 'ZONE' | 'SHELF';
 
 export interface InventoryLocation {
-  id?: number;
+  id?: number | string;
   tenantId: string;
   name: string;
   code: string;
   type: LocationType;
-  parentId?: number | null;
+  parentId?: number | string | null;
   capacity?: number;
   description?: string;
   isShared?: boolean;
@@ -432,25 +432,34 @@ export interface InventoryLocation {
 }
 
 export interface ItemLocationMapping {
-  id?: number;
+  id?: number | string;
   tenantId: string;
-  itemId: number;
-  locationId: number;
+  itemId: number | string;
+  locationId: number | string;
+  skuCode?: string;
   quantity: number;
   maxCapacity?: number;
   updatedAt?: string;
 }
 
 export interface StockTransfer {
-  id?: number;
+  id?: number | string;
   transferNumber: string;
   tenantId: string;
-  sourceLocationId: number;
-  destinationLocationId: number;
-  itemId: number;
+  sourceLocationId: number | string;
+  destinationLocationId: number | string;
+  itemId: number | string;
   quantity: number;
   transferDate: string;
   notes?: string;
+  createdAt?: string;
+}
+
+export interface StoreWarehouseAccess {
+  id?: number | string;
+  tenantId: string;
+  storeId: string;
+  warehouseId: number | string;
   createdAt?: string;
 }
 

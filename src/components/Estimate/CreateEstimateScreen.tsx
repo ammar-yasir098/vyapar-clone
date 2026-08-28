@@ -14,14 +14,14 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { Item, Party, BusinessDetails, Estimate } from '../../types';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 import { saveServerEstimate } from '../../services/api';
 import { useToast } from '../Common/ToastContext';
 
 interface CreateEstimateScreenProps {
   items: Item[];
   parties: Party[];
-  business: BusinessDetails;
+  business?: BusinessDetails;
   onEstimateSaved: () => void;
   onCancel: () => void;
 }
@@ -34,7 +34,7 @@ export const CreateEstimateScreen: React.FC<CreateEstimateScreenProps> = ({
   onCancel
 }) => {
   const { showToast } = useToast();
-  const activeTenantId = business.tenantId || 'default-tenant';
+  const activeTenantId = getActiveTenantId(business);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedParty, setSelectedParty] = useState<Party | null>(

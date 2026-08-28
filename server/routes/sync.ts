@@ -26,6 +26,7 @@ import {
   InventoryLocation,
   ItemLocationMapping,
   StockTransfer,
+  StoreWarehouseAccess,
   CompanyProfile,
   User
 } from '../db/sequelize.js';
@@ -145,7 +146,7 @@ syncRouter.get('/pull', async (req: Request, res: Response) => {
       return res.json({ success: true, serverVersion: cloudStore.getLatestVersion(), data: {} });
     }
 
-    const [items, parties, invoices, estimates, paymentsIn, purchaseOrders, purchaseBills, paymentsOut, expenses, purchaseReturns, saleReturns, cashAccounts, cashTransactions] = await Promise.all([
+    const [items, parties, invoices, estimates, paymentsIn, purchaseOrders, purchaseBills, paymentsOut, expenses, purchaseReturns, saleReturns, cashAccounts, cashTransactions, rawLocations, rawItemLocations, rawStockTransfers, storeWarehouseAccess] = await Promise.all([
       Item.findAll({ where: { tenantId } }),
       Party.findAll({ where: { tenantId } }),
       Invoice.findAll({ where: { tenantId } }),
@@ -158,8 +159,60 @@ syncRouter.get('/pull', async (req: Request, res: Response) => {
       PurchaseReturn.findAll({ where: { tenantId } }),
       SaleReturn.findAll({ where: { tenantId } }),
       CashAccount.findAll({ where: { tenantId } }),
-      CashTransaction.findAll({ where: { tenantId } })
+      CashTransaction.findAll({ where: { tenantId } }),
+      InventoryLocation.findAll(),
+      ItemLocationMapping.findAll(),
+      StockTransfer.findAll(),
+      StoreWarehouseAccess.findAll()
     ]);
+
+    // Resolve accessible warehouses for tenant (ownership, store_warehouse_access join, or allowedTenantIds)
+    const accessibleWhIds = new Set<string>();
+    storeWarehouseAccess.forEach(acc => {
+      const sId = acc.get('storeId') as string;
+      const whId = String(acc.get('warehouseId'));
+      if (sId === tenantId) accessibleWhIds.add(whId);
+    });
+
+    rawLocations.forEach(loc => {
+      const locTenant = loc.get('tenantId') as string;
+      const isShared = loc.get('isShared') === true;
+      const allowedTenantIds = (loc.get('allowedTenantIds') as string[]) || [];
+      if (locTenant === tenantId || isShared || (Array.isArray(allowedTenantIds) && allowedTenantIds.includes(tenantId))) {
+        accessibleWhIds.add(String(loc.get('id')));
+      }
+    });
+
+    // Accessible locations include root warehouses and their child zones/shelves
+    const locations = rawLocations.filter(loc => {
+      const lId = String(loc.get('id'));
+      const pId = loc.get('parentId') ? String(loc.get('parentId')) : null;
+      if (accessibleWhIds.has(lId)) return true;
+      if (pId && accessibleWhIds.has(pId)) return true;
+      return false;
+    });
+
+    const accessibleLocIdSet = new Set(locations.map(l => String(l.get('id'))));
+
+    // Accessible item locations and stock transfers matching accessible locations
+    const itemLocations = rawItemLocations.filter(m => {
+      const mTenant = m.get('tenantId') as string;
+      const locId = String(m.get('locationId'));
+      return mTenant === tenantId || accessibleLocIdSet.has(locId);
+    });
+
+    const stockTransfers = rawStockTransfers.filter(st => {
+      const stTenant = st.get('tenantId') as string;
+      const srcId = String(st.get('sourceLocationId'));
+      const dstId = String(st.get('destinationLocationId'));
+      return stTenant === tenantId || accessibleLocIdSet.has(srcId) || accessibleLocIdSet.has(dstId);
+    });
+
+    const relevantAccess = storeWarehouseAccess.filter(acc => {
+      const tId = acc.get('tenantId') as string;
+      const sId = acc.get('storeId') as string;
+      return tId === tenantId || sId === tenantId;
+    });
 
     return res.json({
       success: true,
@@ -178,7 +231,11 @@ syncRouter.get('/pull', async (req: Request, res: Response) => {
         purchaseReturns,
         saleReturns,
         cashAccounts,
-        cashTransactions
+        cashTransactions,
+        locations,
+        itemLocations,
+        stockTransfers,
+        storeWarehouseAccess: relevantAccess
       }
     });
   } catch (err: any) {
@@ -205,7 +262,7 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
 
   // Persist mutations directly into PostgreSQL Database using Sequelize ORM
   if (isDbConnected()) {
-    const { sequelize, Item, Party, Invoice, InvoiceItem, PurchaseBill, Expense, PaymentIn, PaymentOut, CashAccount, CashTransaction } = await import('../db/sequelize.js');
+    const { sequelize, Item, Party, Invoice, InvoiceItem, PurchaseBill, Expense, PaymentIn, PaymentOut, CashAccount, CashTransaction, InventoryLocation, ItemLocationMapping, StockTransfer, StoreWarehouseAccess } = await import('../db/sequelize.js');
     const dbTx = await sequelize.transaction();
 
     try {
@@ -696,6 +753,68 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
             } else {
               await CashTransaction.create(txData);
             }
+          }
+        } else if (entityType === 'LOCATION') {
+          if (mutationType === 'DELETE' && payload.id) {
+            await InventoryLocation.destroy({ where: { id: String(payload.id) } });
+          } else if (payload.name || payload.code) {
+            const locId = payload.id ? String(payload.id) : `wh-${Date.now()}`;
+            await InventoryLocation.upsert({
+              id: locId,
+              tenantId: payload.tenantId || tenantId || 'default-tenant',
+              name: payload.name || 'Warehouse',
+              code: payload.code || `WH-${Date.now()}`,
+              type: payload.type || 'WAREHOUSE',
+              parentId: payload.parentId ? String(payload.parentId) : null,
+              capacity: payload.capacity || 500,
+              description: payload.description || '',
+              isShared: !!payload.isShared,
+              allowedTenantIds: payload.allowedTenantIds || []
+            });
+          }
+        } else if (entityType === 'ITEM_LOCATION') {
+          if (mutationType === 'DELETE' && payload.id) {
+            await ItemLocationMapping.destroy({ where: { id: String(payload.id) } });
+          } else if (payload.itemId && payload.locationId) {
+            const mapId = payload.id ? String(payload.id) : `map-${payload.itemId}-${payload.locationId}`;
+            await ItemLocationMapping.upsert({
+              id: mapId,
+              tenantId: payload.tenantId || tenantId || 'default-tenant',
+              itemId: String(payload.itemId),
+              locationId: String(payload.locationId),
+              quantity: payload.quantity || 0,
+              maxCapacity: payload.maxCapacity || 100
+            });
+          }
+        } else if (entityType === 'STOCK_TRANSFER') {
+          if (mutationType === 'DELETE' && payload.id) {
+            await StockTransfer.destroy({ where: { id: String(payload.id) } });
+          } else if (payload.sourceLocationId && payload.destinationLocationId) {
+            const trfId = payload.id ? String(payload.id) : `trf-${Date.now()}`;
+            await StockTransfer.upsert({
+              id: trfId,
+              transferNumber: payload.transferNumber || `TRF-${Date.now()}`,
+              tenantId: payload.tenantId || tenantId || 'default-tenant',
+              sourceLocationId: String(payload.sourceLocationId),
+              destinationLocationId: String(payload.destinationLocationId),
+              itemId: String(payload.itemId),
+              quantity: payload.quantity || 1,
+              transferDate: payload.transferDate || new Date().toISOString().split('T')[0],
+              notes: payload.notes || ''
+            });
+          }
+        } else if (entityType === 'STORE_WAREHOUSE_ACCESS') {
+          if (mutationType === 'DELETE' && (payload.id || (payload.storeId && payload.warehouseId))) {
+            if (payload.id) await StoreWarehouseAccess.destroy({ where: { id: String(payload.id) } });
+            else await StoreWarehouseAccess.destroy({ where: { storeId: payload.storeId, warehouseId: String(payload.warehouseId) } });
+          } else if (payload.storeId && payload.warehouseId) {
+            const accessId = payload.id ? String(payload.id) : `access-${payload.storeId}-${payload.warehouseId}`;
+            await StoreWarehouseAccess.upsert({
+              id: accessId,
+              tenantId: payload.tenantId || tenantId || 'default-tenant',
+              storeId: payload.storeId,
+              warehouseId: String(payload.warehouseId)
+            });
           }
         }
       } catch (err) {

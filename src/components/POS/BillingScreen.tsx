@@ -16,7 +16,7 @@ import {
   Tag
 } from 'lucide-react';
 import { Item, Party, InvoiceItem, Invoice, PaymentMethod, BusinessDetails, ItemLocationMapping } from '../../types';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 import { printA4TaxInvoice, buildWhatsAppInvoiceLink } from '../../services/pdfInvoice';
 import { createServerInvoice } from '../../services/api';
 import { syncManager } from '../../services/sync';
@@ -218,7 +218,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   const handleQuickAddParty = async () => {
     if (!newPartyName || !newPartyPhone) return;
     const partyId = await db.parties.add({
-      tenantId: business.tenantId || 'default-tenant',
+      tenantId: getActiveTenantId(business),
       name: newPartyName,
       phone: newPartyPhone,
       type: 'CUSTOMER',

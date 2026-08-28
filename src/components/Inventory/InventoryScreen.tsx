@@ -61,8 +61,8 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
 
   // Multi-Location Inventory Breakdown State (Phase 5)
   const [itemLocs, setItemLocs] = useState<ItemLocationMapping[]>([]);
-  const [whLocationIds, setWhLocationIds] = useState<Set<number>>(new Set());
-  const [storeFrontLocationIds, setStoreFrontLocationIds] = useState<Set<number>>(new Set());
+  const [whLocationIds, setWhLocationIds] = useState<Set<string | number>>(new Set());
+  const [storeFrontLocationIds, setStoreFrontLocationIds] = useState<Set<string | number>>(new Set());
 
   const activeTenantId = getActiveTenantId(business);
 
@@ -70,12 +70,22 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
     async function loadLocationData() {
       const locs = await db.locations.toArray();
       const tenantLocs = locs.filter(l => (l.tenantId || 'default-tenant') === activeTenantId || (l.allowedTenantIds && l.allowedTenantIds.includes(activeTenantId)));
-      const whIds = new Set(tenantLocs.filter(l => l.type === 'WAREHOUSE').map(l => Number(l.id)));
-      const storeIds = new Set(
-        tenantLocs
-          .filter(l => l.isStoreFront || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE_FRONT')
-          .map(l => Number(l.id))
-      );
+      const whIds = new Set<string | number>();
+      tenantLocs.filter(l => l.type === 'WAREHOUSE').forEach(l => {
+        if (l.id !== undefined && l.id !== null) {
+          whIds.add(l.id as any);
+          whIds.add(String(l.id));
+        }
+      });
+      const storeIds = new Set<string | number>();
+      tenantLocs
+        .filter(l => l.isStoreFront || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE_FRONT')
+        .forEach(l => {
+          if (l.id !== undefined && l.id !== null) {
+            storeIds.add(l.id as any);
+            storeIds.add(String(l.id));
+          }
+        });
       setWhLocationIds(whIds);
       setStoreFrontLocationIds(storeIds);
 
@@ -440,7 +450,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                           });
 
                           // Deduplicate mappings by locationId
-                          const uniqueMap = new Map<number, ItemLocationMapping>();
+                          const uniqueMap = new Map<string | number, ItemLocationMapping>();
                           itemMaps.forEach(m => {
                             if (!uniqueMap.has(m.locationId)) {
                               uniqueMap.set(m.locationId, { ...m });
@@ -451,7 +461,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                           });
 
                           const validMappings = Array.from(uniqueMap.values()).filter(m => m.quantity > 0);
-                          const storeMaps = validMappings.filter(m => storeFrontLocationIds.has(Number(m.locationId)));
+                          const storeMaps = validMappings.filter(m => storeFrontLocationIds.has(m.locationId as any) || storeFrontLocationIds.has(String(m.locationId)));
                           const storeStock = storeMaps.reduce((sum, m) => sum + m.quantity, 0);
                           const whStock = Math.max(0, stock - storeStock);
 

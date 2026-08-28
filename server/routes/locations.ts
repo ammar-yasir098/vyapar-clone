@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { InventoryLocation, ItemLocationMapping, StockTransfer, Item, isDbConnected } from '../db/sequelize.js';
+import { InventoryLocation, ItemLocationMapping, StockTransfer, Item, StoreWarehouseAccess, isDbConnected } from '../db/sequelize.js';
 
 export const locationsRouter = Router();
 
@@ -9,7 +9,7 @@ export async function cleanupDuplicateLocations() {
   try {
     const allLocs = await InventoryLocation.findAll({ order: [['id', 'ASC']] });
     const seen = new Set<string>();
-    const duplicateIds: number[] = [];
+    const duplicateIds: (string | number)[] = [];
 
     for (const l of allLocs) {
       const tenantKey = l.tenantId || 'default-tenant';
@@ -43,7 +43,7 @@ locationsRouter.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/v1/locations — Create or update location (With strict deduplication)
+// POST /api/v1/locations — Create or update location (With strict deduplication & warehouse access sync)
 locationsRouter.post('/', async (req: Request, res: Response) => {
   try {
     const tenantId = req.body.tenantId || (req as any).user?.tenantId || 'default-tenant';
@@ -51,7 +51,7 @@ locationsRouter.post('/', async (req: Request, res: Response) => {
 
     let loc;
     if (id) {
-      loc = await InventoryLocation.findByPk(id);
+      loc = await InventoryLocation.findByPk(String(id));
     }
     if (!loc && code) {
       loc = await InventoryLocation.findOne({ where: { tenantId, code } });
@@ -61,11 +61,12 @@ locationsRouter.post('/', async (req: Request, res: Response) => {
     }
 
     const payloadData = {
+      id: id ? String(id) : `wh-${Date.now()}`,
       tenantId,
       name,
       code,
       type: type || 'WAREHOUSE',
-      parentId: parentId ? Number(parentId) : null,
+      parentId: parentId ? String(parentId) : null,
       capacity: capacity ? Number(capacity) : 500,
       description,
       isShared: !!isShared,
@@ -76,6 +77,19 @@ locationsRouter.post('/', async (req: Request, res: Response) => {
       await loc.update(payloadData);
     } else {
       loc = await InventoryLocation.create(payloadData);
+    }
+
+    // Sync StoreWarehouseAccess permissions table
+    if (Array.isArray(allowedTenantIds)) {
+      for (const storeId of allowedTenantIds) {
+        const accessId = `access-${storeId}-${loc.get('id')}`;
+        await StoreWarehouseAccess.upsert({
+          id: accessId,
+          tenantId,
+          storeId,
+          warehouseId: String(loc.get('id'))
+        }).catch(() => {});
+      }
     }
 
     return res.json({ success: true, data: loc });

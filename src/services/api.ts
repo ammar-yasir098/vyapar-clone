@@ -637,7 +637,7 @@ export async function saveServerLocation(locData: any) {
   }
 }
 
-export async function deleteServerLocation(id: number) {
+export async function deleteServerLocation(id: string | number) {
   try {
     const res = await fetchWithTimeout(`${API_BASE_URL}/locations/${id}`, {
       method: 'DELETE',

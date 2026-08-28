@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Pencil, Upload, Calendar, Building, Phone, Mail, MapPin, CheckCircle2, Trash2, Lock, Eye, EyeOff, KeyRound, ShieldCheck, ArrowLeft, ChevronRight, Store, ShieldAlert, Sparkles } from 'lucide-react';
 import { BusinessDetails } from '../../types';
 import { fetchServerCompanyProfile, saveServerCompanyProfile, changeUserPassword } from '../../services/api';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 import { useToast } from '../Common/ToastContext';
 
 interface EditProfileScreenProps {
@@ -21,7 +21,7 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
   onDeleteCompany
 }) => {
   const { showToast } = useToast();
-  const activeTenantId = business.tenantId || 'default-tenant';
+  const activeTenantId = getActiveTenantId(business);
 
   // Sub-page navigation state
   const [subView, setSubView] = useState<SettingsSubView>('hub');
@@ -38,8 +38,8 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({
   const [booksBeginDate, setBooksBeginDate] = useState('2026-08-10');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
-  const [primaryWarehouseId, setPrimaryWarehouseId] = useState<number | ''>('');
-  const [warehouses, setWarehouses] = useState<{ id?: number; name: string; code: string }[]>([]);
+  const [primaryWarehouseId, setPrimaryWarehouseId] = useState<string | number | ''>('');
+  const [warehouses, setWarehouses] = useState<{ id?: string | number; name: string; code: string }[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 

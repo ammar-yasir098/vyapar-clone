@@ -161,10 +161,22 @@ CREATE TABLE IF NOT EXISTS payment_in (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 10. STORE WAREHOUSE ACCESS PERMISSIONS
+CREATE TABLE IF NOT EXISTS store_warehouse_access (
+    id VARCHAR(64) PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default-tenant',
+    store_id VARCHAR(64) NOT NULL,
+    warehouse_id VARCHAR(64) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- MULTI-TENANT PERFORMANCE INDEXES
 CREATE INDEX IF NOT EXISTS idx_items_tenant_id ON items(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_parties_tenant_id ON parties(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant_id ON invoices(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_estimates_tenant_id ON estimates(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_payment_in_tenant_id ON payment_in(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_store_wh_access_tenant_store ON store_warehouse_access(tenant_id, store_id);
+CREATE INDEX IF NOT EXISTS idx_store_wh_access_store_wh ON store_warehouse_access(store_id, warehouse_id);
+
 

@@ -1,31 +1,32 @@
 import Dexie, { Table } from 'dexie';
-import { Item, Party, Invoice, SyncJournal, BusinessDetails, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock, PurchaseOrder, PurchaseBill, PaymentOut, Expense, PurchaseReturn, SaleReturn, CashAccount, CashTransaction, InventoryLocation, ItemLocationMapping, StockTransfer } from '../types';
+import { Item, Party, Invoice, SyncJournal, BusinessDetails, CompanyProfileEntity, Estimate, PaymentIn, ItemRestock, PurchaseOrder, PurchaseBill, PaymentOut, Expense, PurchaseReturn, SaleReturn, CashAccount, CashTransaction, InventoryLocation, ItemLocationMapping, StockTransfer, StoreWarehouseAccess } from '../types';
 
 export class VyaparDatabase extends Dexie {
-  items!: Table<Item, number>;
-  parties!: Table<Party, number>;
-  invoices!: Table<Invoice, number>;
-  syncJournal!: Table<SyncJournal, number>;
-  companyProfiles!: Table<CompanyProfileEntity, number>;
-  estimates!: Table<Estimate, number>;
-  paymentIn!: Table<PaymentIn, number>;
-  itemRestocks!: Table<ItemRestock, number>;
-  purchaseOrders!: Table<PurchaseOrder, number>;
-  purchaseBills!: Table<PurchaseBill, number>;
-  paymentOut!: Table<PaymentOut, number>;
-  expenses!: Table<Expense, number>;
-  purchaseReturns!: Table<PurchaseReturn, number>;
-  saleReturns!: Table<SaleReturn, number>;
-  cashAccounts!: Table<CashAccount, number>;
-  cashTransactions!: Table<CashTransaction, number>;
-  locations!: Table<InventoryLocation, number>;
-  itemLocations!: Table<ItemLocationMapping, number>;
-  stockTransfers!: Table<StockTransfer, number>;
+  items!: Table<Item, any>;
+  parties!: Table<Party, any>;
+  invoices!: Table<Invoice, any>;
+  syncJournal!: Table<SyncJournal, any>;
+  companyProfiles!: Table<CompanyProfileEntity, any>;
+  estimates!: Table<Estimate, any>;
+  paymentIn!: Table<PaymentIn, any>;
+  itemRestocks!: Table<ItemRestock, any>;
+  purchaseOrders!: Table<PurchaseOrder, any>;
+  purchaseBills!: Table<PurchaseBill, any>;
+  paymentOut!: Table<PaymentOut, any>;
+  expenses!: Table<Expense, any>;
+  purchaseReturns!: Table<PurchaseReturn, any>;
+  saleReturns!: Table<SaleReturn, any>;
+  cashAccounts!: Table<CashAccount, any>;
+  cashTransactions!: Table<CashTransaction, any>;
+  locations!: Table<InventoryLocation, any>;
+  itemLocations!: Table<ItemLocationMapping, any>;
+  stockTransfers!: Table<StockTransfer, any>;
+  storeWarehouseAccess!: Table<StoreWarehouseAccess, any>;
 
   constructor() {
     super('VyaparOfflineDB');
     
-    this.version(17).stores({
+    this.version(18).stores({
       items: '++id, skuCode, barcode, name, currentStock, tenantId',
       parties: '++id, name, phone, type, tenantId',
       invoices: '++id, invoiceId, invoiceNumber, invoiceDate, paymentStatus, partyId, syncStatus, tenantId',
@@ -42,9 +43,10 @@ export class VyaparDatabase extends Dexie {
       saleReturns: '++id, returnId, creditNoteNumber, returnDate, partyId, tenantId',
       cashAccounts: '++id, name, tenantId',
       cashTransactions: '++id, cashAccountId, type, source, transactionDate, tenantId',
-      locations: '++id, tenantId, name, code, type, parentId',
-      itemLocations: '++id, tenantId, itemId, locationId, [itemId+locationId]',
-      stockTransfers: '++id, tenantId, transferNumber, sourceLocationId, destinationLocationId, itemId, transferDate'
+      locations: '++id, tenantId, name, code, type, parentId, [tenantId+type], [tenantId+parentId]',
+      itemLocations: '++id, tenantId, itemId, locationId, [itemId+locationId], [tenantId+locationId]',
+      stockTransfers: '++id, tenantId, transferNumber, sourceLocationId, destinationLocationId, itemId, transferDate, [tenantId+sourceLocationId], [tenantId+destinationLocationId]',
+      storeWarehouseAccess: '++id, tenantId, storeId, warehouseId, [tenantId+storeId], [storeId+warehouseId]'
     });
   }
 }
@@ -122,7 +124,9 @@ export async function seedDefaultLocationsForTenant(tenantId: string) {
   if (!tenantId) return;
   const count = await db.locations.filter(l => l.tenantId === tenantId).count();
   if (count === 0) {
-    const mainStoreId = await db.locations.add({
+    const mainStoreId = `wh-main-${tenantId}`;
+    await db.locations.put({
+      id: mainStoreId,
       tenantId,
       name: 'Main Store / Godown',
       code: 'WH-MAIN',
@@ -132,7 +136,9 @@ export async function seedDefaultLocationsForTenant(tenantId: string) {
       createdAt: new Date().toISOString()
     });
 
-    const aisleAId = await db.locations.add({
+    const aisleAId = `zone-a1-${tenantId}`;
+    await db.locations.put({
+      id: aisleAId,
       tenantId,
       name: 'Aisle 1 - General FMCG',
       code: 'ZONE-A1',
@@ -143,7 +149,9 @@ export async function seedDefaultLocationsForTenant(tenantId: string) {
       createdAt: new Date().toISOString()
     });
 
-    await db.locations.add({
+    const shelfAId = `shelf-a1-01-${tenantId}`;
+    await db.locations.put({
+      id: shelfAId,
       tenantId,
       name: 'Shelf A1-Bin 01',
       code: 'SH-A1-01',
@@ -175,13 +183,13 @@ export async function clearAllDatabaseData(tenantId?: string) {
   const targetTenantId = tenantId || (typeof localStorage !== 'undefined' ? localStorage.getItem('vyapar_current_tenant') : null) || 'default-tenant';
 
   // Helper to delete records for target tenant from a Dexie table
-  const clearTenantRecords = async (table: Table<any, number>) => {
+  const clearTenantRecords = async (table: Table<any, any>) => {
     try {
       const keysToDelete = await table
         .filter(item => targetTenantId === 'ALL' || item.tenantId === targetTenantId || (!item.tenantId && targetTenantId === 'default-tenant'))
         .primaryKeys();
       if (keysToDelete.length > 0) {
-        await table.bulkDelete(keysToDelete as number[]);
+        await table.bulkDelete(keysToDelete as any[]);
       }
     } catch (err) {
       console.warn('Failed clearing tenant records for table:', err);

@@ -716,44 +716,48 @@ CashAccount.hasMany(CashTransaction, { foreignKey: 'cashAccountId', as: 'transac
 
 // 23. InventoryLocation Model
 export class InventoryLocation extends Model {
-  declare id: number;
+  declare id: string | number;
   declare tenantId: string;
   declare name: string;
   declare code: string;
   declare type: string;
-  declare parentId: number | null;
+  declare parentId: string | number | null;
   declare capacity: number;
   declare description: string;
+  declare isShared: boolean;
+  declare allowedTenantIds: string[];
 }
 InventoryLocation.init(
   {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    id: { type: DataTypes.STRING, primaryKey: true },
     tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
     name: { type: DataTypes.STRING, allowNull: false },
     code: { type: DataTypes.STRING, allowNull: false },
     type: { type: DataTypes.STRING, defaultValue: 'WAREHOUSE' },
-    parentId: { type: DataTypes.INTEGER, allowNull: true, field: 'parent_id' },
+    parentId: { type: DataTypes.STRING, allowNull: true, field: 'parent_id' },
     capacity: { type: DataTypes.INTEGER, defaultValue: 500 },
-    description: { type: DataTypes.TEXT, allowNull: true }
+    description: { type: DataTypes.TEXT, allowNull: true },
+    isShared: { type: DataTypes.BOOLEAN, defaultValue: false, field: 'is_shared' },
+    allowedTenantIds: { type: DataTypes.JSON, defaultValue: [], field: 'allowed_tenant_ids' }
   },
   { sequelize, modelName: 'InventoryLocation', tableName: 'inventory_locations', timestamps: true }
 );
 
 // 24. ItemLocationMapping Model
 export class ItemLocationMapping extends Model {
-  declare id: number;
+  declare id: string | number;
   declare tenantId: string;
-  declare itemId: number;
-  declare locationId: number;
+  declare itemId: string | number;
+  declare locationId: string | number;
   declare quantity: number;
   declare maxCapacity: number;
 }
 ItemLocationMapping.init(
   {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    id: { type: DataTypes.STRING, primaryKey: true },
     tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
-    itemId: { type: DataTypes.INTEGER, allowNull: false, field: 'item_id' },
-    locationId: { type: DataTypes.INTEGER, allowNull: false, field: 'location_id' },
+    itemId: { type: DataTypes.STRING, allowNull: false, field: 'item_id' },
+    locationId: { type: DataTypes.STRING, allowNull: false, field: 'location_id' },
     quantity: { type: DataTypes.FLOAT, defaultValue: 0.0 },
     maxCapacity: { type: DataTypes.INTEGER, defaultValue: 100, field: 'max_capacity' }
   },
@@ -762,29 +766,47 @@ ItemLocationMapping.init(
 
 // 25. StockTransfer Model
 export class StockTransfer extends Model {
-  declare id: number;
+  declare id: string | number;
   declare transferNumber: string;
   declare tenantId: string;
-  declare sourceLocationId: number;
-  declare destinationLocationId: number;
-  declare itemId: number;
+  declare sourceLocationId: string | number;
+  declare destinationLocationId: string | number;
+  declare itemId: string | number;
   declare quantity: number;
   declare transferDate: string;
   declare notes: string;
 }
 StockTransfer.init(
   {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    id: { type: DataTypes.STRING, primaryKey: true },
     transferNumber: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'transfer_number' },
     tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
-    sourceLocationId: { type: DataTypes.INTEGER, allowNull: false, field: 'source_location_id' },
-    destinationLocationId: { type: DataTypes.INTEGER, allowNull: false, field: 'destination_location_id' },
-    itemId: { type: DataTypes.INTEGER, allowNull: false, field: 'item_id' },
+    sourceLocationId: { type: DataTypes.STRING, allowNull: false, field: 'source_location_id' },
+    destinationLocationId: { type: DataTypes.STRING, allowNull: false, field: 'destination_location_id' },
+    itemId: { type: DataTypes.STRING, allowNull: false, field: 'item_id' },
     quantity: { type: DataTypes.FLOAT, defaultValue: 1.0 },
     transferDate: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW, field: 'transfer_date' },
     notes: { type: DataTypes.TEXT, allowNull: true }
   },
   { sequelize, modelName: 'StockTransfer', tableName: 'stock_transfers', timestamps: true }
+);
+
+// 26. StoreWarehouseAccess Model
+export class StoreWarehouseAccess extends Model {
+  declare id: string;
+  declare tenantId: string;
+  declare storeId: string;
+  declare warehouseId: string;
+  declare createdAt: Date;
+}
+StoreWarehouseAccess.init(
+  {
+    id: { type: DataTypes.STRING, primaryKey: true },
+    tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
+    storeId: { type: DataTypes.STRING, allowNull: false, field: 'store_id' },
+    warehouseId: { type: DataTypes.STRING, allowNull: false, field: 'warehouse_id' }
+  },
+  { sequelize, modelName: 'StoreWarehouseAccess', tableName: 'store_warehouse_access', timestamps: true, updatedAt: false }
 );
 
 /**

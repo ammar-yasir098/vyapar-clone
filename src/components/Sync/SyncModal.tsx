@@ -74,7 +74,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
     if (!isOpen) return;
 
     refreshModalData();
-    const unsubscribe = syncManager.subscribe((status) => {
+    const unsubscribe = syncManager.subscribe((status: SyncStatus) => {
       setSyncStatus(status);
       refreshModalData();
     });
