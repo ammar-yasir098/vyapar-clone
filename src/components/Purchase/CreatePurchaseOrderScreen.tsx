@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShoppingBag, Plus, Trash2, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { Item, Party, PurchaseOrderItem, BusinessDetails, PurchaseOrder, InventoryLocation } from '../../types';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 import { createServerPurchaseOrder } from '../../services/api';
 import { useToast } from '../Common/ToastContext';
 
@@ -114,7 +114,7 @@ export const CreatePurchaseOrderScreen: React.FC<CreatePurchaseOrderScreenProps>
       return;
     }
 
-    const currentTenantId = business?.tenantId || 'default-tenant';
+    const currentTenantId = getActiveTenantId(business);
     const poId = `po-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
     const newPO: PurchaseOrder = {

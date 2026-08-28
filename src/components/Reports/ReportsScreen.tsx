@@ -21,7 +21,7 @@ import {
 import { Invoice, BusinessDetails, PurchaseBill, PurchaseReturn, PaymentIn, PaymentOut, Expense, SaleReturn, CashTransaction, Item, Party } from '../../types';
 import { triggerThermalPrint } from '../../services/printer';
 import { calculateProfitAndLoss, generatePartyLedger, calculateTaxSummary } from '../../services/reportsService';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 
 interface ReportsScreenProps {
   items?: Item[];
@@ -265,19 +265,21 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const [partiesList, setPartiesList] = useState<Party[]>(parties);
   const [selectedPartyId, setSelectedPartyId] = useState<number | ''>('');
 
+  const activeTenantId = getActiveTenantId(business);
+
   useEffect(() => {
     if (parties && parties.length > 0) {
       setPartiesList(parties);
       if (parties[0]?.id) setSelectedPartyId(parties[0].id);
     } else {
-      db.parties.toArray().then(pList => {
+      db.parties.filter(p => (p.tenantId || 'default-tenant') === activeTenantId).toArray().then(pList => {
         setPartiesList(pList);
         if (pList.length > 0 && pList[0]?.id) {
           setSelectedPartyId(pList[0].id);
         }
       });
     }
-  }, [parties]);
+  }, [parties, activeTenantId]);
 
   const selectedParty = useMemo(() => {
     return partiesList.find(p => p.id === Number(selectedPartyId)) || partiesList[0] || null;
@@ -289,7 +291,6 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const [expandedExpenses, setExpandedExpenses] = useState<boolean>(true);
   const [expandedCogs, setExpandedCogs] = useState<boolean>(true);
 
-  const activeTenantId = business?.tenantId || 'default-tenant';
   const [selectedFirm, setSelectedFirm] = useState<string>(activeTenantId || 'all');
   const [search, setSearch] = useState<string>('');
   const [showChart, setShowChart] = useState<boolean>(false);

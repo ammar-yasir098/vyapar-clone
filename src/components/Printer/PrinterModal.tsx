@@ -67,8 +67,9 @@ export const PrinterModal: React.FC<PrinterModalProps> = ({ business }) => {
   };
 
   const handleResetData = async () => {
-    if (confirm('Are you sure you want to delete ALL store products, bills, and party data? This will give you a 100% clean blank database.')) {
-      await clearAllDatabaseData();
+    const activeTenant = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+    if (confirm('Are you sure you want to delete ALL store products, inventory locations, bills, and party data for your store account? This will give you a clean blank database.')) {
+      await clearAllDatabaseData(activeTenant);
     }
   };
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShoppingCart, Plus, Trash2, CheckCircle2, User, FileText, ArrowUpRight } from 'lucide-react';
 import { Item, Party, InvoiceItem, PaymentMethod, BusinessDetails, PurchaseBill, InventoryLocation } from '../../types';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 import { createServerPurchase } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { useToast } from '../Common/ToastContext';
@@ -156,7 +156,7 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       return;
     }
 
-    const currentTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+    const currentTenantId = getActiveTenantId(business);
     const totalAmount = totalBillAmount;
     const paidAmt = paymentMethod === 'CREDIT' ? 0 : (paidAmount ? Math.max(0, parseFloat(paidAmount)) : totalAmount);
     const dueAmt = paymentMethod === 'CREDIT' ? totalAmount : Math.max(0, totalAmount - paidAmt);
@@ -249,7 +249,8 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
 
     // 2. Update Supplier Accounts Payable Ledger Balance (only for dueAmt)
     if (selectedSupplier?.id && dueAmt > 0) {
-      const curBal = safeNum(selectedSupplier.currentBalance);
+      const dbParty = await db.parties.get(selectedSupplier.id);
+      const curBal = safeNum(dbParty?.currentBalance !== undefined ? dbParty.currentBalance : selectedSupplier.currentBalance);
       const newBal = curBal + dueAmt;
       await db.parties.update(selectedSupplier.id, {
         currentBalance: newBal

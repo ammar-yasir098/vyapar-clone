@@ -10,7 +10,7 @@ import {
   FileText
 } from 'lucide-react';
 import { Party, Item, SaleReturn, SaleReturnItem, BusinessDetails } from '../../types';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 import { createServerSaleReturn } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { recordCashEntry } from '../../services/cash';
@@ -142,7 +142,7 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
     setIsSaving(true);
 
     try {
-      const activeTenant = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+      const activeTenant = getActiveTenantId(business);
       const uniqueReturnId = `cr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
       const newReturn: SaleReturn = {

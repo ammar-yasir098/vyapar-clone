@@ -55,12 +55,19 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   // Store vs Warehouse Stock Location State
   const [itemLocs, setItemLocs] = useState<ItemLocationMapping[]>([]);
   const [whLocationIds, setWhLocationIds] = useState<Set<number>>(new Set());
+  const [storeFrontLocationIds, setStoreFrontLocationIds] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     async function loadLocationData() {
       const locs = await db.locations.toArray();
       const whIds = new Set(locs.filter(l => l.type === 'WAREHOUSE').map(l => Number(l.id)));
+      const storeIds = new Set(
+        locs
+          .filter(l => l.isStoreFront || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE_FRONT')
+          .map(l => Number(l.id))
+      );
       setWhLocationIds(whIds);
+      setStoreFrontLocationIds(storeIds);
       const mappings = await db.itemLocations.toArray();
       setItemLocs(mappings);
     }
@@ -391,8 +398,9 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                         <div className="font-extrabold text-xs text-emerald-600 font-mono">Rs {Number(item.salesPrice || 0).toFixed(2)}</div>
                         {(() => {
                           const itemMaps = itemLocs.filter(il => Number(il.itemId) === Number(item.id) && il.quantity > 0);
-                          const whStock = itemMaps.reduce((sum: number, il: any) => sum + il.quantity, 0);
-                          const storeStock = Math.max(0, item.currentStock - whStock);
+                          const storeMaps = itemMaps.filter(il => storeFrontLocationIds.has(Number(il.locationId)));
+                          const storeStock = storeMaps.reduce((sum: number, il: any) => sum + il.quantity, 0);
+                          const whStock = Math.max(0, item.currentStock - storeStock);
 
                           return (
                             <div className="text-[9.5px] font-mono mt-0.5 flex items-center justify-end gap-1">
@@ -553,25 +561,25 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
         </div>
 
         {/* Right Drawer Summary Panel */}
-        <div className="w-84 bg-white border-l border-slate-200 flex flex-col p-4 shrink-0 justify-between shadow-xs space-y-3 overflow-y-auto">
+        <div className="w-88 bg-white border-l border-slate-200/80 flex flex-col p-4 shrink-0 justify-between shadow-xs space-y-3 overflow-y-auto">
           <div className="space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-              <h2 className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5">
-                <CreditCard className="w-4 h-4 text-blue-600" />
+            <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
+              <h2 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-indigo-600" />
                 <span>Checkout Summary</span>
               </h2>
               <button
                 onClick={handleResetBill}
-                className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1 font-semibold cursor-pointer"
+                className="text-xs text-slate-400 hover:text-rose-600 flex items-center gap-1 font-semibold cursor-pointer transition-colors"
               >
-                <RotateCcw className="w-3 h-3" />
+                <RotateCcw className="w-3.5 h-3.5" />
                 <span>Reset</span>
               </button>
             </div>
 
             {/* Quick Preset Discount Pills */}
             <div className="space-y-1.5">
-              <label className="text-[10px] font-extrabold text-slate-500 uppercase flex items-center gap-1">
+              <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest flex items-center gap-1">
                 <Tag className="w-3 h-3 text-amber-500" />
                 <span>Quick Discount Presets</span>
               </label>
@@ -580,14 +588,14 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                   <button
                     key={pct}
                     onClick={() => applyPresetDiscount(pct)}
-                    className="py-1 px-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded text-[11px] font-bold cursor-pointer transition"
+                    className="py-1.5 px-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200/80 rounded-lg text-[11px] font-extrabold cursor-pointer transition shadow-2xs"
                   >
                     {pct}% Off
                   </button>
                 ))}
                 <button
                   onClick={() => setDiscountTotal(0)}
-                  className="py-1 px-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[11px] font-bold cursor-pointer"
+                  className="py-1.5 px-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[11px] font-extrabold cursor-pointer transition"
                 >
                   Clear
                 </button>
@@ -595,7 +603,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
             </div>
 
             {/* Totals Breakdown */}
-            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2 text-xs">
+            <div className="bg-slate-50/80 p-4 rounded-2xl border border-slate-200/80 space-y-2.5 text-xs shadow-2xs">
               <div className="flex justify-between text-slate-600 font-semibold">
                 <span>Subtotal ({cartItems.length} items):</span>
                 <span className="font-mono text-slate-900 font-bold">Rs {subtotal.toFixed(2)}</span>
@@ -607,21 +615,21 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
               </div>
 
               {/* Discount Field */}
-              <div className="flex items-center justify-between pt-1.5 border-t border-slate-200">
-                <span className="text-slate-700 font-bold">Discount (Rs):</span>
+              <div className="flex items-center justify-between pt-2 border-t border-slate-200/80">
+                <span className="text-slate-700 font-extrabold">Discount (Rs):</span>
                 <input
                   type="number"
                   value={discountTotal || ''}
                   onChange={e => setDiscountTotal(parseFloat(e.target.value) || 0)}
                   placeholder="0.00"
-                  className="w-24 text-right bg-white border border-slate-300 rounded px-2 py-0.5 text-xs text-rose-600 font-mono font-bold"
+                  className="w-24 text-right bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs text-rose-600 font-mono font-black outline-none focus:border-indigo-500"
                 />
               </div>
 
               {/* Net Grand Total */}
               <div className="flex justify-between items-center pt-2.5 border-t-2 border-slate-300 text-sm">
                 <span className="font-black text-slate-900">NET GRAND TOTAL:</span>
-                <span className="font-mono font-black text-emerald-600 text-lg">
+                <span className="font-mono font-black text-emerald-600 text-xl tracking-tight">
                   Rs {grandTotal.toFixed(2)}
                 </span>
               </div>
@@ -629,7 +637,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
 
             {/* Payment Method Selector */}
             <div>
-              <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
+              <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest block mb-1.5">
                 Payment Method
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -637,9 +645,9 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                   <button
                     key={method}
                     onClick={() => setPaymentMethod(method)}
-                    className={`py-2 px-2 rounded-lg font-extrabold text-xs border transition flex items-center justify-center cursor-pointer ${paymentMethod === method
-                        ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
-                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
+                    className={`py-2.5 px-2 rounded-xl font-black text-xs border transition-all flex items-center justify-center cursor-pointer ${paymentMethod === method
+                        ? 'bg-gradient-to-r from-indigo-600 to-violet-600 border-indigo-600 text-white shadow-xs'
+                        : 'bg-slate-50 border-slate-200/80 text-slate-700 hover:border-slate-300 hover:bg-white'
                       }`}
                   >
                     {method === 'UPI' ? 'DIGITAL / APP' : method === 'CREDIT' ? 'PARTY CREDIT' : method}
@@ -650,21 +658,21 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
 
             {/* Cash Quick Tender Notes & Change Calculator */}
             {paymentMethod === 'CASH' && (
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+              <div className="bg-slate-50/80 p-3.5 rounded-2xl border border-slate-200/80 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
-                  <label className="text-xs font-bold text-slate-700 shrink-0">Amount Received:</label>
-                  <div className="flex items-center gap-1">
+                  <label className="text-xs font-extrabold text-slate-700 shrink-0">Amount Received:</label>
+                  <div className="flex items-center gap-1.5">
                     <input
                       type="number"
                       value={receivedAmount}
                       onChange={e => setReceivedAmount(e.target.value)}
                       placeholder="0.00"
-                      className="w-24 text-right bg-white border border-slate-300 rounded px-2 py-1 text-xs text-slate-900 font-mono font-bold outline-none focus:border-blue-500"
+                      className="w-24 text-right bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-900 font-mono font-black outline-none focus:border-indigo-500"
                     />
                     <button
                       type="button"
                       onClick={() => setReceivedAmount(grandTotal.toString())}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] px-2 py-1 rounded cursor-pointer transition shadow-xs shrink-0"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] px-2 py-1.5 rounded-lg cursor-pointer transition shadow-2xs shrink-0"
                       title="Fill exact bill amount as received cash"
                     >
                       Exact Paid
@@ -673,13 +681,13 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                 </div>
 
                 {/* Quick Tender Note Buttons */}
-                <div className="grid grid-cols-4 gap-1 pt-1">
+                <div className="grid grid-cols-4 gap-1.5 pt-1">
                   {[500, 1000, 5000].map(note => (
                     <button
                       key={note}
                       type="button"
                       onClick={() => setReceivedAmount(note.toString())}
-                      className="py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded text-[10px] font-mono font-bold text-slate-700 cursor-pointer"
+                      className="py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-[10px] font-mono font-extrabold text-slate-700 cursor-pointer shadow-2xs"
                     >
                       Rs {note}
                     </button>
@@ -687,16 +695,16 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => setReceivedAmount('')}
-                    className="py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[10px] font-bold cursor-pointer"
+                    className="py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-extrabold cursor-pointer"
                   >
                     Clear
                   </button>
                 </div>
 
                 {/* Live Status Indicator */}
-                <div className="flex justify-between items-center text-xs font-bold pt-2 border-t border-slate-200">
+                <div className="flex justify-between items-center text-xs font-bold pt-2 border-t border-slate-200/80">
                   <span className="text-slate-600">Status:</span>
-                  <span className={`px-2 py-0.5 rounded text-[11px] font-extrabold font-mono border ${paymentStatus === 'PAID'
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-black font-mono border ${paymentStatus === 'PAID'
                       ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                       : paymentStatus === 'PARTIAL'
                         ? 'bg-amber-50 text-amber-700 border-amber-200'
@@ -719,9 +727,9 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
           <button
             onClick={handleSaveAndPrint}
             disabled={cartItems.length === 0}
-            className="btn-vyapar-red w-full py-3.5 text-xs font-extrabold flex items-center justify-center gap-2 shadow-md cursor-pointer disabled:opacity-50"
+            className="btn-vyapar-emerald w-full py-3.5 text-xs font-black tracking-wide flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all cursor-pointer disabled:opacity-50"
           >
-            <Printer className="w-4 h-4" />
+            <Printer className="w-4 h-4 stroke-[2.5]" />
             <span>SAVE & PRINT RECEIPT [F8]</span>
           </button>
         </div>

@@ -62,6 +62,14 @@ export const DEFAULT_BUSINESS: BusinessDetails = {
 };
 
 /**
+ * Returns the currently active store tenant ID from business prop or localStorage
+ */
+export function getActiveTenantId(business?: { tenantId?: string }): string {
+  return business?.tenantId || (typeof localStorage !== 'undefined' ? localStorage.getItem('vyapar_current_tenant') : null) || 'default-tenant';
+}
+
+
+/**
  * Seeds default Walk-in Retail Customer for a specific store tenant if not present.
  * Automatically purges any duplicate Walk-in customer entries for that store.
  */
@@ -160,37 +168,61 @@ export async function seedDatabaseIfEmpty(tenantId?: string) {
 }
 
 /**
- * Wipes all operational store data from IndexedDB and cloud PostgreSQL (EXCEPT users and company profiles).
+ * Wipes operational and inventory store data specifically for a user/tenant from IndexedDB and cloud PostgreSQL.
+ * (EXCEPT user accounts and company profiles).
  */
-export async function clearAllDatabaseData() {
-  await db.items.clear();
-  await db.parties.clear();
-  await db.invoices.clear();
-  await db.syncJournal.clear();
-  await db.estimates.clear();
-  await db.paymentIn.clear();
-  await db.itemRestocks.clear();
-  await db.purchaseOrders.clear();
-  await db.purchaseBills.clear();
-  await db.paymentOut.clear();
-  await db.expenses.clear();
-  await db.purchaseReturns.clear();
-  await db.saleReturns.clear();
-  await db.cashTransactions.clear();
-  await db.cashAccounts.clear();
-  await db.locations.clear();
-  await db.itemLocations.clear();
-  await db.stockTransfers.clear();
+export async function clearAllDatabaseData(tenantId?: string) {
+  const targetTenantId = tenantId || (typeof localStorage !== 'undefined' ? localStorage.getItem('vyapar_current_tenant') : null) || 'default-tenant';
+
+  // Helper to delete records for target tenant from a Dexie table
+  const clearTenantRecords = async (table: Table<any, number>) => {
+    try {
+      const keysToDelete = await table
+        .filter(item => targetTenantId === 'ALL' || item.tenantId === targetTenantId || (!item.tenantId && targetTenantId === 'default-tenant'))
+        .primaryKeys();
+      if (keysToDelete.length > 0) {
+        await table.bulkDelete(keysToDelete as number[]);
+      }
+    } catch (err) {
+      console.warn('Failed clearing tenant records for table:', err);
+    }
+  };
+
+  await clearTenantRecords(db.items);
+  await clearTenantRecords(db.parties);
+  await clearTenantRecords(db.invoices);
+  await clearTenantRecords(db.syncJournal);
+  await clearTenantRecords(db.estimates);
+  await clearTenantRecords(db.paymentIn);
+  await clearTenantRecords(db.itemRestocks);
+  await clearTenantRecords(db.purchaseOrders);
+  await clearTenantRecords(db.purchaseBills);
+  await clearTenantRecords(db.paymentOut);
+  await clearTenantRecords(db.expenses);
+  await clearTenantRecords(db.purchaseReturns);
+  await clearTenantRecords(db.saleReturns);
+  await clearTenantRecords(db.cashTransactions);
+  await clearTenantRecords(db.cashAccounts);
+  await clearTenantRecords(db.locations);
+  await clearTenantRecords(db.itemLocations);
+  await clearTenantRecords(db.stockTransfers);
 
   // EXPLICITLY PRESERVED: db.companyProfiles and user sessions remain intact!
 
-  // Call server API to reset PostgreSQL tables using authenticated fetchWithTimeout
+  // Call server API to reset PostgreSQL tables for targetTenantId
   try {
     const { fetchWithTimeout, API_BASE_URL } = await import('../services/api');
-    await fetchWithTimeout(`${API_BASE_URL}/sync/reset`, { method: 'POST' });
+    await fetchWithTimeout(`${API_BASE_URL}/sync/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenantId: targetTenantId, resetAll: targetTenantId === 'ALL' })
+    });
   } catch (err) {
     console.warn('Server reset notification warning:', err);
   }
+
+  // Re-seed essential defaults for the reset tenant
+  await seedDatabaseIfEmpty(targetTenantId);
 
   if (typeof window !== 'undefined') {
     window.location.reload();

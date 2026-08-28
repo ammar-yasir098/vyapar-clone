@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 import { 
   Wallet, 
   ArrowDownLeft, 
@@ -32,16 +32,16 @@ interface CashInHandScreenProps {
 
 export const CashInHandScreen: React.FC<CashInHandScreenProps> = ({ business }) => {
   const { showToast } = useToast();
-  const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+  const activeTenantId = getActiveTenantId(business);
   const tenantId = activeTenantId;
 
-  // Live Dexie query listeners to reactively trigger reload on any transaction mutation
-  const liveInvoices = useLiveQuery(() => db.invoices.toArray(), []);
-  const livePaymentIn = useLiveQuery(() => db.paymentIn.toArray(), []);
-  const livePaymentOut = useLiveQuery(() => db.paymentOut.toArray(), []);
-  const liveExpenses = useLiveQuery(() => db.expenses.toArray(), []);
-  const livePurchaseBills = useLiveQuery(() => db.purchaseBills.toArray(), []);
-  const liveCashTxns = useLiveQuery(() => db.cashTransactions.toArray(), []);
+  // Live Dexie query listeners strictly scoped to active store tenantId
+  const liveInvoices = useLiveQuery(() => db.invoices.filter(i => (i.tenantId || 'default-tenant') === activeTenantId).toArray(), [activeTenantId]);
+  const livePaymentIn = useLiveQuery(() => db.paymentIn.filter(p => (p.tenantId || 'default-tenant') === activeTenantId).toArray(), [activeTenantId]);
+  const livePaymentOut = useLiveQuery(() => db.paymentOut.filter(p => (p.tenantId || 'default-tenant') === activeTenantId).toArray(), [activeTenantId]);
+  const liveExpenses = useLiveQuery(() => db.expenses.filter(e => (e.tenantId || 'default-tenant') === activeTenantId).toArray(), [activeTenantId]);
+  const livePurchaseBills = useLiveQuery(() => db.purchaseBills.filter(b => (b.tenantId || 'default-tenant') === activeTenantId).toArray(), [activeTenantId]);
+  const liveCashTxns = useLiveQuery(() => db.cashTransactions.filter(c => (c.tenantId || 'default-tenant') === activeTenantId).toArray(), [activeTenantId]);
 
   // Data States
   const [balanceInfo, setBalanceInfo] = useState({

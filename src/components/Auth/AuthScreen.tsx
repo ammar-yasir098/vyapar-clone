@@ -30,24 +30,24 @@ const StatCard: React.FC<{ icon: React.ReactNode; label: string; value: string; 
   }, [delay]);
   return (
     <div
-      className="flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-700"
+      className="flex items-center gap-3 rounded-2xl px-4 py-3 transition-all duration-700 hover:scale-102"
       style={{
         background: 'rgba(255,255,255,0.06)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        backdropFilter: 'blur(10px)',
+        border: '1px solid rgba(255,255,255,0.12)',
+        backdropFilter: 'blur(12px)',
         opacity: visible ? 1 : 0,
         transform: visible ? 'translateY(0)' : 'translateY(12px)',
       }}
     >
       <div
-        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-        style={{ background: `${color}22` }}
+        className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-xs"
+        style={{ background: `${color}25` }}
       >
         <span style={{ color }}>{icon}</span>
       </div>
       <div>
-        <div className="text-white text-sm font-bold">{value}</div>
-        <div className="text-slate-400 text-[11px]">{label}</div>
+        <div className="text-white text-sm font-extrabold font-mono tracking-tight">{value}</div>
+        <div className="text-slate-400 text-[11px] font-semibold">{label}</div>
       </div>
     </div>
   );
@@ -87,11 +87,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     if (/[^A-Za-z0-9]/.test(pass)) score += 1;
 
     switch (score) {
-      case 1: return { score: 1, label: 'Weak (min 8 chars needed)', color: '#ef4444' };
+      case 1: return { score: 1, label: 'Weak (min 8 chars needed)', color: '#f43f5e' };
       case 2: return { score: 2, label: 'Fair', color: '#f59e0b' };
-      case 3: return { score: 3, label: 'Good', color: '#3b82f6' };
+      case 3: return { score: 3, label: 'Good', color: '#6366f1' };
       case 4: return { score: 4, label: 'Strong', color: '#10b981' };
-      default: return { score: 0, label: 'Too Short (min 8 chars)', color: '#ef4444' };
+      default: return { score: 0, label: 'Too Short (min 8 chars)', color: '#f43f5e' };
     }
   };
 
@@ -172,12 +172,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
     paddingRight: '16px',
     background: '#f8fafc',
     border: '1.5px solid #e2e8f0',
-    borderRadius: '10px',
+    borderRadius: '12px',
     fontSize: '13px',
-    color: '#1e293b',
-    fontWeight: 500,
+    color: '#0f172a',
+    fontWeight: 600,
     outline: 'none',
-    transition: 'border-color 0.2s, box-shadow 0.2s',
+    transition: 'all 0.2s',
     fontFamily: 'inherit',
   };
 
@@ -197,7 +197,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         style={{
           width: '420px',
           minWidth: '420px',
-          background: 'linear-gradient(145deg, #0f172a 0%, #1a2744 45%, #0c1f3f 100%)',
+          background: 'linear-gradient(145deg, #0b1329 0%, #0f172a 50%, #1e1b4b 100%)',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
@@ -218,36 +218,36 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         <div style={{
           position: 'absolute', top: '-80px', right: '-60px',
           width: '300px', height: '300px',
-          background: 'radial-gradient(circle, rgba(59,130,246,0.18) 0%, transparent 70%)',
+          background: 'radial-gradient(circle, rgba(99,102,241,0.22) 0%, transparent 70%)',
           pointerEvents: 'none',
         }} />
         <div style={{
           position: 'absolute', bottom: '-60px', left: '-40px',
           width: '260px', height: '260px',
-          background: 'radial-gradient(circle, rgba(229,62,62,0.12) 0%, transparent 70%)',
+          background: 'radial-gradient(circle, rgba(139,92,246,0.18) 0%, transparent 70%)',
           pointerEvents: 'none',
         }} />
 
-        {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', position: 'relative' }}>
+        {/* Logo Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', position: 'relative' }}>
           <div style={{
-            width: '38px', height: '38px', borderRadius: '10px',
-            background: 'linear-gradient(135deg, #e53e3e, #c53030)',
+            width: '42px', height: '42px', borderRadius: '12px',
+            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 4px 12px rgba(229,62,62,0.4)',
+            boxShadow: '0 4px 14px rgba(99,102,241,0.45)',
           }}>
-            <Store style={{ width: '19px', height: '19px', color: '#fff', strokeWidth: 2.5 }} />
+            <Store style={{ width: '22px', height: '22px', color: '#fff', strokeWidth: 2.5 }} />
           </div>
           <div>
-            <div style={{ color: '#fff', fontWeight: 800, fontSize: '17px', letterSpacing: '-0.3px', lineHeight: 1.1 }}>
+            <div style={{ color: '#fff', fontWeight: 900, fontSize: '18px', letterSpacing: '-0.3px', lineHeight: 1.1 }}>
               Vyapar POS
             </div>
             <div style={{
-              display: 'inline-block', fontSize: '9px', padding: '1px 7px', borderRadius: '4px',
-              background: 'rgba(59,130,246,0.25)', color: '#93c5fd',
-              fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+              display: 'inline-block', fontSize: '9px', padding: '1px 8px', borderRadius: '6px',
+              background: 'rgba(99,102,241,0.25)', color: '#a5b4fc',
+              fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: '2px',
             }}>
-              Enterprise
+              Enterprise Edition
             </div>
           </div>
         </div>
@@ -265,14 +265,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           >
             Run your business<br />
             <span style={{
-              background: 'linear-gradient(90deg, #60a5fa, #818cf8)',
+              background: 'linear-gradient(90deg, #818cf8, #c084fc)',
               WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
             }}>
               smarter, faster.
             </span>
           </div>
           <div style={{
-            fontSize: '12.5px', color: '#94a3b8', lineHeight: 1.6, marginBottom: '28px',
+            fontSize: '12.5px', color: '#94a3b8', lineHeight: 1.6, marginBottom: '28px', fontWeight: 500,
             opacity: mounted ? 1 : 0,
             transition: 'all 0.7s 0.1s cubic-bezier(0.22,1,0.36,1)',
           }}>
@@ -281,20 +281,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <StatCard icon={<TrendingUp style={{ width: 16, height: 16 }} />} label="Revenue tracked" value="Rs 2,40,000" color="#34d399" delay={200} />
-            <StatCard icon={<Package style={{ width: 16, height: 16 }} />} label="Items in catalog" value="1,248 Products" color="#60a5fa" delay={350} />
-            <StatCard icon={<Users style={{ width: 16, height: 16 }} />} label="Active parties" value="364 Customers" color="#f472b6" delay={500} />
-            <StatCard icon={<Receipt style={{ width: 16, height: 16 }} />} label="Bills saved today" value="47 Invoices" color="#fb923c" delay={650} />
+            <StatCard icon={<TrendingUp style={{ width: 17, height: 17 }} />} label="Revenue tracked" value="Rs 2,40,000" color="#10b981" delay={200} />
+            <StatCard icon={<Package style={{ width: 17, height: 17 }} />} label="Items in catalog" value="1,248 Products" color="#6366f1" delay={350} />
+            <StatCard icon={<Users style={{ width: 17, height: 17 }} />} label="Active parties" value="364 Customers" color="#ec4899" delay={500} />
+            <StatCard icon={<Receipt style={{ width: 17, height: 17 }} />} label="Bills saved today" value="47 Invoices" color="#f59e0b" delay={650} />
           </div>
         </div>
 
         {/* Bottom trust line */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', position: 'relative' }}>
           {[
-            { icon: <ShieldCheck style={{ width: 13, height: 13, color: '#34d399' }} />, text: '256-bit SSL' },
-            { icon: <CheckCircle2 style={{ width: 13, height: 13, color: '#60a5fa' }} />, text: 'Full offline mode' },
+            { icon: <ShieldCheck style={{ width: 14, height: 14, color: '#10b981' }} />, text: '256-bit SSL' },
+            { icon: <CheckCircle2 style={{ width: 14, height: 14, color: '#6366f1' }} />, text: 'Full offline mode' },
           ].map(({ icon, text }) => (
-            <div key={text} style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#64748b', fontSize: '11px', fontWeight: 500 }}>
+            <div key={text} style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#64748b', fontSize: '11px', fontWeight: 600 }}>
               {icon} {text}
             </div>
           ))}
@@ -307,8 +307,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'flex-start',
-        background: '#f1f5f9',
+        justifyContent: 'center',
+        background: '#f8fafc',
         padding: '32px 24px',
         position: 'relative',
         overflowY: 'auto',
@@ -318,7 +318,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
         <div style={{
           position: 'absolute', top: '-100px', right: '-80px',
           width: '320px', height: '320px',
-          background: 'radial-gradient(circle, rgba(59,130,246,0.07) 0%, transparent 70%)',
+          background: 'radial-gradient(circle, rgba(99,102,241,0.08) 0%, transparent 70%)',
           pointerEvents: 'none',
         }} />
 
@@ -332,25 +332,26 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           }}
         >
           {/* Mobile logo */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '28px' }}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '24px' }}
             className="flex lg:hidden">
             <div style={{
-              width: '34px', height: '34px', borderRadius: '9px',
-              background: 'linear-gradient(135deg, #e53e3e, #c53030)',
+              width: '38px', height: '38px', borderRadius: '10px',
+              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(99,102,241,0.3)',
             }}>
-              <Store style={{ width: '17px', height: '17px', color: '#fff', strokeWidth: 2.5 }} />
+              <Store style={{ width: '19px', height: '19px', color: '#fff', strokeWidth: 2.5 }} />
             </div>
-            <span style={{ fontWeight: 800, color: '#1e293b', fontSize: '16px' }}>Vyapar POS</span>
+            <span style={{ fontWeight: 900, color: '#0f172a', fontSize: '18px' }}>Vyapar POS</span>
           </div>
 
-          {/* Card */}
+          {/* Auth Card */}
           <div style={{
-            background: '#fff',
-            borderRadius: '20px',
-            boxShadow: '0 4px 6px -1px rgba(0,0,0,0.07), 0 20px 60px -10px rgba(0,0,0,0.12)',
+            background: '#ffffff',
+            borderRadius: '24px',
+            boxShadow: '0 4px 6px -1px rgba(0,0,0,0.04), 0 20px 50px -10px rgba(15,23,42,0.08)',
             border: '1px solid rgba(226,232,240,0.8)',
-            padding: '28px 28px 24px',
+            padding: '32px 30px 28px',
             maxHeight: 'calc(100vh - 64px)',
             overflowY: 'auto',
           }}>
@@ -358,13 +359,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             <div style={{ marginBottom: '22px' }}>
               <h1 style={{ margin: 0, fontSize: '22px', fontWeight: 900, color: '#0f172a', letterSpacing: '-0.4px' }}>
                 {mode === 'login' && 'Welcome back 👋'}
-                {mode === 'register' && 'Create your account'}
+                {mode === 'register' && 'Create your store account'}
                 {mode === 'forgot' && 'Reset your password'}
                 {mode === 'reset' && 'Enter reset token'}
               </h1>
-              <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: '#94a3b8', fontWeight: 500 }}>
+              <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: '#64748b', fontWeight: 500 }}>
                 {mode === 'login' && 'Enter your credentials to access your store'}
-                {mode === 'register' && 'Fill in the details to set up your business'}
+                {mode === 'register' && 'Fill in details to set up your business'}
                 {mode === 'forgot' && 'Enter your registered email to receive a password reset token'}
                 {mode === 'reset' && 'Enter the reset PIN and your new password'}
               </p>
@@ -373,8 +374,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             {/* Mode Switcher Tabs (Only for Login & Register) */}
             {(mode === 'login' || mode === 'register') && (
               <div style={{
-                display: 'flex', background: '#f1f5f9', borderRadius: '10px',
-                padding: '4px', marginBottom: '22px', gap: '4px',
+                display: 'flex', background: '#f1f5f9', borderRadius: '12px',
+                padding: '4px', marginBottom: '22px', gap: '4px', border: '1px solid #e2e8f0',
               }}>
                 {(['login', 'register'] as const).map(m => (
                   <button
@@ -382,12 +383,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                     type="button"
                     onClick={() => { setMode(m); setErrorMessage(null); setSuccessMessage(null); }}
                     style={{
-                      flex: 1, padding: '8px 0', fontSize: '12px', fontWeight: 700,
-                      borderRadius: '7px', border: 'none', cursor: 'pointer',
+                      flex: 1, padding: '9px 0', fontSize: '12px', fontWeight: 800,
+                      borderRadius: '9px', border: 'none', cursor: 'pointer',
                       transition: 'all 0.25s',
-                      background: mode === m ? '#fff' : 'transparent',
-                      color: mode === m ? '#0f172a' : '#94a3b8',
-                      boxShadow: mode === m ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
+                      background: mode === m ? 'linear-gradient(135deg, #6366f1, #4f46e5)' : 'transparent',
+                      color: mode === m ? '#ffffff' : '#64748b',
+                      boxShadow: mode === m ? '0 2px 8px rgba(99,102,241,0.35)' : 'none',
                       fontFamily: 'inherit',
                     }}
                   >
@@ -402,11 +403,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
               <div style={{
                 display: 'flex', alignItems: 'flex-start', gap: '8px',
                 background: '#ecfdf5', border: '1.5px solid #a7f3d0',
-                borderRadius: '10px', padding: '10px 12px',
-                color: '#065f46', fontSize: '12px', fontWeight: 500,
+                borderRadius: '12px', padding: '10px 12px',
+                color: '#065f46', fontSize: '12px', fontWeight: 600,
                 marginBottom: '16px',
               }}>
-                <CheckCircle2 style={{ width: 14, height: 14, marginTop: 1, flexShrink: 0 }} />
+                <CheckCircle2 style={{ width: 15, height: 15, marginTop: 1, flexShrink: 0 }} />
                 {successMessage}
               </div>
             )}
@@ -415,12 +416,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             {errorMessage && (
               <div style={{
                 display: 'flex', alignItems: 'flex-start', gap: '8px',
-                background: '#fef2f2', border: '1.5px solid #fecaca',
-                borderRadius: '10px', padding: '10px 12px',
-                color: '#dc2626', fontSize: '12px', fontWeight: 500,
+                background: '#fff1f2', border: '1.5px solid #fecdd3',
+                borderRadius: '12px', padding: '10px 12px',
+                color: '#be123c', fontSize: '12px', fontWeight: 600,
                 marginBottom: '16px',
               }}>
-                <AlertCircle style={{ width: 14, height: 14, marginTop: 1, flexShrink: 0 }} />
+                <AlertCircle style={{ width: 15, height: 15, marginTop: 1, flexShrink: 0 }} />
                 {errorMessage}
               </div>
             )}
@@ -439,7 +440,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                         onChange={e => setBusinessName(e.target.value)}
                         placeholder="e.g. SuperMarket Retailers"
                         style={inputBase}
-                        onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                        onFocus={e => { e.target.style.borderColor = '#6366f1'; e.target.style.boxShadow = '0 0 0 3.5px rgba(99,102,241,0.15)'; e.target.style.background = '#fff'; }}
                         onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
                       />
                     </Field>
@@ -451,7 +452,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                         onChange={e => setFullName(e.target.value)}
                         placeholder="e.g. Ammar Yasir"
                         style={inputBase}
-                        onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                        onFocus={e => { e.target.style.borderColor = '#6366f1'; e.target.style.boxShadow = '0 0 0 3.5px rgba(99,102,241,0.15)'; e.target.style.background = '#fff'; }}
                         onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
                       />
                     </Field>
@@ -463,14 +464,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                         onChange={e => setPhone(e.target.value)}
                         placeholder="+92 300 xxxxxxx"
                         style={inputBase}
-                        onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                        onFocus={e => { e.target.style.borderColor = '#6366f1'; e.target.style.boxShadow = '0 0 0 3.5px rgba(99,102,241,0.15)'; e.target.style.background = '#fff'; }}
                         onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
                       />
                     </Field>
                   </>
                 )}
 
-                {/* Email (Shown in Login, Register, Forgot, Reset) */}
+                {/* Email */}
                 <Field label="Email Address">
                   <Mail style={{ width: 14, height: 14, color: '#94a3b8', position: 'absolute', left: 13, top: 15 }} />
                   <input
@@ -478,7 +479,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                     onChange={e => setEmail(e.target.value)}
                     placeholder="admin@vyapar.com"
                     style={inputBase}
-                    onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                    onFocus={e => { e.target.style.borderColor = '#6366f1'; e.target.style.boxShadow = '0 0 0 3.5px rgba(99,102,241,0.15)'; e.target.style.background = '#fff'; }}
                     onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
                   />
                 </Field>
@@ -493,7 +494,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                       onChange={e => setPassword(e.target.value)}
                       placeholder="••••••••"
                       style={{ ...inputBase, paddingRight: '40px' }}
-                      onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                      onFocus={e => { e.target.style.borderColor = '#6366f1'; e.target.style.boxShadow = '0 0 0 3.5px rgba(99,102,241,0.15)'; e.target.style.background = '#fff'; }}
                       onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
                     />
                     <button
@@ -512,7 +513,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                   </Field>
                 )}
 
-                {/* Real-time Password Strength Indicator for Registration */}
+                {/* Real-time Password Strength Indicator */}
                 {mode === 'register' && password && (
                   <div style={{ marginTop: '-4px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
@@ -530,7 +531,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                   </div>
                 )}
 
-                {/* Forgot Password Link on Login Form */}
+                {/* Forgot Password Link */}
                 {mode === 'login' && (
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-6px' }}>
                     <button
@@ -538,16 +539,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                       onClick={() => { setMode('forgot'); setErrorMessage(null); setSuccessMessage(null); }}
                       style={{
                         background: 'none', border: 'none', cursor: 'pointer',
-                        fontSize: '11.5px', color: '#3b82f6', fontWeight: 600,
+                        fontSize: '11.5px', color: '#6366f1', fontWeight: 700,
                         padding: 0, fontFamily: 'inherit'
                       }}
+                      className="hover:underline"
                     >
                       Forgot password?
                     </button>
                   </div>
                 )}
 
-                {/* Reset Token & New Password Inputs for Reset Mode */}
+                {/* Reset Token & New Password Inputs */}
                 {mode === 'reset' && (
                   <>
                     <Field label="Reset Token / PIN">
@@ -557,7 +559,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                         onChange={e => setResetTokenInput(e.target.value)}
                         placeholder="e.g. 123456"
                         style={inputBase}
-                        onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                        onFocus={e => { e.target.style.borderColor = '#6366f1'; e.target.style.boxShadow = '0 0 0 3.5px rgba(99,102,241,0.15)'; e.target.style.background = '#fff'; }}
                         onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
                       />
                     </Field>
@@ -570,7 +572,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                         onChange={e => setNewPassword(e.target.value)}
                         placeholder="••••••••"
                         style={{ ...inputBase, paddingRight: '40px' }}
-                        onFocus={e => { e.target.style.borderColor = '#3b82f6'; e.target.style.boxShadow = '0 0 0 3px rgba(59,130,246,0.12)'; e.target.style.background = '#fff'; }}
+                        onFocus={e => { e.target.style.borderColor = '#6366f1'; e.target.style.boxShadow = '0 0 0 3.5px rgba(99,102,241,0.15)'; e.target.style.background = '#fff'; }}
                         onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = 'none'; e.target.style.background = '#f8fafc'; }}
                       />
                       <button
@@ -590,7 +592,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                   </>
                 )}
 
-                {/* Back to Login Button for Forgot / Reset Modes */}
+                {/* Back to Login Button */}
                 {(mode === 'forgot' || mode === 'reset') && (
                   <button
                     type="button"
@@ -611,22 +613,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                   type="submit"
                   disabled={loading}
                   style={{
-                    width: '100%', height: '46px', marginTop: '4px',
+                    width: '100%', height: '46px', marginTop: '6px',
                     background: loading
-                      ? '#c53030'
-                      : 'linear-gradient(135deg, #e53e3e 0%, #c53030 100%)',
-                    border: 'none', borderRadius: '11px',
-                    color: '#fff', fontSize: '13px', fontWeight: 700,
+                      ? '#4338ca'
+                      : 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                    border: 'none', borderRadius: '12px',
+                    color: '#fff', fontSize: '13px', fontWeight: 800,
                     cursor: loading ? 'not-allowed' : 'pointer',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-                    boxShadow: loading ? 'none' : '0 4px 14px rgba(229,62,62,0.45)',
+                    boxShadow: loading ? 'none' : '0 4px 16px rgba(99,102,241,0.4)',
                     transition: 'all 0.2s',
                     fontFamily: 'inherit',
                     opacity: loading ? 0.8 : 1,
                     letterSpacing: '0.01em',
                   }}
-                  onMouseEnter={e => { if (!loading) { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 6px 20px rgba(229,62,62,0.5)'; } }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = loading ? 'none' : '0 4px 14px rgba(229,62,62,0.45)'; }}
+                  onMouseEnter={e => { if (!loading) { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-1px)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 6px 20px rgba(99,102,241,0.5)'; } }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(0)'; (e.currentTarget as HTMLButtonElement).style.boxShadow = loading ? 'none' : '0 4px 16px rgba(99,102,241,0.4)'; }}
                 >
                   {loading ? (
                     <>
@@ -653,7 +655,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
               </div>
             </form>
 
-            {/* Demo helper */}
+            {/* Demo Helper Pill */}
             {mode === 'login' && (
               <div style={{
                 marginTop: '18px', paddingTop: '16px',
@@ -667,29 +669,29 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                   type="button"
                   onClick={fillDemoAccount}
                   style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: '5px',
-                    fontSize: '11.5px', fontWeight: 700, color: '#3b82f6',
-                    fontFamily: 'inherit', padding: 0,
+                    background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '4px 10px',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px',
+                    fontSize: '11.5px', fontWeight: 800, color: '#2563eb',
+                    fontFamily: 'inherit', transition: 'all 0.2s',
                   }}
-                  onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.color = '#2563eb'}
-                  onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = '#3b82f6'}
+                  onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#dbeafe'}
+                  onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = '#eff6ff'}
                 >
-                  <Sparkles style={{ width: 12, height: 12 }} />
+                  <Sparkles style={{ width: 13, height: 13 }} />
                   Fill Demo Admin
                 </button>
               </div>
             )}
           </div>
 
-          {/* Trust badges */}
+          {/* Trust Badges */}
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            gap: '20px', marginTop: '18px',
+            gap: '20px', marginTop: '20px',
           }}>
             {[
               { icon: <ShieldCheck style={{ width: 13, height: 13, color: '#10b981' }} />, text: '256-Bit SSL Cloud' },
-              { icon: <CheckCircle2 style={{ width: 13, height: 13, color: '#3b82f6' }} />, text: 'Full Offline POS Mode' },
+              { icon: <CheckCircle2 style={{ width: 13, height: 13, color: '#6366f1' }} />, text: 'Full Offline POS Mode' },
             ].map(({ icon, text }) => (
               <div key={text} style={{
                 display: 'flex', alignItems: 'center', gap: '5px',

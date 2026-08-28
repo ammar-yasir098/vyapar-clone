@@ -426,6 +426,7 @@ export interface InventoryLocation {
   capacity?: number;
   description?: string;
   isShared?: boolean;
+  isStoreFront?: boolean;
   allowedTenantIds?: string[];
   createdAt?: string;
 }

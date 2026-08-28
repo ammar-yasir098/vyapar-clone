@@ -92,14 +92,15 @@ export const SyncModal: React.FC<SyncModalProps> = ({ isOpen, onClose }) => {
   };
 
   const handleResetAllData = async () => {
+    const activeTenant = localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
     showConfirm({
-      title: 'Reset All Store Data (Excluding Users & Company Profiles)',
-      message: 'Are you sure you want to delete ALL store products, parties, invoices, orders, bills, expenses, and location stock across ALL store branches in local IndexedDB and cloud PostgreSQL? Your User Accounts and Company Profiles will be preserved.',
+      title: 'Reset Store & Inventory Data (Current User Store)',
+      message: 'Are you sure you want to delete ALL operational store data (products, customers, invoices, bills, expenses) and ALL inventory data (warehouses, locations, shelves, storefront stocks, and stock transfers) for your active store account in IndexedDB and cloud PostgreSQL? Your User Account and Company Profile will be preserved.',
       type: 'danger',
-      confirmText: 'Yes, Reset All Data',
+      confirmText: 'Yes, Reset My Store Data',
       onConfirm: async () => {
         try {
-          await clearAllDatabaseData();
+          await clearAllDatabaseData(activeTenant);
         } catch (err: any) {
           showToast(`Reset failed: ${err.message}`, 'error');
         }

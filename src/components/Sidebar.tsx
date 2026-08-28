@@ -11,7 +11,8 @@ import {
   ChevronRight,
   ChevronDown,
   ShoppingBag,
-  ShieldCheck
+  ShieldCheck,
+  Zap
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -19,12 +20,12 @@ interface SidebarProps {
   setActiveTab: (tab: string) => void;
 }
 
-const SIDEBAR_BG   = '#111827';   // rich dark navy
-const ACTIVE_BG    = '#1f2d3d';   // slightly lighter active bg
-const HOVER_BG     = '#1a2535';   // hover background
-const TEXT_NORMAL  = '#9ca3af';   // default text/icon
-const TEXT_ACTIVE  = '#ffffff';   // active text
-const TEXT_HOVER   = '#e2e8f0';   // hover text
+const SIDEBAR_BG   = '#0b1329';   // Rich midnight dark navy
+const ACTIVE_BG    = 'linear-gradient(135deg, rgba(99, 102, 241, 0.22), rgba(139, 92, 246, 0.15))'; // Indigo-violet gradient active
+const HOVER_BG     = '#141e38';   // Smooth hover background
+const TEXT_NORMAL  = '#94a3b8';   // Default text/icon
+const TEXT_ACTIVE  = '#ffffff';   // Active text
+const TEXT_HOVER   = '#f1f5f9';   // Hover text
 
 // Top-level nav item
 const NavItem: React.FC<{
@@ -33,34 +34,41 @@ const NavItem: React.FC<{
   isActive: boolean;
   onClick: () => void;
   accentColor?: string;
-}> = ({ icon: Icon, label, isActive, onClick, accentColor = '#e53e3e' }) => {
+}> = ({ icon: Icon, label, isActive, onClick, accentColor = '#6366f1' }) => {
   const [hovered, setHovered] = useState(false);
   return (
     <button
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] font-medium transition-all cursor-pointer relative"
+      className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[13px] font-semibold transition-all cursor-pointer relative group"
       style={{
         background: isActive ? ACTIVE_BG : hovered ? HOVER_BG : 'transparent',
         color: isActive ? TEXT_ACTIVE : hovered ? TEXT_HOVER : TEXT_NORMAL,
-        fontWeight: isActive ? 600 : 500,
+        border: isActive ? '1px solid rgba(99, 102, 241, 0.25)' : '1px solid transparent',
       }}
     >
-      {/* Accent bar on active */}
+      {/* Accent pill bar on active */}
       {isActive && (
         <span
-          className="absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full"
-          style={{ width: '3px', height: '18px', background: accentColor }}
+          className="absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full shadow-xs"
+          style={{ width: '3.5px', height: '20px', background: accentColor }}
         />
       )}
-      <Icon
+      <div
+        className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition-transform group-hover:scale-105"
         style={{
-          width: 16, height: 16, flexShrink: 0,
-          color: isActive ? accentColor : hovered ? TEXT_HOVER : TEXT_NORMAL,
+          background: isActive ? `${accentColor}25` : 'transparent',
         }}
-      />
-      <span style={{ letterSpacing: '-0.1px' }}>{label}</span>
+      >
+        <Icon
+          style={{
+            width: 16, height: 16,
+            color: isActive ? accentColor : hovered ? TEXT_HOVER : TEXT_NORMAL,
+          }}
+        />
+      </div>
+      <span className="tracking-tight">{label}</span>
     </button>
   );
 };
@@ -73,7 +81,8 @@ const GroupHeader: React.FC<{
   isOpen: boolean;
   onClick: () => void;
   accentColor?: string;
-}> = ({ icon: Icon, label, isActive, isOpen, onClick, accentColor = '#e53e3e' }) => {
+  badgeCount?: number;
+}> = ({ icon: Icon, label, isActive, isOpen, onClick, accentColor = '#6366f1', badgeCount }) => {
   const [hovered, setHovered] = useState(false);
   return (
     <button
@@ -81,37 +90,51 @@ const GroupHeader: React.FC<{
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-[13px] transition-all cursor-pointer relative"
+      className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-[13px] font-semibold transition-all cursor-pointer relative group"
       style={{
         background: isActive ? ACTIVE_BG : hovered ? HOVER_BG : 'transparent',
         color: isActive ? TEXT_ACTIVE : hovered ? TEXT_HOVER : TEXT_NORMAL,
-        fontWeight: isActive ? 600 : 500,
+        border: isActive ? '1px solid rgba(99, 102, 241, 0.25)' : '1px solid transparent',
       }}
     >
       {isActive && (
         <span
-          className="absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full"
-          style={{ width: '3px', height: '18px', background: accentColor }}
+          className="absolute left-0 top-1/2 -translate-y-1/2 rounded-r-full shadow-xs"
+          style={{ width: '3.5px', height: '20px', background: accentColor }}
         />
       )}
       <div className="flex items-center gap-3">
-        <Icon
+        <div
+          className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 transition-transform group-hover:scale-105"
           style={{
-            width: 16, height: 16, flexShrink: 0,
-            color: isActive ? accentColor : hovered ? TEXT_HOVER : TEXT_NORMAL,
+            background: isActive ? `${accentColor}25` : 'transparent',
+          }}
+        >
+          <Icon
+            style={{
+              width: 16, height: 16,
+              color: isActive ? accentColor : hovered ? TEXT_HOVER : TEXT_NORMAL,
+            }}
+          />
+        </div>
+        <span className="tracking-tight">{label}</span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        {badgeCount !== undefined && badgeCount > 0 && (
+          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700">
+            {badgeCount}
+          </span>
+        )}
+        <ChevronDown
+          style={{
+            width: 14, height: 14,
+            color: isOpen ? accentColor : '#64748b',
+            transform: isOpen ? 'rotate(180deg)' : 'none',
+            transition: 'transform 0.22s cubic-bezier(0.16,1,0.3,1)',
+            flexShrink: 0,
           }}
         />
-        <span style={{ letterSpacing: '-0.1px' }}>{label}</span>
       </div>
-      <ChevronDown
-        style={{
-          width: 14, height: 14,
-          color: '#475569',
-          transform: isOpen ? 'rotate(180deg)' : 'none',
-          transition: 'transform 0.2s',
-          flexShrink: 0,
-        }}
-      />
     </button>
   );
 };
@@ -123,7 +146,7 @@ const SubItem: React.FC<{
   isActive: boolean;
   onClick: () => void;
   activeColor?: string;
-}> = ({ label, dotColor, isActive, onClick, activeColor = '#e53e3e' }) => {
+}> = ({ label, dotColor, isActive, onClick, activeColor = '#6366f1' }) => {
   const [hovered, setHovered] = useState(false);
   return (
     <button
@@ -131,21 +154,21 @@ const SubItem: React.FC<{
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12px] transition-all cursor-pointer"
+      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12px] font-semibold transition-all cursor-pointer"
       style={{
-        background: isActive ? activeColor : hovered ? 'rgba(255,255,255,0.06)' : 'transparent',
-        color: isActive ? '#fff' : hovered ? TEXT_HOVER : TEXT_NORMAL,
-        fontWeight: isActive ? 700 : 500,
+        background: isActive ? activeColor : hovered ? 'rgba(255,255,255,0.07)' : 'transparent',
+        color: isActive ? '#ffffff' : hovered ? TEXT_HOVER : TEXT_NORMAL,
       }}
     >
       <span
         style={{
           width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-          background: isActive ? 'rgba(255,255,255,0.8)' : dotColor,
+          background: isActive ? '#ffffff' : dotColor,
+          boxShadow: isActive ? `0 0 8px ${dotColor}` : 'none',
           display: 'inline-block',
         }}
       />
-      {label}
+      <span className="truncate">{label}</span>
     </button>
   );
 };
@@ -153,14 +176,11 @@ const SubItem: React.FC<{
 // Section divider label
 const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div
-    className="px-3 pb-1.5"
+    className="px-3.5 pb-1.5 tracking-wider uppercase font-black"
     style={{
-      paddingTop: '20px',
-      fontSize: '10.5px',
-      fontWeight: 800,
-      textTransform: 'uppercase',
-      letterSpacing: '0.12em',
-      color: '#94a3b8',
+      paddingTop: '18px',
+      fontSize: '10px',
+      color: '#64748b',
     }}
   >
     {children}
@@ -182,10 +202,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
     marginLeft: '14px',
     marginTop: '3px',
     marginBottom: '3px',
-    padding: '6px',
+    padding: '5px',
     borderRadius: '12px',
-    background: 'rgba(0,0,0,0.3)',
-    borderLeft: '2px solid rgba(255,255,255,0.07)',
+    background: 'rgba(0,0,0,0.35)',
+    borderLeft: '2px solid rgba(255,255,255,0.08)',
     display: 'flex',
     flexDirection: 'column',
     gap: '2px',
@@ -193,27 +213,42 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
 
   return (
     <aside
-      className="w-56 flex flex-col shrink-0 select-none"
+      className="w-58 flex flex-col shrink-0 select-none shadow-md z-20"
       style={{
         background: SIDEBAR_BG,
-        borderRight: '1px solid rgba(255,255,255,0.07)',
-        fontFamily: "'Inter','Plus Jakarta Sans',sans-serif",
+        borderRight: '1px solid rgba(255,255,255,0.08)',
+        fontFamily: "'Plus Jakarta Sans','Inter',sans-serif",
       }}
     >
-      {/* Scrollable nav area */}
-      <div
-        className="flex-1 overflow-y-auto sidebar-scroll"
-        style={{ padding: '8px 8px 0', display: 'flex', flexDirection: 'column', gap: '2px' }}
-      >
-        <SectionLabel>Main</SectionLabel>
+      {/* Sidebar Brand Header */}
+      <div className="p-3.5 border-b border-white/8 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white flex items-center justify-center font-black shadow-sm">
+            <Zap className="w-4 h-4 fill-white" />
+          </div>
+          <div>
+            <div className="text-xs font-black text-white tracking-wider uppercase">Vyapar POS</div>
+            <div className="text-[10px] text-slate-400 font-semibold">Offline-First Retail</div>
+          </div>
+        </div>
+        <span className="text-[9.5px] font-mono font-bold px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+          v2.5
+        </span>
+      </div>
 
-        <NavItem icon={Home}  label="Home"    isActive={activeTab === 'home'}    onClick={() => setActiveTab('home')} />
-        <NavItem icon={Users} label="Parties" isActive={activeTab === 'parties'} onClick={() => setActiveTab('parties')} />
+      {/* Scrollable Nav Items */}
+      <div
+        className="flex-1 overflow-y-auto sidebar-scroll px-2 py-1 flex flex-col gap-1"
+      >
+        <SectionLabel>Main Workspace</SectionLabel>
+
+        <NavItem icon={Home}  label="Home Dashboard" isActive={activeTab === 'home'}    onClick={() => setActiveTab('home')} accentColor="#6366f1" />
+        <NavItem icon={Users} label="Parties & Directory" isActive={activeTab === 'parties'} onClick={() => setActiveTab('parties')} accentColor="#3b82f6" />
 
         {/* INVENTORY */}
         <GroupHeader
           icon={Package}
-          label="Inventory"
+          label="Inventory & Stock"
           isActive={isInventoryActive}
           isOpen={isInventoryOpen}
           onClick={() => setIsInventoryOpen(p => !p)}
@@ -221,9 +256,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
         />
         {isInventoryOpen && (
           <div style={subMenuStyle}>
-            <SubItem dotColor="#8b5cf6" label="Stock"             isActive={activeTab === 'inventory'}          onClick={() => setActiveTab('inventory')}          activeColor="#8b5cf6" />
+            <SubItem dotColor="#8b5cf6" label="Stock Catalog"      isActive={activeTab === 'inventory'}          onClick={() => setActiveTab('inventory')}          activeColor="#8b5cf6" />
             <SubItem dotColor="#10b981" label="Store Front Stock" isActive={activeTab === 'inventory-store'}    onClick={() => setActiveTab('inventory-store')}    activeColor="#8b5cf6" />
-            <SubItem dotColor="#3b82f6" label="Location"          isActive={activeTab === 'inventory-location'} onClick={() => setActiveTab('inventory-location')} activeColor="#8b5cf6" />
+            <SubItem dotColor="#3b82f6" label="Warehouse & Shelf" isActive={activeTab === 'inventory-location'} onClick={() => setActiveTab('inventory-location')} activeColor="#8b5cf6" />
           </div>
         )}
 
@@ -232,19 +267,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
         {/* SALE */}
         <GroupHeader
           icon={ShoppingCart}
-          label="Sale"
+          label="Sale Operations"
           isActive={isSaleActive}
           isOpen={isSaleOpen}
           onClick={() => setIsSaleOpen(p => !p)}
-          accentColor="#e53e3e"
+          accentColor="#ef4444"
         />
         {isSaleOpen && (
           <div style={subMenuStyle}>
-            <SubItem dotColor="#e53e3e" label="POS"                 isActive={activeTab === 'pos'}                                                         onClick={() => setActiveTab('pos')} activeColor="#e53e3e" />
-            <SubItem dotColor="#10b981" label="Payment-In"          isActive={activeTab === 'payment-in'}                                                  onClick={() => setActiveTab('payment-in')} activeColor="#e53e3e" />
-            <SubItem dotColor="#f59e0b" label="Estimate / Quotation" isActive={activeTab === 'estimates' || activeTab === 'create-estimate'}                onClick={() => setActiveTab('estimates')} activeColor="#e53e3e" />
-            <SubItem dotColor="#64748b" label="Sale Invoices"       isActive={activeTab === 'invoices'}                                                    onClick={() => setActiveTab('invoices')} activeColor="#e53e3e" />
-            <SubItem dotColor="#10b981" label="Sale Return"         isActive={activeTab === 'sale-returns' || activeTab === 'create-sale-return'}           onClick={() => setActiveTab('sale-returns')} activeColor="#e53e3e" />
+            <SubItem dotColor="#ef4444" label="POS Checkout"        isActive={activeTab === 'pos'}                                                         onClick={() => setActiveTab('pos')} activeColor="#ef4444" />
+            <SubItem dotColor="#10b981" label="Payment-In Receipt"  isActive={activeTab === 'payment-in'}                                                  onClick={() => setActiveTab('payment-in')} activeColor="#ef4444" />
+            <SubItem dotColor="#f59e0b" label="Estimate / Quotation" isActive={activeTab === 'estimates' || activeTab === 'create-estimate'}                onClick={() => setActiveTab('estimates')} activeColor="#ef4444" />
+            <SubItem dotColor="#64748b" label="Sale Invoices"       isActive={activeTab === 'invoices'}                                                    onClick={() => setActiveTab('invoices')} activeColor="#ef4444" />
+            <SubItem dotColor="#10b981" label="Sale Returns (Cr. Note)" isActive={activeTab === 'sale-returns' || activeTab === 'create-sale-return'}     onClick={() => setActiveTab('sale-returns')} activeColor="#ef4444" />
           </div>
         )}
 
@@ -259,18 +294,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
         />
         {isPurchaseOpen && (
           <div style={subMenuStyle}>
-            <SubItem dotColor="#3b82f6" label="Purchase Order"   isActive={activeTab === 'purchase-orders' || activeTab === 'create-po'}                   onClick={() => setActiveTab('purchase-orders')} activeColor="#3b82f6" />
-            <SubItem dotColor="#6366f1" label="Purchase Bills"   isActive={activeTab === 'purchase'}                                                       onClick={() => setActiveTab('purchase')} activeColor="#3b82f6" />
-            <SubItem dotColor="#f43f5e" label="Payment-Out"      isActive={activeTab === 'payment-out'}                                                    onClick={() => setActiveTab('payment-out')} activeColor="#3b82f6" />
-            <SubItem dotColor="#f59e0b" label="Expenses"         isActive={activeTab === 'expenses'}                                                       onClick={() => setActiveTab('expenses')} activeColor="#3b82f6" />
-            <SubItem dotColor="#ef4444" label="Purchase Return"  isActive={activeTab === 'purchase-returns' || activeTab === 'create-purchase-return'}      onClick={() => setActiveTab('purchase-returns')} activeColor="#3b82f6" />
+            <SubItem dotColor="#3b82f6" label="Purchase Orders"   isActive={activeTab === 'purchase-orders' || activeTab === 'create-po'}                   onClick={() => setActiveTab('purchase-orders')} activeColor="#3b82f6" />
+            <SubItem dotColor="#6366f1" label="Purchase Bills"    isActive={activeTab === 'purchase'}                                                       onClick={() => setActiveTab('purchase')} activeColor="#3b82f6" />
+            <SubItem dotColor="#f43f5e" label="Payment-Out"       isActive={activeTab === 'payment-out'}                                                    onClick={() => setActiveTab('payment-out')} activeColor="#3b82f6" />
+            <SubItem dotColor="#f59e0b" label="Store Expenses"    isActive={activeTab === 'expenses'}                                                       onClick={() => setActiveTab('expenses')} activeColor="#3b82f6" />
+            <SubItem dotColor="#ef4444" label="Purchase Returns"  isActive={activeTab === 'purchase-returns' || activeTab === 'create-purchase-return'}      onClick={() => setActiveTab('purchase-returns')} activeColor="#3b82f6" />
           </div>
         )}
 
         {/* CASH & BANK */}
         <GroupHeader
           icon={BookOpen}
-          label="Cash & Bank"
+          label="Cash & Ledger"
           isActive={isCashBankActive}
           isOpen={isCashBankOpen}
           onClick={() => setIsCashBankOpen(p => !p)}
@@ -278,56 +313,41 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
         />
         {isCashBankOpen && (
           <div style={subMenuStyle}>
-            <SubItem dotColor="#10b981" label="Cash In Hand" isActive={activeTab === 'cash-in-hand' || activeTab === 'ledger'} onClick={() => setActiveTab('cash-in-hand')} activeColor="#10b981" />
+            <SubItem dotColor="#10b981" label="Cash Drawer & Ledger" isActive={activeTab === 'cash-in-hand' || activeTab === 'ledger'} onClick={() => setActiveTab('cash-in-hand')} activeColor="#10b981" />
           </div>
         )}
 
-        <SectionLabel>More</SectionLabel>
+        <SectionLabel>Analytics & System</SectionLabel>
 
-        <NavItem icon={ShieldCheck} label="GST & E-Way Bills" isActive={activeTab === 'gst'}      onClick={() => setActiveTab('gst')} />
-        <NavItem icon={BarChart3}   label="Reports"           isActive={activeTab === 'reports'}   onClick={() => setActiveTab('reports')} />
-        <NavItem icon={Printer}     label="Thermal Printer"   isActive={activeTab === 'settings'}  onClick={() => setActiveTab('settings')} />
+        <NavItem icon={ShieldCheck} label="GST & E-Way Compliance" isActive={activeTab === 'gst'}      onClick={() => setActiveTab('gst')} accentColor="#8b5cf6" />
+        <NavItem icon={BarChart3}   label="Reports & Insights"     isActive={activeTab === 'reports'}   onClick={() => setActiveTab('reports')} accentColor="#f59e0b" />
+        <NavItem icon={Printer}     label="Thermal Printer Config" isActive={activeTab === 'settings'}  onClick={() => setActiveTab('settings')} accentColor="#06b6d4" />
 
-        {/* bottom spacer */}
         <div style={{ flexGrow: 1, minHeight: 12 }} />
       </div>
 
-      {/* Bottom — My Company */}
-      <div style={{ padding: '8px', borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+      {/* Footer — Settings & Store */}
+      <div className="p-2 border-t border-white/8 bg-black/20">
         <button
           type="button"
           onClick={() => setActiveTab('company')}
-          className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer"
+          className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all cursor-pointer border border-white/6 hover:border-white/15"
           style={{
-            background: activeTab === 'company' ? ACTIVE_BG : 'rgba(255,255,255,0.04)',
+            background: activeTab === 'company' ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.15))' : 'rgba(255,255,255,0.03)',
             color: activeTab === 'company' ? TEXT_ACTIVE : TEXT_NORMAL,
-            border: activeTab === 'company' ? '1px solid rgba(255,255,255,0.1)' : '1px solid transparent',
-          }}
-          onMouseEnter={e => {
-            if (activeTab !== 'company') {
-              (e.currentTarget as HTMLButtonElement).style.background = HOVER_BG;
-              (e.currentTarget as HTMLButtonElement).style.color = TEXT_HOVER;
-            }
-          }}
-          onMouseLeave={e => {
-            if (activeTab !== 'company') {
-              (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)';
-              (e.currentTarget as HTMLButtonElement).style.color = TEXT_NORMAL;
-            }
           }}
         >
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
             <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-              style={{ background: 'rgba(59,130,246,0.18)', border: '1px solid rgba(59,130,246,0.2)' }}
+              className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 bg-indigo-500/20 border border-indigo-500/30 text-indigo-400"
             >
-              <Building2 style={{ width: 14, height: 14, color: '#60a5fa' }} />
+              <Building2 className="w-3.5 h-3.5" />
             </div>
-            <span style={{ fontSize: '13px', fontWeight: 500, maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              My Company
+            <span className="text-xs font-semibold truncate max-w-[120px]">
+              Store & Account Settings
             </span>
           </div>
-          <ChevronRight style={{ width: 14, height: 14, color: '#374151', flexShrink: 0 }} />
+          <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
         </button>
       </div>
     </aside>

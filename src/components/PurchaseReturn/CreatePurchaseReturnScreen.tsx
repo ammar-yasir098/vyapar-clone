@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { RotateCcw, Plus, Trash2, ArrowUpRight } from 'lucide-react';
 import { Item, Party, BusinessDetails, PurchaseReturnItem, PurchaseReturn } from '../../types';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 import { createServerPurchaseReturn } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { recordCashEntry } from '../../services/cash';
@@ -10,7 +10,7 @@ import { useToast } from '../Common/ToastContext';
 interface CreatePurchaseReturnScreenProps {
   items: Item[];
   parties: Party[];
-  business: BusinessDetails;
+  business?: BusinessDetails;
   onReturnSaved: () => void;
   onCancel: () => void;
 }
@@ -22,7 +22,7 @@ export const CreatePurchaseReturnScreen: React.FC<CreatePurchaseReturnScreenProp
   onReturnSaved,
   onCancel
 }) => {
-  const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+  const activeTenantId = getActiveTenantId(business);
   const { showToast } = useToast();
 
   const suppliers = parties.filter(p => p.type === 'SUPPLIER' || p.type === 'BOTH');

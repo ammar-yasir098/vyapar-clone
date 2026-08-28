@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Building2, Store, MapPin } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, seedDatabaseIfEmpty, seedWalkInCustomerForTenant, DEFAULT_BUSINESS } from './db';
@@ -57,6 +57,7 @@ import {
   deleteServerCompanyProfile
 } from './services/api';
 import { useToast } from './components/Common/ToastContext';
+import { syncManager, deduplicateLocalDatabase } from './services/sync';
 
 export function App() {
   const { showToast, showConfirm } = useToast();
@@ -317,377 +318,14 @@ export function App() {
           }
         }
 
-        // Fetch live catalog, parties, and invoices for activeTenantId from PostgreSQL API concurrently
-        const [
-          serverItems,
-          serverParties,
-          serverInvoices,
-          serverEstimates,
-          serverPaymentsIn,
-          serverPOs,
-          serverPBills,
-          serverPaymentsOut,
-          serverExpenses,
-          serverReturns,
-          serverSaleReturns,
-          serverCashTxns,
-          serverLocations,
-          serverItemLocations,
-          serverTransfers
-        ] = await Promise.all([
-          fetchServerItems(activeTenantId),
-          fetchServerParties(activeTenantId),
-          fetchServerInvoices(activeTenantId),
-          fetchServerEstimates(activeTenantId),
-          fetchServerPaymentsIn(activeTenantId),
-          fetchServerPurchaseOrders(activeTenantId),
-          fetchServerPurchaseBills(activeTenantId),
-          fetchServerPaymentsOut(activeTenantId),
-          fetchServerExpenses(activeTenantId),
-          fetchServerPurchaseReturns(activeTenantId),
-          fetchServerSaleReturns(activeTenantId),
-          fetchServerCashTransactions(activeTenantId),
-          fetchServerLocations(activeTenantId),
-          fetchServerItemLocations(activeTenantId),
-          fetchServerStockTransfers(activeTenantId)
-        ]);
+        // Execute unified server pull and local database deduplication
+        await syncManager.pullServerChanges(activeTenantId);
+        await deduplicateLocalDatabase();
 
-        const pulledCount = (serverItems?.length || 0) + (serverParties?.length || 0) + (serverInvoices?.length || 0) + (serverEstimates?.length || 0) + (serverPaymentsIn?.length || 0) + (serverPOs?.length || 0) + (serverPBills?.length || 0) + (serverPaymentsOut?.length || 0) + (serverExpenses?.length || 0) + (serverReturns?.length || 0) + (serverSaleReturns?.length || 0) + (serverCashTxns?.length || 0) + (serverLocations?.length || 0) + (serverItemLocations?.length || 0) + (serverTransfers?.length || 0);
-
-        console.log(`[Sync] Pulled from Postgres: ${pulledCount} records`);
-
-        // Sync Locations to Dexie
-        if (serverLocations && serverLocations.length > 0) {
-          for (const sLoc of serverLocations) {
-            const rawLoc = sLoc.dataValues || sLoc;
-            const existing = await db.locations.filter(l => l.code === rawLoc.code && (l.tenantId || 'default-tenant') === activeTenantId).first();
-            const locData = { ...rawLoc, tenantId: rawLoc.tenantId || activeTenantId };
-            if (existing && existing.id) {
-              await db.locations.update(existing.id, locData);
-            } else {
-              await db.locations.add(locData);
-            }
-          }
-        }
-
-        // Sync ItemLocationMappings to Dexie with local item ID resolution
-        if (serverItemLocations && serverItemLocations.length > 0) {
-          const activeItems = allItems.filter(i => (i.tenantId || 'default-tenant') === activeTenantId);
-
-          for (const sMap of serverItemLocations) {
-            const rawMap = sMap.dataValues || sMap;
-            const cloudItemId = Number(rawMap.itemId);
-            const targetLocId = Number(rawMap.locationId);
-            const targetTenantId = rawMap.tenantId || activeTenantId;
-
-            // Resolve matching local Dexie item
-            let matchedItem = activeItems.find(i => Number(i.id) === cloudItemId);
-            if (!matchedItem && serverItems && serverItems.length > 0) {
-              const sItemObj = serverItems.find((si: any) => Number(si.id) === cloudItemId);
-              if (sItemObj) {
-                matchedItem = activeItems.find(i => 
-                  (sItemObj.skuCode && i.skuCode === sItemObj.skuCode) ||
-                  (sItemObj.name && i.name.toLowerCase() === sItemObj.name.toLowerCase())
-                );
-              }
-            }
-
-            if (!matchedItem && activeItems.length > 0) {
-              if (cloudItemId === 125 || cloudItemId === 1) matchedItem = activeItems[0];
-              else if (cloudItemId === 126 || cloudItemId === 2) matchedItem = activeItems[1] || activeItems[0];
-              else matchedItem = activeItems[0];
-            }
-
-            const resolvedItemId = matchedItem && matchedItem.id ? Number(matchedItem.id) : cloudItemId;
-
-            const existing = await db.itemLocations
-              .filter(m => (m.tenantId || 'default-tenant') === targetTenantId && (Number(m.itemId) === resolvedItemId || Number(m.itemId) === cloudItemId) && Number(m.locationId) === targetLocId)
-              .first();
-
-            const mapData = {
-              ...rawMap,
-              itemId: resolvedItemId,
-              locationId: targetLocId,
-              tenantId: targetTenantId
-            };
-            if (existing && existing.id) {
-              await db.itemLocations.update(existing.id, mapData);
-            } else {
-              await db.itemLocations.add(mapData);
-            }
-          }
-        }
-
-        // Sync StockTransfers to Dexie
-        if (serverTransfers && serverTransfers.length > 0) {
-          for (const sTrf of serverTransfers) {
-            const rawTrf = sTrf.dataValues || sTrf;
-            const existing = await db.stockTransfers.filter(t => t.transferNumber === rawTrf.transferNumber).first();
-            const trfData = { ...rawTrf, tenantId: rawTrf.tenantId || activeTenantId };
-            if (existing && existing.id) {
-              await db.stockTransfers.update(existing.id, trfData);
-            } else {
-              await db.stockTransfers.add(trfData);
-            }
-          }
-        }
-
-        // Only seed sample database if local tables AND cloud fetched items are completely empty
-        if (localItemCount === 0 && (!serverItems || serverItems.length === 0)) {
+        // Seed structural defaults if database is completely empty for active tenant
+        const localItemCount = await db.items.filter(i => (i.tenantId || 'default-tenant') === activeTenantId).count();
+        if (localItemCount === 0) {
           await seedDatabaseIfEmpty(activeTenantId);
-        }
-
-        // 1. Items Sync with pending mutation protection
-        if (serverItems && serverItems.length > 0) {
-          for (const sItem of serverItems) {
-            const existing = await db.items.where('name').equalsIgnoreCase(sItem.name).first();
-            const itemData = { ...sItem, tenantId: sItem.tenantId || activeTenantId };
-            if (existing && existing.id) {
-              if (await hasPendingLocalMutation('ITEM', existing.id)) continue;
-              await db.items.update(existing.id, itemData);
-            } else {
-              await db.items.add(itemData);
-            }
-          }
-        }
-
-        // 2. Parties Sync with pending mutation protection
-        if (serverParties && serverParties.length > 0) {
-          for (const sParty of serverParties) {
-            const existing = await db.parties.where('name').equalsIgnoreCase(sParty.name).first();
-            const partyData = { ...sParty, tenantId: sParty.tenantId || activeTenantId };
-            if (existing && existing.id) {
-              if (await hasPendingLocalMutation('PARTY', existing.id)) continue;
-              await db.parties.update(existing.id, partyData);
-            } else {
-              await db.parties.add(partyData);
-            }
-          }
-        }
-
-        // 3. Invoices Sync with child array reconstruction & pending mutation protection
-        if (serverInvoices && serverInvoices.length > 0) {
-          for (const sInv of serverInvoices) {
-            const rawInv = sInv.dataValues || sInv;
-            const invId = rawInv.invoiceId || rawInv.invoice_id;
-            const invNum = rawInv.invoiceNumber || rawInv.invoice_number;
-
-            const existing = await db.invoices
-              .filter(i => (invId && i.invoiceId === invId) || (invNum && i.invoiceNumber === invNum))
-              .first();
-
-            const invData = {
-              ...rawInv,
-              invoiceId: invId || `inv-${Date.now()}-${Math.random()}`,
-              invoiceNumber: invNum || `INV-${Date.now()}`,
-              items: rawInv.items || rawInv.invoice_items || [],
-              tenantId: rawInv.tenantId || rawInv.tenant_id || activeTenantId
-            };
-
-            if (existing && existing.id) {
-              if (await hasPendingLocalMutation('INVOICE', existing.id) || await hasPendingLocalMutation('INVOICE', existing.invoiceId)) continue;
-              await db.invoices.update(existing.id, invData);
-            } else {
-              await db.invoices.add(invData);
-            }
-          }
-        }
-
-        // 6. Estimates Sync
-        if (serverEstimates && serverEstimates.length > 0) {
-          for (const sEst of serverEstimates) {
-            const existing = await db.estimates.where('estimateId').equals(sEst.estimateId).first();
-            const estData = {
-              ...sEst,
-              items: sEst.items || sEst.estimate_items || [],
-              tenantId: sEst.tenantId || activeTenantId
-            };
-            if (existing && existing.id) {
-              if (await hasPendingLocalMutation('ESTIMATE', existing.id) || await hasPendingLocalMutation('ESTIMATE', existing.estimateId)) continue;
-              await db.estimates.update(existing.id, estData);
-            } else {
-              await db.estimates.add(estData);
-            }
-          }
-        }
-
-        // 7. Payment-In Sync
-        if (serverPaymentsIn && serverPaymentsIn.length > 0) {
-          for (const sPay of serverPaymentsIn) {
-            const existing = await db.paymentIn.where('receiptNumber').equals(sPay.receiptNumber).first();
-            const payData = { ...sPay, tenantId: sPay.tenantId || activeTenantId };
-            if (existing && existing.id) {
-              if (await hasPendingLocalMutation('PAYMENT_IN', existing.id) || await hasPendingLocalMutation('PAYMENT_IN', existing.receiptNumber)) continue;
-              await db.paymentIn.update(existing.id, payData);
-            } else {
-              await db.paymentIn.add(payData);
-            }
-          }
-        }
-
-        // 8. Purchase Orders Sync
-        if (serverPOs && serverPOs.length > 0) {
-          for (const sPo of serverPOs) {
-            const existing = await db.purchaseOrders.where('poId').equals(sPo.poId).first();
-            const poData = {
-              ...sPo,
-              items: sPo.items || sPo.purchase_order_items || [],
-              tenantId: sPo.tenantId || activeTenantId
-            };
-            if (existing && existing.id) {
-              if (await hasPendingLocalMutation('PURCHASE_ORDER', existing.id) || await hasPendingLocalMutation('PURCHASE_ORDER', existing.poId)) continue;
-              await db.purchaseOrders.update(existing.id, poData);
-            } else {
-              await db.purchaseOrders.add(poData);
-            }
-          }
-        }
-
-        // 9. Purchase Bills Sync
-        if (serverPBills && serverPBills.length > 0) {
-          for (const sBill of serverPBills) {
-            const rawBill = sBill.dataValues || sBill;
-            const bId = rawBill.billId || rawBill.bill_id;
-            const bNum = rawBill.billNumber || rawBill.bill_number;
-            const existing = await db.purchaseBills.filter(b => (bId && b.billId === bId) || (bNum && b.billNumber === bNum)).first();
-            const billData = {
-              ...rawBill,
-              billId: bId || `pur-${Date.now()}`,
-              billNumber: bNum || `PUR-${Date.now()}`,
-              items: rawBill.items || rawBill.purchase_bill_items || [],
-              tenantId: rawBill.tenantId || rawBill.tenant_id || activeTenantId
-            };
-            if (existing && existing.id) {
-              if (await hasPendingLocalMutation('PURCHASE_BILL', existing.id) || await hasPendingLocalMutation('PURCHASE_BILL', existing.billId)) continue;
-              await db.purchaseBills.update(existing.id, billData);
-            } else {
-              await db.purchaseBills.add(billData);
-            }
-          }
-        }
-
-        // 10. Payment-Out Sync
-        if (serverPaymentsOut && serverPaymentsOut.length > 0) {
-          for (const sPay of serverPaymentsOut) {
-            const existing = await db.paymentOut.where('receiptNumber').equals(sPay.receiptNumber).first();
-            const payData = { ...sPay, tenantId: sPay.tenantId || activeTenantId };
-            if (existing && existing.id) {
-              if (await hasPendingLocalMutation('PAYMENT_OUT', existing.id) || await hasPendingLocalMutation('PAYMENT_OUT', existing.receiptNumber)) continue;
-              await db.paymentOut.update(existing.id, payData);
-            } else {
-              await db.paymentOut.add(payData);
-            }
-          }
-        }
-
-        // 11. Expenses Sync
-        if (serverExpenses && serverExpenses.length > 0) {
-          for (const sExp of serverExpenses) {
-            const existing = await db.expenses.where('expenseNumber').equals(sExp.expenseNumber).first();
-            const expData = { ...sExp, tenantId: sExp.tenantId || activeTenantId };
-            if (existing && existing.id) {
-              if (await hasPendingLocalMutation('EXPENSE', existing.id) || await hasPendingLocalMutation('EXPENSE', existing.expenseNumber)) continue;
-              await db.expenses.update(existing.id, expData);
-            } else {
-              await db.expenses.add(expData);
-            }
-          }
-        }
-
-        // 12. Purchase Returns Sync
-        if (serverReturns && serverReturns.length > 0) {
-          for (const sRet of serverReturns) {
-            const rawRet = sRet.dataValues || sRet;
-            const rId = rawRet.returnId || rawRet.return_id;
-            const dnNum = rawRet.debitNoteNumber || rawRet.debit_note_number;
-            const existing = await db.purchaseReturns.filter(r => (rId && r.returnId === rId) || (dnNum && r.debitNoteNumber === dnNum)).first();
-            const retData = {
-              ...rawRet,
-              returnId: rId || `dn-${Date.now()}`,
-              debitNoteNumber: dnNum || `DN-${Date.now()}`,
-              items: rawRet.items || rawRet.purchase_return_items || [],
-              tenantId: rawRet.tenantId || rawRet.tenant_id || activeTenantId
-            };
-            if (existing && existing.id) {
-              if (await hasPendingLocalMutation('PURCHASE_RETURN', existing.id) || await hasPendingLocalMutation('PURCHASE_RETURN', existing.returnId)) continue;
-              await db.purchaseReturns.update(existing.id, retData);
-            } else {
-              await db.purchaseReturns.add(retData);
-            }
-          }
-        }
-
-        // 13. Sale Returns Sync
-        if (serverSaleReturns && serverSaleReturns.length > 0) {
-          for (const sRet of serverSaleReturns) {
-            const rawRet = sRet.dataValues || sRet;
-            const rId = rawRet.returnId || rawRet.return_id;
-            const crNum = rawRet.creditNoteNumber || rawRet.credit_note_number;
-            const existing = await db.saleReturns.filter(r => (rId && r.returnId === rId) || (crNum && r.creditNoteNumber === crNum)).first();
-            const retData = {
-              ...rawRet,
-              returnId: rId || `cr-${Date.now()}`,
-              creditNoteNumber: crNum || `CR-${Date.now()}`,
-              items: rawRet.items || rawRet.sale_return_items || [],
-              tenantId: rawRet.tenantId || rawRet.tenant_id || activeTenantId
-            };
-            if (existing && existing.id) {
-              if (await hasPendingLocalMutation('SALE_RETURN', existing.id) || await hasPendingLocalMutation('SALE_RETURN', existing.returnId)) continue;
-              await db.saleReturns.update(existing.id, retData);
-            } else {
-              await db.saleReturns.add(retData);
-            }
-          }
-        }
-
-        // 14. Cash Transactions Sync
-        if (serverCashTxns && serverCashTxns.length > 0) {
-          for (const sTx of serverCashTxns) {
-            const rawTx = sTx.dataValues || sTx;
-            const refId = rawTx.referenceId || rawTx.reference_id;
-            const existing = await db.cashTransactions
-              .filter(ct => (refId && ct.referenceId === refId) || (rawTx.id && String(ct.id) === String(rawTx.id)))
-              .first();
-            const txData = {
-              ...rawTx,
-              referenceId: refId || `TXN-${Date.now()}`,
-              tenantId: rawTx.tenantId || rawTx.tenant_id || activeTenantId
-            };
-            if (existing && existing.id) {
-              if (await hasPendingLocalMutation('CASH_TRANSACTION', existing.id) || await hasPendingLocalMutation('CASH_TRANSACTION', existing.referenceId)) continue;
-              await db.cashTransactions.update(Number(existing.id), txData);
-            } else {
-              await db.cashTransactions.add(txData);
-            }
-          }
-        }
-
-        // Auto-migrate orphaned default-tenant records in local Dexie IndexedDB to active store tenantId
-        if (activeTenantId && activeTenantId !== 'default-tenant') {
-          const orphanedParties = await db.parties.filter(p => !p.tenantId || p.tenantId === 'default-tenant').toArray();
-          for (const p of orphanedParties) {
-            if (p.id) await db.parties.update(p.id, { tenantId: activeTenantId });
-          }
-          const orphanedItems = await db.items.filter(i => !i.tenantId || i.tenantId === 'default-tenant').toArray();
-          for (const i of orphanedItems) {
-            if (i.id) await db.items.update(i.id, { tenantId: activeTenantId });
-          }
-          const orphanedInvoices = await db.invoices.filter(i => !i.tenantId || i.tenantId === 'default-tenant').toArray();
-          for (const inv of orphanedInvoices) {
-            if (inv.id) await db.invoices.update(inv.id, { tenantId: activeTenantId });
-          }
-        }
-
-        // Auto-deduplicate duplicate party entries in Dexie IndexedDB
-        const allLocalParties = await db.parties.toArray();
-        const seenPartyKeys = new Set<string>();
-        for (const p of allLocalParties) {
-          const key = `${p.tenantId || 'default-tenant'}_${(p.name || '').trim().toLowerCase()}`;
-          if (seenPartyKeys.has(key)) {
-            if (p.id) await db.parties.delete(p.id);
-          } else {
-            seenPartyKeys.add(key);
-          }
         }
       } catch (err) {
         console.warn('Error during cloud database sync:', err);
@@ -730,7 +368,66 @@ export function App() {
   const allStockTransfers = useLiveQuery(() => db.stockTransfers.reverse().toArray(), []) || [];
 
   const activeTenantId = currentTenantId || 'default-tenant';
-  const items = allItems.filter(item => item && (item.tenantId || 'default-tenant') === activeTenantId);
+
+  // Determine accessible warehouses for active store based strictly on ownership or explicit allowedTenantIds linkage
+  const accessibleWhIds = useMemo(() => {
+    const set = new Set<number>();
+    allLocations.forEach(loc => {
+      if (loc.type === 'WAREHOUSE') {
+        const isOwner = (loc.tenantId || 'default-tenant') === activeTenantId;
+        const isLinked = loc.allowedTenantIds && Array.isArray(loc.allowedTenantIds) && loc.allowedTenantIds.includes(activeTenantId);
+        if (isOwner || isLinked) {
+          set.add(Number(loc.id));
+        }
+      }
+    });
+    return set;
+  }, [allLocations, activeTenantId]);
+
+  // Compute all child location IDs (Zones, Racks, Shelves, Store Front) belonging to accessible warehouses or active tenant
+  const accessibleLocationIds = useMemo(() => {
+    const locIds = new Set<number>(accessibleWhIds);
+    let addedChild = true;
+    while (addedChild) {
+      addedChild = false;
+      for (const loc of allLocations) {
+        if (loc.parentId && locIds.has(Number(loc.parentId)) && !locIds.has(Number(loc.id))) {
+          locIds.add(Number(loc.id));
+          addedChild = true;
+        }
+      }
+    }
+    return locIds;
+  }, [allLocations, accessibleWhIds]);
+
+  const locations = useMemo(() => {
+    return allLocations.filter(loc => {
+      if (!loc) return false;
+      const isOwner = (loc.tenantId || 'default-tenant') === activeTenantId;
+      const isLocAccessible = accessibleLocationIds.has(Number(loc.id));
+      return isOwner || isLocAccessible;
+    });
+  }, [allLocations, activeTenantId, accessibleLocationIds]);
+
+  const itemLocations = useMemo(() => {
+    return allItemLocations.filter(il => {
+      if (!il) return false;
+      const isOwner = (il.tenantId || 'default-tenant') === activeTenantId;
+      const isLocAccessible = accessibleLocationIds.has(Number(il.locationId));
+      return isOwner || isLocAccessible;
+    });
+  }, [allItemLocations, activeTenantId, accessibleLocationIds]);
+
+  const items = useMemo(() => {
+    return allItems.filter(item => {
+      if (!item) return false;
+      const itemTenant = item.tenantId || 'default-tenant';
+      const isOwner = itemTenant === activeTenantId;
+      const isStoredInAccessibleLoc = itemLocations.some((il: any) => Number(il.itemId) === Number(item.id) && accessibleLocationIds.has(Number(il.locationId)));
+      return isOwner || isStoredInAccessibleLoc;
+    });
+  }, [allItems, activeTenantId, itemLocations, accessibleLocationIds]);
+
   const parties = allParties.filter(party => party && (party.tenantId || 'default-tenant') === activeTenantId);
   const invoices = allInvoices.filter(inv => inv && (inv.tenantId || 'default-tenant') === activeTenantId);
   const estimates = allEstimates.filter(est => est && (est.tenantId || 'default-tenant') === activeTenantId);
@@ -742,28 +439,16 @@ export function App() {
   const purchaseReturns = allPurchaseReturns.filter(pr => pr && (pr.tenantId || 'default-tenant') === activeTenantId);
   const saleReturns = allSaleReturns.filter(sr => sr && (sr.tenantId || 'default-tenant') === activeTenantId);
   const cashTransactions = allCashTransactions.filter(ct => ct && (ct.tenantId || 'default-tenant') === activeTenantId);
-  // Joined Inventory Location Hierarchy across all user store branches:
-  // Central Warehouses, Zones, Racks, Shelves, Bins & Mappings are fully joined across stores
-  const warehouseIds = new Set(allLocations.filter(l => l.type === 'WAREHOUSE').map(l => Number(l.id)));
-  const sharedLocIds = new Set<number>(warehouseIds);
-  let addedChild = true;
-  while (addedChild) {
-    addedChild = false;
-    for (const loc of allLocations) {
-      if (loc.parentId && sharedLocIds.has(Number(loc.parentId)) && !sharedLocIds.has(Number(loc.id))) {
-        sharedLocIds.add(Number(loc.id));
-        addedChild = true;
-      }
-    }
-  }
 
-  const locations = allLocations.filter(loc => 
-    loc && ((loc.tenantId || 'default-tenant') === activeTenantId || sharedLocIds.has(Number(loc.id)))
-  );
-  const itemLocations = allItemLocations.filter(il => 
-    il && (il.tenantId || 'default-tenant') === activeTenantId
-  );
-  const stockTransfers = allStockTransfers;
+  const stockTransfers = useMemo(() => {
+    return allStockTransfers.filter(st => {
+      if (!st) return false;
+      const isOwner = (st.tenantId || 'default-tenant') === activeTenantId;
+      const isSrcAccessible = accessibleLocationIds.has(Number(st.sourceLocationId));
+      const isDestAccessible = accessibleLocationIds.has(Number(st.destinationLocationId));
+      return isOwner || isSrcAccessible || isDestAccessible;
+    });
+  }, [allStockTransfers, activeTenantId, accessibleLocationIds]);
 
   const handleInvoiceCreated = (invoice: Invoice) => {
     triggerThermalPrint(invoice, businessDetails, '80mm');
@@ -1149,15 +834,15 @@ export function App() {
 
           {activeTab === 'reports' && (
             <ReportsScreen
-              items={allItems}
-              invoices={allInvoices}
-              purchaseBills={allPurchaseBills}
-              purchaseReturns={allPurchaseReturns}
-              paymentsIn={allPaymentsIn}
-              paymentsOut={allPaymentsOut}
-              expenses={allExpenses}
-              saleReturns={allSaleReturns}
-              cashTransactions={allCashTransactions}
+              items={items}
+              invoices={invoices}
+              purchaseBills={purchaseBills}
+              purchaseReturns={purchaseReturns}
+              paymentsIn={paymentsIn}
+              paymentsOut={paymentsOut}
+              expenses={expenses}
+              saleReturns={saleReturns}
+              cashTransactions={cashTransactions}
               business={businessDetails}
               companies={companies}
               onAddSale={() => setActiveTab('pos')}

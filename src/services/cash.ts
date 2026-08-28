@@ -87,6 +87,8 @@ export async function deduplicateLocalCashTransactions() {
  */
 export async function getAllAggregatedCashTransactions(tenantId: string): Promise<CashTransaction[]> {
   const activeTenantId = tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+  const cashAcc = await getOrCreateLocalCashAccount(activeTenantId);
+  const activeAccountId = cashAcc?.id || 1;
 
   const [
     invoices,
@@ -123,7 +125,7 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
     if (amt > 0) {
       items.push({
         id: `cash-sale-${inv.id || inv.invoiceNumber}`,
-        cashAccountId: 1,
+        cashAccountId: activeAccountId,
         tenantId: activeTenantId,
         type: 'IN',
         amount: amt,
@@ -142,7 +144,7 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
     if (mode === 'CASH' && amt > 0) {
       items.push({
         id: `cash-payin-${p.id || p.receiptNumber}`,
-        cashAccountId: 1,
+        cashAccountId: activeAccountId,
         tenantId: activeTenantId,
         type: 'IN',
         amount: roundCurrency(amt),
@@ -166,7 +168,7 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
     if (amt > 0) {
       items.push({
         id: `cash-pur-${b.id || b.billNumber}`,
-        cashAccountId: 1,
+        cashAccountId: activeAccountId,
         tenantId: activeTenantId,
         type: 'OUT',
         amount: amt,
@@ -185,7 +187,7 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
     if (mode === 'CASH' && amt > 0) {
       items.push({
         id: `cash-payout-${po.id || po.receiptNumber}`,
-        cashAccountId: 1,
+        cashAccountId: activeAccountId,
         tenantId: activeTenantId,
         type: 'OUT',
         amount: roundCurrency(amt),
@@ -204,7 +206,7 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
     if (mode === 'CASH' && amt > 0) {
       items.push({
         id: `cash-exp-${e.id || e.expenseNumber}`,
-        cashAccountId: 1,
+        cashAccountId: activeAccountId,
         tenantId: activeTenantId,
         type: 'OUT',
         amount: roundCurrency(amt),
@@ -222,7 +224,7 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
     if (amt > 0) {
       items.push({
         id: `cash-pur-ret-${pr.id || pr.debitNoteNumber}`,
-        cashAccountId: 1,
+        cashAccountId: activeAccountId,
         tenantId: activeTenantId,
         type: 'IN',
         amount: roundCurrency(amt),
@@ -240,7 +242,7 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
     if (amt > 0) {
       items.push({
         id: `cash-sale-ret-${sr.id || sr.creditNoteNumber}`,
-        cashAccountId: 1,
+        cashAccountId: activeAccountId,
         tenantId: activeTenantId,
         type: 'OUT',
         amount: roundCurrency(amt),
@@ -265,7 +267,7 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
 
     items.push({
       id: `cash-tx-${ct.id}`,
-      cashAccountId: ct.cashAccountId || 1,
+      cashAccountId: ct.cashAccountId || activeAccountId,
       tenantId: activeTenantId,
       type: ct.type,
       amount: roundCurrency(ct.amount),

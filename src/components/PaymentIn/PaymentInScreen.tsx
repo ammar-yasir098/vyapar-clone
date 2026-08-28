@@ -14,7 +14,7 @@ import {
   DollarSign
 } from 'lucide-react';
 import { PaymentIn, Party, Invoice, BusinessDetails } from '../../types';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 import { createServerPaymentIn, recordServerPartyPayment } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { recordCashEntry } from '../../services/cash';
@@ -24,7 +24,7 @@ interface PaymentInScreenProps {
   payments: PaymentIn[];
   parties: Party[];
   invoices: Invoice[];
-  business: BusinessDetails;
+  business?: BusinessDetails;
   onPaymentRecorded: () => void;
   selectedPartyFromParties?: Party | null;
   onClearSelectedParty?: () => void;
@@ -39,7 +39,7 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
   selectedPartyFromParties,
   onClearSelectedParty
 }) => {
-  const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+  const activeTenantId = getActiveTenantId(business);
   const { showToast, showConfirm } = useToast();
 
   const [activeSubTab, setActiveSubTab] = useState<'pending' | 'history'>('pending');
@@ -67,8 +67,23 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
     }
   }, [selectedPartyFromParties]);
 
-  // Safe Number helper
+  // Safe Number helper to compute true live due balance for a customer
   const getPartyDueBalance = (party: Party): number => {
+    const customerInvoices = (invoices || []).filter(inv =>
+      (party.id !== undefined && Number(inv.partyId) === Number(party.id)) ||
+      (inv.partyName && inv.partyName.trim().toLowerCase() === party.name.trim().toLowerCase())
+    );
+
+    if (customerInvoices.length > 0) {
+      const invDueSum = customerInvoices.reduce((sum, inv) => {
+        if (inv.paymentStatus === 'PAID') return sum;
+        const due = inv.dueAmount !== undefined && inv.dueAmount >= 0 ? inv.dueAmount : Math.max(0, (inv.grandTotal || 0) - (inv.receivedAmount || 0));
+        return sum + due;
+      }, 0);
+      const opening = party.openingBalance && party.balanceType === 'RECEIVABLE' ? Number(party.openingBalance) : 0;
+      return Math.max(0, invDueSum + opening);
+    }
+
     return Number(party.currentBalance !== undefined ? party.currentBalance : party.openingBalance) || 0;
   };
 
@@ -675,9 +690,9 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
             <div className="p-6">
               <div className="bg-white border border-slate-300 p-4 font-mono text-slate-900 text-xs shadow-xs rounded-xl space-y-3">
                 <div className="text-center border-b border-dashed border-slate-300 pb-2">
-                  <div className="font-bold text-sm uppercase">{business.name || 'My Business'}</div>
-                  <div className="text-[10px] text-slate-600">{business.address}</div>
-                  <div className="text-[10px] text-slate-600">Phone: {business.phone}</div>
+                  <div className="font-bold text-sm uppercase">{business?.name || 'My Business'}</div>
+                  <div className="text-[10px] text-slate-600">{business?.address}</div>
+                  <div className="text-[10px] text-slate-600">Phone: {business?.phone}</div>
                   <div className="mt-1 font-bold text-emerald-700 border border-emerald-300 rounded px-2 py-0.5 inline-block text-[10px]">
                     *** PAYMENT RECEIPT VOUCHER ***
                   </div>

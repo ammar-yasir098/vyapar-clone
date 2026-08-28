@@ -47,3 +47,5 @@ desktop.ini
 whatsapp_auth/
 server/whatsapp_auth/
 server/uploads/
+# Antigravity agent configuration
+.antigravity/

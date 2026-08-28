@@ -13,7 +13,7 @@ import {
   Calendar
 } from 'lucide-react';
 import { Expense, BusinessDetails } from '../../types';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 import { createServerExpense, deleteServerExpense } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { recordCashEntry } from '../../services/cash';
@@ -21,7 +21,7 @@ import { useToast } from '../Common/ToastContext';
 
 interface ExpenseScreenProps {
   expenses: Expense[];
-  business: BusinessDetails;
+  business?: BusinessDetails;
   onExpenseRecorded: () => void;
 }
 
@@ -41,7 +41,7 @@ export const ExpenseScreen: React.FC<ExpenseScreenProps> = ({
   business,
   onExpenseRecorded
 }) => {
-  const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+  const activeTenantId = getActiveTenantId(business);
   const { showToast, showConfirm } = useToast();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -472,9 +472,9 @@ export const ExpenseScreen: React.FC<ExpenseScreenProps> = ({
               <div id="expense-print-area" className="bg-white p-8 font-sans text-slate-900 border border-slate-300 rounded-xl shadow-xs space-y-6">
                 <div className="flex justify-between items-start border-b border-slate-300 pb-6">
                   <div className="space-y-1">
-                    <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">{business.name || 'Company Name'}</h1>
-                    <p className="text-xs text-slate-600 font-medium">{business.address || 'Store Address'}</p>
-                    <p className="text-xs text-slate-600">Phone: {business.phone || '+92 300 0000000'}</p>
+                    <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">{business?.name || 'Company Name'}</h1>
+                    <p className="text-xs text-slate-600 font-medium">{business?.address || 'Store Address'}</p>
+                    <p className="text-xs text-slate-600">Phone: {business?.phone || '+92 300 0000000'}</p>
                   </div>
 
                   <div className="flex flex-col items-end space-y-2">

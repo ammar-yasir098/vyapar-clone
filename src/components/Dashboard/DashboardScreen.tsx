@@ -10,7 +10,8 @@ import {
   BarChart3,
   TrendingUp,
   Zap,
-  Globe
+  Globe,
+  Sparkles
 } from 'lucide-react';
 import { Invoice, Party } from '../../types';
 
@@ -25,29 +26,33 @@ const KpiCard: React.FC<{
   value: string;
   sub: string;
   icon: React.ElementType;
-  iconBg: string;
+  gradientFrom: string;
+  gradientTo: string;
   iconColor: string;
   accentColor: string;
   onClick: () => void;
-}> = ({ title, value, sub, icon: Icon, iconBg, iconColor, accentColor, onClick }) => (
+}> = ({ title, value, sub, icon: Icon, gradientFrom, gradientTo, iconColor, accentColor, onClick }) => (
   <div
     onClick={onClick}
-    className="bg-white rounded-2xl border border-slate-200 p-5 flex items-center justify-between cursor-pointer group transition-all duration-200 hover:-translate-y-0.5 animate-slide-up"
-    style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.05)', borderTop: `3px solid ${accentColor}` }}
-    onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.boxShadow = `0 8px 24px rgba(0,0,0,0.09)`; }}
-    onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)'; }}
+    className="card card-glass p-5 flex items-center justify-between cursor-pointer group transition-all duration-200 hover:-translate-y-1 animate-slide-up relative overflow-hidden"
+    style={{ borderTop: `3.5px solid ${accentColor}` }}
   >
-    <div>
-      <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">{title}</div>
-      <div className="text-2xl font-black text-slate-900 font-mono leading-none">{value}</div>
-      <div className="text-[11.5px] text-slate-500 font-medium mt-1.5">{sub}</div>
+    <div className="relative z-10">
+      <div className="text-[11px] font-extrabold uppercase tracking-widest text-slate-500 mb-1.5">{title}</div>
+      <div className="text-2xl sm:text-3xl font-black text-slate-900 font-mono tracking-tight leading-none">{value}</div>
+      <div className="text-xs text-slate-500 font-semibold mt-2 flex items-center gap-1.5">{sub}</div>
     </div>
     <div
-      className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-110"
-      style={{ background: iconBg }}
+      className="w-13 h-13 rounded-2xl flex items-center justify-center shrink-0 shadow-sm transition-transform duration-300 group-hover:scale-110 relative z-10"
+      style={{ background: `linear-gradient(135deg, ${gradientFrom}, ${gradientTo})` }}
     >
-      <Icon className="w-5 h-5 stroke-[2.5]" style={{ color: iconColor }} />
+      <Icon className="w-6 h-6 stroke-[2.5]" style={{ color: iconColor }} />
     </div>
+    {/* Subtle background glow */}
+    <div
+      className="absolute -right-6 -bottom-6 w-24 h-24 rounded-full opacity-15 blur-xl pointer-events-none"
+      style={{ background: accentColor }}
+    />
   </div>
 );
 
@@ -115,90 +120,92 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ invoices = [],
 
   return (
     <div
-      className="flex-1 flex flex-col overflow-y-auto select-none"
-      style={{ background: '#f1f5f9', padding: '24px' }}
+      className="flex-1 flex flex-col overflow-y-auto select-none p-4 sm:p-6"
+      style={{ background: '#f8fafc' }}
     >
       <div className="flex flex-col lg:flex-row gap-5">
 
         {/* ── Left Column ──────────────────────────────────── */}
         <div className="flex-1 space-y-5">
 
-          {/* KPI Cards */}
+          {/* KPI Stat Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <KpiCard
               title="Total Receivable"
               value={fmt(totalReceivable)}
-              sub={`From ${receivablePartiesCount} Customers`}
+              sub={`From ${receivablePartiesCount} Active Customers`}
               icon={ArrowDownLeft}
-              iconBg="#ecfdf5"
-              iconColor="#10b981"
+              gradientFrom="#d1fae5"
+              gradientTo="#a7f3d0"
+              iconColor="#047857"
               accentColor="#10b981"
               onClick={() => onNavigateTab('parties')}
             />
             <KpiCard
               title="Total Payable"
               value={fmt(totalPayable)}
-              sub={totalPayable > 0 ? 'To Registered Suppliers' : 'No pending payables as of now.'}
+              sub={totalPayable > 0 ? 'To Registered Suppliers' : 'No pending payables as of now'}
               icon={ArrowUpRight}
-              iconBg="#fff1f2"
-              iconColor="#f43f5e"
+              gradientFrom="#ffe4e6"
+              gradientTo="#fecdd3"
+              iconColor="#be123c"
               accentColor="#f43f5e"
               onClick={() => onNavigateTab('parties')}
             />
           </div>
 
-          {/* Sales Chart Card */}
-          <div
-            className="bg-white rounded-2xl border border-slate-200 p-6 animate-slide-up stagger-2"
-            style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}
-          >
-            <div className="flex items-center justify-between mb-4">
+          {/* Analytics & Sales Chart Card */}
+          <div className="card card-glass p-6 animate-slide-up stagger-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
               <div>
-                <div className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
-                  Total Sales ({safeInvoices.length} Bills Saved)
+                <div className="text-[11px] font-extrabold uppercase tracking-widest text-slate-500 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Total Sales Performance ({safeInvoices.length} Invoices)</span>
                 </div>
-                <div className="text-3xl font-black text-slate-900 font-mono mt-1 leading-none">
+                <div className="text-3xl font-black text-slate-900 font-mono tracking-tight mt-1 leading-none">
                   {fmt(totalSales)}
                 </div>
               </div>
-              <select
-                value={period}
-                onChange={e => setPeriod(e.target.value as any)}
-                className="h-8 px-3 text-xs font-bold rounded-lg border outline-none cursor-pointer transition"
-                style={{
-                  background: '#eff6ff', borderColor: '#bfdbfe',
-                  color: '#1d4ed8', fontFamily: 'inherit',
-                }}
-              >
-                <option value="month">This Month</option>
-                <option value="week">This Week</option>
-                <option value="year">Financial Year</option>
-              </select>
+              <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/80 self-start sm:self-auto">
+                {(['month', 'week', 'year'] as const).map(p => (
+                  <button
+                    key={p}
+                    onClick={() => setPeriod(p)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      period === p
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {p === 'month' ? 'This Month' : p === 'week' ? 'This Week' : 'Financial Year'}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* SVG Chart */}
-            <div className="h-48 w-full">
+            {/* Bezier SVG Sales Graph */}
+            <div className="h-52 w-full">
               <svg className="w-full h-full" viewBox="0 0 500 140" preserveAspectRatio="none">
                 <defs>
                   <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.18" />
-                    <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
+                    <stop offset="0%" stopColor="#6366f1" stopOpacity="0.32" />
+                    <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0" />
                   </linearGradient>
                 </defs>
-                {/* Grid lines */}
+                {/* Horizontal Grid lines */}
                 {[30, 60, 90, 120].map(y => (
-                  <line key={y} x1="20" y1={y} x2="480" y2={y} stroke="#f1f5f9" strokeWidth="1" />
+                  <line key={y} x1="20" y1={y} x2="480" y2={y} stroke="#e2e8f0" strokeDasharray="3,3" strokeWidth="1" />
                 ))}
                 <path d={areaD} fill="url(#salesGrad)" />
-                <path d={pathD} fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d={pathD} fill="none" stroke="#6366f1" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
                 {peakPoint && peakPoint.val > 0 && (
                   <>
-                    <circle cx={peakPoint.x} cy={peakPoint.y} r="6" fill="#3b82f6" stroke="#ffffff" strokeWidth="2.5" />
-                    <line x1={peakPoint.x} y1={peakPoint.y} x2={peakPoint.x} y2="120" stroke="#3b82f6" strokeWidth="1" strokeDasharray="3,3" opacity="0.4" />
+                    <circle cx={peakPoint.x} cy={peakPoint.y} r="6" fill="#6366f1" stroke="#ffffff" strokeWidth="3" className="animate-pulse" />
+                    <line x1={peakPoint.x} y1={peakPoint.y} x2={peakPoint.x} y2="120" stroke="#6366f1" strokeWidth="1.5" strokeDasharray="3,3" opacity="0.6" />
                   </>
                 )}
               </svg>
-              <div className="flex justify-between text-[10px] text-slate-400 font-mono font-bold mt-1.5 px-1">
+              <div className="flex justify-between text-[10px] text-slate-400 font-mono font-bold mt-2 px-1">
                 {['1st','4th','7th','10th','13th','16th','19th','22nd','25th','28th','31st'].map(d => (
                   <span key={d}>{d}</span>
                 ))}
@@ -206,18 +213,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ invoices = [],
             </div>
           </div>
 
-          {/* Quick Reports */}
-          <div
-            className="bg-white rounded-2xl border border-slate-200 p-5 animate-slide-up stagger-3"
-            style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}
-          >
+          {/* Most Used Reports Grid */}
+          <div className="card card-glass p-5 animate-slide-up stagger-3">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Most Used Reports</h3>
+              <h3 className="text-[11px] font-extrabold uppercase tracking-widest text-slate-700">Most Used Reports</h3>
               <button
                 onClick={() => onNavigateTab('reports')}
-                className="text-xs font-bold text-blue-600 hover:text-blue-700 transition cursor-pointer flex items-center gap-0.5"
+                className="text-xs font-bold text-indigo-600 hover:text-indigo-700 transition cursor-pointer flex items-center gap-0.5"
               >
-                View All Reports <ChevronRight className="w-3.5 h-3.5" />
+                <span>View All Reports</span>
+                <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -225,25 +230,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ invoices = [],
                 <button
                   key={r.label}
                   onClick={() => onNavigateTab(r.tab)}
-                  className="flex items-center justify-between p-3.5 rounded-xl text-xs font-bold transition-all cursor-pointer group"
-                  style={{
-                    background: '#f8fafc',
-                    border: '1.5px solid #e2e8f0',
-                    color: '#334155',
-                  }}
-                  onMouseEnter={e => {
-                    (e.currentTarget as HTMLButtonElement).style.background = r.bg;
-                    (e.currentTarget as HTMLButtonElement).style.borderColor = r.color + '55';
-                    (e.currentTarget as HTMLButtonElement).style.color = r.color;
-                  }}
-                  onMouseLeave={e => {
-                    (e.currentTarget as HTMLButtonElement).style.background = '#f8fafc';
-                    (e.currentTarget as HTMLButtonElement).style.borderColor = '#e2e8f0';
-                    (e.currentTarget as HTMLButtonElement).style.color = '#334155';
-                  }}
+                  className="flex items-center justify-between p-3.5 rounded-xl text-xs font-bold transition-all cursor-pointer group bg-slate-50/80 border border-slate-200/80 hover:bg-white hover:border-indigo-200 hover:shadow-md"
                 >
-                  <span>{r.label}</span>
-                  <r.icon className="w-3.5 h-3.5 shrink-0" style={{ color: r.color, opacity: 0.8 }} />
+                  <span className="text-slate-800 group-hover:text-indigo-900">{r.label}</span>
+                  <div
+                    className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-transform group-hover:scale-110"
+                    style={{ background: r.bg }}
+                  >
+                    <r.icon className="w-3.5 h-3.5 shrink-0" style={{ color: r.color }} />
+                  </div>
                 </button>
               ))}
             </div>
@@ -251,98 +246,67 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ invoices = [],
         </div>
 
         {/* ── Right Column ─────────────────────────────────── */}
-        <div className="w-full lg:w-72 space-y-4">
+        <div className="w-full lg:w-76 space-y-4">
 
-          {/* Google Profile card */}
-          <div
-            className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3.5 animate-slide-up stagger-1"
-            style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}
-          >
-            <div className="flex items-center gap-2.5">
+          {/* Google Profile Card */}
+          <div className="card card-glass p-5 space-y-3.5 animate-slide-up stagger-1">
+            <div className="flex items-center gap-3">
               <div
-                className="w-8 h-8 rounded-xl flex items-center justify-center font-black text-sm"
-                style={{ background: 'linear-gradient(135deg, #4285F4, #34A853)', color: '#fff' }}
+                className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm text-white shadow-xs"
+                style={{ background: 'linear-gradient(135deg, #4285F4, #34A853)' }}
               >
                 G
               </div>
               <div>
-                <div className="text-xs font-bold text-slate-900">Google Profile Manager</div>
-                <div className="text-[10px] text-slate-400 font-medium">Business visibility tool</div>
+                <div className="text-xs font-extrabold text-slate-900">Google Profile Manager</div>
+                <div className="text-[10px] text-slate-400 font-semibold">Business visibility tool</div>
               </div>
             </div>
-            <p className="text-xs text-slate-600 font-medium leading-relaxed">
-              Businesses with 4+ star ratings get <strong className="text-slate-800">28% more</strong> customer calls on Google Maps.
+            <p className="text-xs text-slate-600 font-semibold leading-relaxed">
+              Businesses with 4+ star ratings get <strong className="text-slate-900 font-extrabold">28% more</strong> customer calls on Google Maps.
             </p>
             <button
               onClick={() => alert('Connected Google Business Profile!')}
-              className="w-full py-2 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5"
-              style={{ background: '#eff6ff', color: '#2563eb', border: '1.5px solid #bfdbfe' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#dbeafe'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = '#eff6ff'; }}
+              className="w-full py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs"
             >
               <Globe className="w-3.5 h-3.5" />
-              Connect Profile
+              <span>Connect Profile</span>
             </button>
           </div>
 
-          {/* Quick actions */}
-          <div
-            className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3 animate-slide-up stagger-2"
-            style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}
-          >
-            <div className="text-xs font-bold uppercase tracking-wider text-slate-500">Quick Actions</div>
+          {/* Quick Actions Grid */}
+          <div className="card card-glass p-5 space-y-3 animate-slide-up stagger-2">
+            <div className="text-[11px] font-extrabold uppercase tracking-widest text-slate-500">Quick Actions</div>
             {[
-              { label: 'New Sale Invoice', tab: 'pos',       color: '#e53e3e', icon: Zap },
-              { label: 'Add Party',        tab: 'parties',   color: '#3b82f6', icon: Users },
-              { label: 'Add Item',         tab: 'inventory', color: '#8b5cf6', icon: Plus },
-              { label: 'View Reports',     tab: 'reports',   color: '#10b981', icon: BarChart3 },
+              { label: 'New Sale Invoice', tab: 'pos',       color: '#ef4444', icon: Zap },
+              { label: 'Add Party / Customer', tab: 'parties',   color: '#3b82f6', icon: Users },
+              { label: 'Add Product Item', tab: 'inventory', color: '#8b5cf6', icon: Plus },
+              { label: 'View Analytics',     tab: 'reports',   color: '#10b981', icon: BarChart3 },
             ].map(item => (
               <button
                 key={item.label}
                 onClick={() => onNavigateTab(item.tab)}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer"
-                style={{ background: '#f8fafc', color: '#334155', border: '1px solid #e2e8f0' }}
-                onMouseEnter={e => {
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = item.color + '66';
-                  (e.currentTarget as HTMLButtonElement).style.color = item.color;
-                }}
-                onMouseLeave={e => {
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = '#e2e8f0';
-                  (e.currentTarget as HTMLButtonElement).style.color = '#334155';
-                }}
+                className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer bg-slate-50/80 border border-slate-200/80 hover:bg-white hover:border-slate-300 hover:shadow-xs group"
               >
                 <div
-                  className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
-                  style={{ background: item.color + '15' }}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-transform group-hover:scale-110"
+                  style={{ background: `${item.color}18` }}
                 >
-                  <item.icon className="w-3.5 h-3.5" style={{ color: item.color }} />
+                  <item.icon className="w-3.5 h-3.5 stroke-[2.5]" style={{ color: item.color }} />
                 </div>
-                {item.label}
+                <span className="text-slate-800">{item.label}</span>
               </button>
             ))}
           </div>
 
-          {/* Add widget placeholder */}
+          {/* Custom Widget Placeholder */}
           <div
             onClick={() => onNavigateTab('pos')}
-            className="rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all group"
-            style={{
-              border: '2px dashed #cbd5e1',
-              padding: '28px 16px',
-              color: '#94a3b8',
-            }}
-            onMouseEnter={e => {
-              (e.currentTarget as HTMLDivElement).style.borderColor = '#3b82f6';
-              (e.currentTarget as HTMLDivElement).style.color = '#3b82f6';
-              (e.currentTarget as HTMLDivElement).style.background = '#eff6ff';
-            }}
-            onMouseLeave={e => {
-              (e.currentTarget as HTMLDivElement).style.borderColor = '#cbd5e1';
-              (e.currentTarget as HTMLDivElement).style.color = '#94a3b8';
-              (e.currentTarget as HTMLDivElement).style.background = 'transparent';
-            }}
+            className="rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all duration-200 border-2 border-dashed border-slate-300 hover:border-indigo-500 hover:bg-indigo-50/50 p-6 text-slate-400 hover:text-indigo-600 group"
           >
-            <Plus className="w-5 h-5 stroke-[2.5]" />
+            <div className="w-9 h-9 rounded-xl bg-slate-100 group-hover:bg-indigo-100 flex items-center justify-center transition-colors">
+              <Plus className="w-5 h-5 stroke-[2.5]" />
+            </div>
             <span className="text-xs font-bold">Add Custom Widget</span>
           </div>
         </div>

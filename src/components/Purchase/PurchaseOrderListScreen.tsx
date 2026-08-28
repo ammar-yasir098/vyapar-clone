@@ -13,7 +13,7 @@ import {
   FileCheck
 } from 'lucide-react';
 import { PurchaseOrder, BusinessDetails, Party, Item, PurchaseBill } from '../../types';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 import { updateServerPOStatus, deleteServerPurchaseOrder, createServerPurchase } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { useToast } from '../Common/ToastContext';
@@ -84,7 +84,7 @@ export const PurchaseOrderListScreen: React.FC<PurchaseOrderListScreenProps> = (
       type: 'info',
       confirmText: 'Yes, Convert Now',
       onConfirm: async () => {
-        const currentTenantId = business?.tenantId || 'default-tenant';
+        const currentTenantId = getActiveTenantId(business);
         const billNumber = `PUR-PO-${po.poNumber.replace(/[^0-9]/g, '') || Date.now().toString().slice(-4)}`;
         const billDate = new Date().toISOString().split('T')[0];
 

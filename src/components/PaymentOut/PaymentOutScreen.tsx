@@ -15,7 +15,7 @@ import {
   Building2
 } from 'lucide-react';
 import { PaymentOut, Party, PurchaseBill, BusinessDetails } from '../../types';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 import { createServerPaymentOut, deleteServerPaymentOut } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { recordCashEntry } from '../../services/cash';
@@ -25,7 +25,7 @@ interface PaymentOutScreenProps {
   payments: PaymentOut[];
   parties: Party[];
   purchaseBills: PurchaseBill[];
-  business: BusinessDetails;
+  business?: BusinessDetails;
   onPaymentRecorded: () => void;
   selectedPartyFromParties?: Party | null;
   onClearSelectedParty?: () => void;
@@ -40,7 +40,7 @@ export const PaymentOutScreen: React.FC<PaymentOutScreenProps> = ({
   selectedPartyFromParties,
   onClearSelectedParty
 }) => {
-  const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+  const activeTenantId = getActiveTenantId(business);
   const { showToast, showConfirm } = useToast();
 
   const [activeSubTab, setActiveSubTab] = useState<'pending' | 'history'>('pending');
@@ -68,8 +68,23 @@ export const PaymentOutScreen: React.FC<PaymentOutScreenProps> = ({
     }
   }, [selectedPartyFromParties]);
 
-  // Safe Number helper
+  // Safe Number helper to compute true live due balance for a supplier
   const getPartyDueBalance = (party: Party): number => {
+    const supplierBills = (purchaseBills || []).filter(b => 
+      (party.id !== undefined && Number(b.supplierId) === Number(party.id)) ||
+      (b.supplierName && b.supplierName.trim().toLowerCase() === party.name.trim().toLowerCase())
+    );
+
+    if (supplierBills.length > 0) {
+      const billsDueSum = supplierBills.reduce((sum, b) => {
+        if (b.paymentStatus === 'PAID') return sum;
+        const due = b.dueAmount !== undefined && b.dueAmount >= 0 ? b.dueAmount : Math.max(0, (b.grandTotal || 0) - (b.paidAmount || 0));
+        return sum + due;
+      }, 0);
+      const opening = party.openingBalance && party.balanceType === 'PAYABLE' ? Number(party.openingBalance) : 0;
+      return Math.max(0, billsDueSum + opening);
+    }
+
     return Number(party.currentBalance !== undefined ? party.currentBalance : party.openingBalance) || 0;
   };
 
@@ -646,9 +661,9 @@ export const PaymentOutScreen: React.FC<PaymentOutScreenProps> = ({
               <div id="payment-out-print-area" className="bg-white p-8 font-sans text-slate-900 border border-slate-300 rounded-xl shadow-xs space-y-6">
                 <div className="flex justify-between items-start border-b border-slate-300 pb-6">
                   <div className="space-y-1">
-                    <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">{business.name || 'Company Name'}</h1>
-                    <p className="text-xs text-slate-600 font-medium">{business.address || 'Store Address'}</p>
-                    <p className="text-xs text-slate-600">Phone: {business.phone || '+92 300 0000000'}</p>
+                    <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">{business?.name || 'Company Name'}</h1>
+                    <p className="text-xs text-slate-600 font-medium">{business?.address || 'Store Address'}</p>
+                    <p className="text-xs text-slate-600">Phone: {business?.phone || '+92 300 0000000'}</p>
                   </div>
 
                   <div className="flex flex-col items-end space-y-2">

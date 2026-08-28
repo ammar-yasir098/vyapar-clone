@@ -71,6 +71,9 @@ class ClientSyncManager {
   /**
    * Pushes pending local mutations to the cloud backend API.
    */
+  /**
+   * Pushes pending local mutations to the cloud backend API.
+   */
   public async triggerSync(targetTenantId?: string) {
     const activeTenantId = targetTenantId || (typeof localStorage !== 'undefined' ? localStorage.getItem('vyapar_current_tenant') : null) || 'default-tenant';
     if (this.isSyncing || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
@@ -81,226 +84,7 @@ class ClientSyncManager {
     try {
       let unsynced = await db.syncJournal.filter(record => !record.synced).toArray();
 
-      // If sync journal is empty, auto-queue all current local records for cloud sync
-      if (unsynced.length === 0) {
-        const tId = activeTenantId;
-        const localItems = await db.items.filter(i => i.tenantId === tId).toArray();
-        const localParties = await db.parties.filter(p => (p.tenantId || 'default-tenant') === tId).toArray();
-        const localInvoices = await db.invoices.filter(inv => (inv.tenantId || 'default-tenant') === tId).toArray();
-
-        for (const item of localItems) {
-          if (item.id) {
-            await db.syncJournal.add({
-              versionId: `client-v-${Date.now()}-item-${item.id}`,
-              clientSequence: Date.now(),
-              entityType: 'ITEM',
-              entityId: String(item.id),
-              mutationType: 'INSERT',
-              payload: JSON.stringify(item),
-              timestamp: new Date().toISOString(),
-              synced: false
-            });
-          }
-        }
-
-        for (const party of localParties) {
-          if (party.id) {
-            await db.syncJournal.add({
-              versionId: `client-v-${Date.now()}-party-${party.id}`,
-              clientSequence: Date.now(),
-              entityType: 'PARTY',
-              entityId: String(party.id),
-              mutationType: 'INSERT',
-              payload: JSON.stringify(party),
-              timestamp: new Date().toISOString(),
-              synced: false
-            });
-          }
-        }
-
-        for (const inv of localInvoices) {
-          if (inv.id || inv.invoiceId) {
-            await db.syncJournal.add({
-              versionId: `client-v-${Date.now()}-inv-${inv.id || inv.invoiceId}`,
-              clientSequence: Date.now(),
-              entityType: 'INVOICE',
-              entityId: String(inv.id || inv.invoiceId),
-              mutationType: 'INSERT',
-              payload: JSON.stringify(inv),
-              timestamp: new Date().toISOString(),
-              synced: false
-            });
-          }
-        }
-
-
-
-        const localEstimates = await db.estimates.filter(e => (e.tenantId || 'default-tenant') === tId).toArray();
-        for (const est of localEstimates) {
-          if (est.id || est.estimateId) {
-            await db.syncJournal.add({
-              versionId: `client-v-${Date.now()}-est-${est.id || est.estimateId}`,
-              clientSequence: Date.now(),
-              entityType: 'ESTIMATE',
-              entityId: String(est.id || est.estimateId),
-              mutationType: 'INSERT',
-              payload: JSON.stringify(est),
-              timestamp: new Date().toISOString(),
-              synced: false
-            });
-          }
-        }
-
-        const localPaymentsIn = await db.paymentIn.filter(p => (p.tenantId || 'default-tenant') === tId).toArray();
-        for (const payIn of localPaymentsIn) {
-          if (payIn.id || payIn.receiptNumber) {
-            await db.syncJournal.add({
-              versionId: `client-v-${Date.now()}-payin-${payIn.id || payIn.receiptNumber}`,
-              clientSequence: Date.now(),
-              entityType: 'PAYMENT_IN',
-              entityId: String(payIn.id || payIn.receiptNumber),
-              mutationType: 'INSERT',
-              payload: JSON.stringify(payIn),
-              timestamp: new Date().toISOString(),
-              synced: false
-            });
-          }
-        }
-
-        const localPOs = await db.purchaseOrders.filter(po => (po.tenantId || 'default-tenant') === tId).toArray();
-        for (const po of localPOs) {
-          if (po.id || po.poId) {
-            await db.syncJournal.add({
-              versionId: `client-v-${Date.now()}-po-${po.id || po.poId}`,
-              clientSequence: Date.now(),
-              entityType: 'PURCHASE_ORDER',
-              entityId: String(po.id || po.poId),
-              mutationType: 'INSERT',
-              payload: JSON.stringify(po),
-              timestamp: new Date().toISOString(),
-              synced: false
-            });
-          }
-        }
-
-        const localBills = await db.purchaseBills.filter(b => (b.tenantId || 'default-tenant') === tId).toArray();
-        for (const bill of localBills) {
-          if (bill.id || bill.billId) {
-            await db.syncJournal.add({
-              versionId: `client-v-${Date.now()}-bill-${bill.id || bill.billId}`,
-              clientSequence: Date.now(),
-              entityType: 'PURCHASE_BILL',
-              entityId: String(bill.id || bill.billId),
-              mutationType: 'INSERT',
-              payload: JSON.stringify(bill),
-              timestamp: new Date().toISOString(),
-              synced: false
-            });
-          }
-        }
-
-        const localPaymentsOut = await db.paymentOut.filter(p => (p.tenantId || 'default-tenant') === tId).toArray();
-        for (const payOut of localPaymentsOut) {
-          if (payOut.id || payOut.receiptNumber) {
-            await db.syncJournal.add({
-              versionId: `client-v-${Date.now()}-payout-${payOut.id || payOut.receiptNumber}`,
-              clientSequence: Date.now(),
-              entityType: 'PAYMENT_OUT',
-              entityId: String(payOut.id || payOut.receiptNumber),
-              mutationType: 'INSERT',
-              payload: JSON.stringify(payOut),
-              timestamp: new Date().toISOString(),
-              synced: false
-            });
-          }
-        }
-
-        const localExpenses = await db.expenses.filter(e => (e.tenantId || 'default-tenant') === tId).toArray();
-        for (const exp of localExpenses) {
-          if (exp.id || exp.expenseNumber) {
-            await db.syncJournal.add({
-              versionId: `client-v-${Date.now()}-exp-${exp.id || exp.expenseNumber}`,
-              clientSequence: Date.now(),
-              entityType: 'EXPENSE',
-              entityId: String(exp.id || exp.expenseNumber),
-              mutationType: 'INSERT',
-              payload: JSON.stringify(exp),
-              timestamp: new Date().toISOString(),
-              synced: false
-            });
-          }
-        }
-
-        const localReturns = await db.purchaseReturns.filter(r => (r.tenantId || 'default-tenant') === tId).toArray();
-        for (const ret of localReturns) {
-          if (ret.id || ret.returnId) {
-            await db.syncJournal.add({
-              versionId: `client-v-${Date.now()}-ret-${ret.id || ret.returnId}`,
-              clientSequence: Date.now(),
-              entityType: 'PURCHASE_RETURN',
-              entityId: String(ret.id || ret.returnId),
-              mutationType: 'INSERT',
-              payload: JSON.stringify(ret),
-              timestamp: new Date().toISOString(),
-              synced: false
-            });
-          }
-        }
-
-        const localSaleReturns = await db.saleReturns.filter(sr => (sr.tenantId || 'default-tenant') === tId).toArray();
-        for (const sret of localSaleReturns) {
-          if (sret.id || sret.returnId) {
-            await db.syncJournal.add({
-              versionId: `client-v-${Date.now()}-saleret-${sret.id || sret.returnId}`,
-              clientSequence: Date.now(),
-              entityType: 'SALE_RETURN',
-              entityId: String(sret.id || sret.returnId),
-              mutationType: 'INSERT',
-              payload: JSON.stringify(sret),
-              timestamp: new Date().toISOString(),
-              synced: false
-            });
-          }
-        }
-
-        const localCashAccs = await db.cashAccounts.filter(c => (c.tenantId || 'default-tenant') === tId).toArray();
-        for (const cAcc of localCashAccs) {
-          if (cAcc.id) {
-            await db.syncJournal.add({
-              versionId: `client-v-${Date.now()}-cashacc-${cAcc.id}`,
-              clientSequence: Date.now(),
-              entityType: 'CASH_ACCOUNT',
-              entityId: String(cAcc.id),
-              mutationType: 'INSERT',
-              payload: JSON.stringify(cAcc),
-              timestamp: new Date().toISOString(),
-              synced: false
-            });
-          }
-        }
-
-        const localCashTxns = await db.cashTransactions.filter(ct => (ct.tenantId || 'default-tenant') === tId).toArray();
-        for (const cTx of localCashTxns) {
-          if (cTx.id || cTx.referenceId) {
-            await db.syncJournal.add({
-              versionId: `client-v-${Date.now()}-cashtx-${cTx.id || cTx.referenceId}`,
-              clientSequence: Date.now(),
-              entityType: 'CASH_TRANSACTION',
-              entityId: String(cTx.id || cTx.referenceId),
-              mutationType: 'INSERT',
-              payload: JSON.stringify(cTx),
-              timestamp: new Date().toISOString(),
-              synced: false
-            });
-          }
-        }
-
-        // Re-fetch unsynced queue after auto-populating
-        unsynced = await db.syncJournal.filter(record => !record.synced).toArray();
-      }
-
       if (unsynced.length > 0) {
-        const activeTenantId = targetTenantId || 'default-tenant';
         const response = await fetchWithTimeout(`${SYNC_SERVER_URL}/push`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -371,32 +155,49 @@ class ClientSyncManager {
         cashTransactions
       } = json.data;
 
-      // 1. Merge items
+      // 1. Merge items safely with non-empty SKU or case-insensitive name match
       if (Array.isArray(items) && items.length > 0) {
         for (const sItem of items) {
+          const sTenant = sItem.tenantId || activeTenantId;
+          if (sTenant !== activeTenantId) continue;
+
+          const skuMatch = sItem.skuCode && sItem.skuCode.trim() !== '';
+          const nameMatch = sItem.name && sItem.name.trim() !== '';
+          
           const existing = await db.items
-            .filter(i => (i.tenantId || 'default-tenant') === activeTenantId && (i.skuCode === sItem.skuCode || i.name === sItem.name))
+            .filter(i => {
+              const tMatch = (i.tenantId || 'default-tenant') === activeTenantId;
+              if (!tMatch) return false;
+              if (skuMatch && i.skuCode && i.skuCode.trim().toLowerCase() === sItem.skuCode.trim().toLowerCase()) return true;
+              if (nameMatch && i.name && i.name.trim().toLowerCase() === sItem.name.trim().toLowerCase()) return true;
+              return false;
+            })
             .first();
+
           if (existing && existing.id) {
-            await db.items.update(existing.id, { ...sItem, id: existing.id });
+            await db.items.update(existing.id, { ...sItem, id: existing.id, tenantId: activeTenantId });
           } else {
             const { id, ...itemData } = sItem;
-            await db.items.add(itemData);
+            await db.items.add({ ...itemData, tenantId: activeTenantId });
           }
         }
       }
 
-      // 2. Merge parties
+      // 2. Merge parties with case-insensitive name match
       if (Array.isArray(parties) && parties.length > 0) {
         for (const sParty of parties) {
+          const sTenant = sParty.tenantId || activeTenantId;
+          if (sTenant !== activeTenantId) continue;
+
+          const pName = (sParty.name || '').trim().toLowerCase();
           const existing = await db.parties
-            .filter(p => (p.tenantId || 'default-tenant') === activeTenantId && p.name === sParty.name)
+            .filter(p => (p.tenantId || 'default-tenant') === activeTenantId && (p.name || '').trim().toLowerCase() === pName)
             .first();
           if (existing && existing.id) {
-            await db.parties.update(existing.id, { ...sParty, id: existing.id });
+            await db.parties.update(existing.id, { ...sParty, id: existing.id, tenantId: activeTenantId });
           } else {
             const { id, ...partyData } = sParty;
-            await db.parties.add(partyData);
+            await db.parties.add({ ...partyData, tenantId: activeTenantId });
           }
         }
       }
@@ -404,14 +205,25 @@ class ClientSyncManager {
       // 3. Merge invoices
       if (Array.isArray(invoices) && invoices.length > 0) {
         for (const sInv of invoices) {
+          const sTenant = sInv.tenantId || activeTenantId;
+          if (sTenant !== activeTenantId) continue;
+
+          const invId = sInv.invoiceId || sInv.invoice_id;
+          const invNum = sInv.invoiceNumber || sInv.invoice_number;
           const existing = await db.invoices
-            .filter(inv => (inv.tenantId || 'default-tenant') === activeTenantId && (inv.invoiceNumber === sInv.invoiceNumber || inv.invoiceId === sInv.invoiceId))
+            .filter(inv => {
+              const tMatch = (inv.tenantId || 'default-tenant') === activeTenantId;
+              if (!tMatch) return false;
+              if (invId && inv.invoiceId === invId) return true;
+              if (invNum && inv.invoiceNumber === invNum) return true;
+              return false;
+            })
             .first();
           if (existing && existing.id) {
-            await db.invoices.update(existing.id, { ...sInv, id: existing.id });
+            await db.invoices.update(existing.id, { ...sInv, id: existing.id, tenantId: activeTenantId });
           } else {
             const { id, ...invData } = sInv;
-            await db.invoices.add(invData);
+            await db.invoices.add({ ...invData, tenantId: activeTenantId });
           }
         }
       }
@@ -419,14 +231,25 @@ class ClientSyncManager {
       // 4. Merge estimates
       if (Array.isArray(estimates) && estimates.length > 0) {
         for (const sEst of estimates) {
+          const sTenant = sEst.tenantId || activeTenantId;
+          if (sTenant !== activeTenantId) continue;
+
+          const estId = sEst.estimateId || sEst.estimate_id;
+          const estNum = sEst.estimateNumber || sEst.estimate_number;
           const existing = await db.estimates
-            .filter(e => (e.tenantId || 'default-tenant') === activeTenantId && (e.estimateNumber === sEst.estimateNumber || e.estimateId === sEst.estimateId))
+            .filter(e => {
+              const tMatch = (e.tenantId || 'default-tenant') === activeTenantId;
+              if (!tMatch) return false;
+              if (estId && e.estimateId === estId) return true;
+              if (estNum && e.estimateNumber === estNum) return true;
+              return false;
+            })
             .first();
           if (existing && existing.id) {
-            await db.estimates.update(existing.id, { ...sEst, id: existing.id });
+            await db.estimates.update(existing.id, { ...sEst, id: existing.id, tenantId: activeTenantId });
           } else {
             const { id, ...estData } = sEst;
-            await db.estimates.add(estData);
+            await db.estimates.add({ ...estData, tenantId: activeTenantId });
           }
         }
       }
@@ -434,14 +257,18 @@ class ClientSyncManager {
       // 5. Merge payment-in
       if (Array.isArray(paymentsIn) && paymentsIn.length > 0) {
         for (const sPayIn of paymentsIn) {
+          const sTenant = sPayIn.tenantId || activeTenantId;
+          if (sTenant !== activeTenantId) continue;
+
+          const recNum = sPayIn.receiptNumber || sPayIn.receipt_number;
           const existing = await db.paymentIn
-            .filter(p => (p.tenantId || 'default-tenant') === activeTenantId && p.receiptNumber === sPayIn.receiptNumber)
+            .filter(p => (p.tenantId || 'default-tenant') === activeTenantId && recNum && p.receiptNumber === recNum)
             .first();
           if (existing && existing.id) {
-            await db.paymentIn.update(existing.id, { ...sPayIn, id: existing.id });
+            await db.paymentIn.update(existing.id, { ...sPayIn, id: existing.id, tenantId: activeTenantId });
           } else {
             const { id, ...payInData } = sPayIn;
-            await db.paymentIn.add(payInData);
+            await db.paymentIn.add({ ...payInData, tenantId: activeTenantId });
           }
         }
       }
@@ -449,14 +276,25 @@ class ClientSyncManager {
       // 6. Merge purchase orders
       if (Array.isArray(purchaseOrders) && purchaseOrders.length > 0) {
         for (const sPO of purchaseOrders) {
+          const sTenant = sPO.tenantId || activeTenantId;
+          if (sTenant !== activeTenantId) continue;
+
+          const poId = sPO.poId || sPO.po_id;
+          const poNum = sPO.poNumber || sPO.po_number;
           const existing = await db.purchaseOrders
-            .filter(po => (po.tenantId || 'default-tenant') === activeTenantId && (po.poNumber === sPO.poNumber || po.poId === sPO.poId))
+            .filter(po => {
+              const tMatch = (po.tenantId || 'default-tenant') === activeTenantId;
+              if (!tMatch) return false;
+              if (poId && po.poId === poId) return true;
+              if (poNum && po.poNumber === poNum) return true;
+              return false;
+            })
             .first();
           if (existing && existing.id) {
-            await db.purchaseOrders.update(existing.id, { ...sPO, id: existing.id });
+            await db.purchaseOrders.update(existing.id, { ...sPO, id: existing.id, tenantId: activeTenantId });
           } else {
             const { id, ...poData } = sPO;
-            await db.purchaseOrders.add(poData);
+            await db.purchaseOrders.add({ ...poData, tenantId: activeTenantId });
           }
         }
       }
@@ -464,14 +302,25 @@ class ClientSyncManager {
       // 7. Merge purchase bills
       if (Array.isArray(purchaseBills) && purchaseBills.length > 0) {
         for (const sBill of purchaseBills) {
+          const sTenant = sBill.tenantId || activeTenantId;
+          if (sTenant !== activeTenantId) continue;
+
+          const bId = sBill.billId || sBill.bill_id;
+          const bNum = sBill.billNumber || sBill.bill_number;
           const existing = await db.purchaseBills
-            .filter(b => (b.tenantId || 'default-tenant') === activeTenantId && (b.billNumber === sBill.billNumber || b.billId === sBill.billId))
+            .filter(b => {
+              const tMatch = (b.tenantId || 'default-tenant') === activeTenantId;
+              if (!tMatch) return false;
+              if (bId && b.billId === bId) return true;
+              if (bNum && b.billNumber === bNum) return true;
+              return false;
+            })
             .first();
           if (existing && existing.id) {
-            await db.purchaseBills.update(existing.id, { ...sBill, id: existing.id });
+            await db.purchaseBills.update(existing.id, { ...sBill, id: existing.id, tenantId: activeTenantId });
           } else {
             const { id, ...billData } = sBill;
-            await db.purchaseBills.add(billData);
+            await db.purchaseBills.add({ ...billData, tenantId: activeTenantId });
           }
         }
       }
@@ -479,14 +328,18 @@ class ClientSyncManager {
       // 8. Merge payment-out
       if (Array.isArray(paymentsOut) && paymentsOut.length > 0) {
         for (const sPayOut of paymentsOut) {
+          const sTenant = sPayOut.tenantId || activeTenantId;
+          if (sTenant !== activeTenantId) continue;
+
+          const recNum = sPayOut.receiptNumber || sPayOut.receipt_number;
           const existing = await db.paymentOut
-            .filter(p => (p.tenantId || 'default-tenant') === activeTenantId && p.receiptNumber === sPayOut.receiptNumber)
+            .filter(p => (p.tenantId || 'default-tenant') === activeTenantId && recNum && p.receiptNumber === recNum)
             .first();
           if (existing && existing.id) {
-            await db.paymentOut.update(existing.id, { ...sPayOut, id: existing.id });
+            await db.paymentOut.update(existing.id, { ...sPayOut, id: existing.id, tenantId: activeTenantId });
           } else {
             const { id, ...payOutData } = sPayOut;
-            await db.paymentOut.add(payOutData);
+            await db.paymentOut.add({ ...payOutData, tenantId: activeTenantId });
           }
         }
       }
@@ -494,14 +347,18 @@ class ClientSyncManager {
       // 9. Merge expenses
       if (Array.isArray(expenses) && expenses.length > 0) {
         for (const sExp of expenses) {
+          const sTenant = sExp.tenantId || activeTenantId;
+          if (sTenant !== activeTenantId) continue;
+
+          const expNum = sExp.expenseNumber || sExp.expense_number;
           const existing = await db.expenses
-            .filter(e => (e.tenantId || 'default-tenant') === activeTenantId && e.expenseNumber === sExp.expenseNumber)
+            .filter(e => (e.tenantId || 'default-tenant') === activeTenantId && expNum && e.expenseNumber === expNum)
             .first();
           if (existing && existing.id) {
-            await db.expenses.update(existing.id, { ...sExp, id: existing.id });
+            await db.expenses.update(existing.id, { ...sExp, id: existing.id, tenantId: activeTenantId });
           } else {
             const { id, ...expData } = sExp;
-            await db.expenses.add(expData);
+            await db.expenses.add({ ...expData, tenantId: activeTenantId });
           }
         }
       }
@@ -509,14 +366,25 @@ class ClientSyncManager {
       // 10. Merge purchase returns
       if (Array.isArray(purchaseReturns) && purchaseReturns.length > 0) {
         for (const sRet of purchaseReturns) {
+          const sTenant = sRet.tenantId || activeTenantId;
+          if (sTenant !== activeTenantId) continue;
+
+          const rId = sRet.returnId || sRet.return_id;
+          const dnNum = sRet.debitNoteNumber || sRet.debit_note_number;
           const existing = await db.purchaseReturns
-            .filter(r => (r.tenantId || 'default-tenant') === activeTenantId && (r.debitNoteNumber === sRet.debitNoteNumber || r.returnId === sRet.returnId))
+            .filter(r => {
+              const tMatch = (r.tenantId || 'default-tenant') === activeTenantId;
+              if (!tMatch) return false;
+              if (rId && r.returnId === rId) return true;
+              if (dnNum && r.debitNoteNumber === dnNum) return true;
+              return false;
+            })
             .first();
           if (existing && existing.id) {
-            await db.purchaseReturns.update(existing.id, { ...sRet, id: existing.id });
+            await db.purchaseReturns.update(existing.id, { ...sRet, id: existing.id, tenantId: activeTenantId });
           } else {
             const { id, ...retData } = sRet;
-            await db.purchaseReturns.add(retData);
+            await db.purchaseReturns.add({ ...retData, tenantId: activeTenantId });
           }
         }
       }
@@ -524,14 +392,25 @@ class ClientSyncManager {
       // 11. Merge sale returns
       if (Array.isArray(saleReturns) && saleReturns.length > 0) {
         for (const sSRet of saleReturns) {
+          const sTenant = sSRet.tenantId || activeTenantId;
+          if (sTenant !== activeTenantId) continue;
+
+          const rId = sSRet.returnId || sSRet.return_id;
+          const crNum = sSRet.creditNoteNumber || sSRet.credit_note_number;
           const existing = await db.saleReturns
-            .filter(sr => (sr.tenantId || 'default-tenant') === activeTenantId && (sr.creditNoteNumber === sSRet.creditNoteNumber || sr.returnId === sSRet.returnId))
+            .filter(sr => {
+              const tMatch = (sr.tenantId || 'default-tenant') === activeTenantId;
+              if (!tMatch) return false;
+              if (rId && sr.returnId === rId) return true;
+              if (crNum && sr.creditNoteNumber === crNum) return true;
+              return false;
+            })
             .first();
           if (existing && existing.id) {
-            await db.saleReturns.update(existing.id, { ...sSRet, id: existing.id });
+            await db.saleReturns.update(existing.id, { ...sSRet, id: existing.id, tenantId: activeTenantId });
           } else {
             const { id, ...sRetData } = sSRet;
-            await db.saleReturns.add(sRetData);
+            await db.saleReturns.add({ ...sRetData, tenantId: activeTenantId });
           }
         }
       }
@@ -539,14 +418,18 @@ class ClientSyncManager {
       // 12. Merge cash accounts
       if (Array.isArray(cashAccounts) && cashAccounts.length > 0) {
         for (const sAcc of cashAccounts) {
+          const sTenant = sAcc.tenantId || activeTenantId;
+          if (sTenant !== activeTenantId) continue;
+
+          const accName = (sAcc.name || '').trim().toLowerCase();
           const existing = await db.cashAccounts
-            .filter(c => (c.tenantId || 'default-tenant') === activeTenantId && c.name === sAcc.name)
+            .filter(c => (c.tenantId || 'default-tenant') === activeTenantId && (c.name || '').trim().toLowerCase() === accName)
             .first();
           if (existing && existing.id) {
-            await db.cashAccounts.update(existing.id as number, { ...sAcc, id: existing.id });
+            await db.cashAccounts.update(existing.id as number, { ...sAcc, id: existing.id, tenantId: activeTenantId });
           } else {
             const { id, ...accData } = sAcc;
-            await db.cashAccounts.add(accData);
+            await db.cashAccounts.add({ ...accData, tenantId: activeTenantId });
           }
         }
       }
@@ -554,20 +437,192 @@ class ClientSyncManager {
       // 13. Merge cash transactions
       if (Array.isArray(cashTransactions) && cashTransactions.length > 0) {
         for (const sTx of cashTransactions) {
+          const sTenant = sTx.tenantId || activeTenantId;
+          if (sTenant !== activeTenantId) continue;
+
+          const refId = sTx.referenceId || sTx.reference_id;
           const existing = await db.cashTransactions
-            .filter(ct => (ct.tenantId || 'default-tenant') === activeTenantId && !!ct.referenceId && ct.referenceId === sTx.referenceId)
+            .filter(ct => {
+              const tMatch = (ct.tenantId || 'default-tenant') === activeTenantId;
+              if (!tMatch) return false;
+              if (refId && ct.referenceId === refId) return true;
+              return false;
+            })
             .first();
           if (existing && existing.id) {
-            await db.cashTransactions.update(existing.id as number, { ...sTx, id: existing.id });
+            await db.cashTransactions.update(existing.id as number, { ...sTx, id: existing.id, tenantId: activeTenantId });
           } else {
             const { id, ...txData } = sTx;
-            await db.cashTransactions.add(txData);
+            await db.cashTransactions.add({ ...txData, tenantId: activeTenantId });
           }
         }
       }
+
+      // Automatically purge local duplicates & cross-tenant leaks after pulling server changes
+      await deduplicateLocalDatabase();
     } catch (err) {
       console.warn('Error pulling server changes:', err);
     }
+  }
+}
+
+/**
+ * Scans all Dexie IndexedDB tables and purges duplicate rows per store tenant
+ * and purges cross-tenant leaked records (copied mistakenly across store tenants)
+ */
+export async function deduplicateLocalDatabase() {
+  try {
+    // 0. Purge Cross-Tenant Leaked Cash Transactions, Payments & Expenses
+    const allCashTxns = await db.cashTransactions.toArray();
+    const primaryCashRefTenants = new Map<string, string>(); // refId -> primary tenantId
+    const leakedCashTxIds: number[] = [];
+
+    // Find primary owner tenant for each transaction referenceId
+    for (const ct of allCashTxns) {
+      const ref = ct.referenceId;
+      const tId = ct.tenantId || 'default-tenant';
+      if (ref && !primaryCashRefTenants.has(ref)) {
+        primaryCashRefTenants.set(ref, tId);
+      }
+    }
+
+    // Purge rows with same referenceId in secondary tenants
+    for (const ct of allCashTxns) {
+      const ref = ct.referenceId;
+      const tId = ct.tenantId || 'default-tenant';
+      if (ref && primaryCashRefTenants.has(ref)) {
+        const ownerTenant = primaryCashRefTenants.get(ref);
+        if (ownerTenant && ownerTenant !== tId && ct.id) {
+          leakedCashTxIds.push(Number(ct.id));
+        }
+      }
+    }
+    if (leakedCashTxIds.length > 0) {
+      await db.cashTransactions.bulkDelete(leakedCashTxIds);
+    }
+
+    // Purge Cross-Tenant Leaked PaymentOut vouchers
+    const allPayOuts = await db.paymentOut.toArray();
+    const primaryPayOutRefTenants = new Map<string, string>();
+    const leakedPayOutIds: number[] = [];
+
+    for (const po of allPayOuts) {
+      const ref = po.receiptNumber;
+      const tId = po.tenantId || 'default-tenant';
+      if (ref && !primaryPayOutRefTenants.has(ref)) {
+        primaryPayOutRefTenants.set(ref, tId);
+      }
+    }
+    for (const po of allPayOuts) {
+      const ref = po.receiptNumber;
+      const tId = po.tenantId || 'default-tenant';
+      if (ref && primaryPayOutRefTenants.has(ref)) {
+        const ownerTenant = primaryPayOutRefTenants.get(ref);
+        if (ownerTenant && ownerTenant !== tId && po.id) {
+          leakedPayOutIds.push(Number(po.id));
+        }
+      }
+    }
+    if (leakedPayOutIds.length > 0) {
+      await db.paymentOut.bulkDelete(leakedPayOutIds);
+    }
+
+    // 1. Deduplicate Items by (tenantId, skuCode) or (tenantId, name)
+    const items = await db.items.toArray();
+    const seenItems = new Set<string>();
+    const dupItemIds: number[] = [];
+    const skuToOwnerTenant = new Map<string, string>();
+
+    for (const item of items) {
+      const tId = item.tenantId || 'default-tenant';
+      const keySku = item.skuCode && item.skuCode.trim() ? item.skuCode.trim().toLowerCase() : null;
+
+      if (keySku && !skuToOwnerTenant.has(keySku)) {
+        skuToOwnerTenant.set(keySku, tId);
+      }
+
+      const primaryKey = keySku ? `${tId}_sku_${keySku}` : item.name ? `${tId}_name_${item.name.trim().toLowerCase()}` : null;
+      if (primaryKey && seenItems.has(primaryKey)) {
+        if (item.id) dupItemIds.push(Number(item.id));
+      } else if (primaryKey) {
+        seenItems.add(primaryKey);
+      }
+    }
+    if (dupItemIds.length > 0) await db.items.bulkDelete(dupItemIds);
+
+    // 2. Deduplicate Parties by (tenantId, name)
+    const parties = await db.parties.toArray();
+    const seenParties = new Set<string>();
+    const dupPartyIds: number[] = [];
+    for (const party of parties) {
+      const tId = party.tenantId || 'default-tenant';
+      const key = `${tId}_${(party.name || '').trim().toLowerCase()}`;
+      if (seenParties.has(key)) {
+        if (party.id) dupPartyIds.push(Number(party.id));
+      } else {
+        seenParties.add(key);
+      }
+    }
+    if (dupPartyIds.length > 0) await db.parties.bulkDelete(dupPartyIds);
+
+    // 3. Deduplicate Invoices by (tenantId, invoiceNumber) or (tenantId, invoiceId)
+    const invoices = await db.invoices.toArray();
+    const seenInvoices = new Set<string>();
+    const dupInvIds: number[] = [];
+    for (const inv of invoices) {
+      const tId = inv.tenantId || 'default-tenant';
+      const keyNum = inv.invoiceNumber ? `${tId}_num_${inv.invoiceNumber.trim().toLowerCase()}` : null;
+      const keyId = inv.invoiceId ? `${tId}_id_${inv.invoiceId.trim().toLowerCase()}` : null;
+      const key = keyNum || keyId;
+      if (key && seenInvoices.has(key)) {
+        if (inv.id) dupInvIds.push(Number(inv.id));
+      } else if (key) {
+        seenInvoices.add(key);
+        if (keyNum && keyId) seenInvoices.add(keyId);
+      }
+    }
+    if (dupInvIds.length > 0) await db.invoices.bulkDelete(dupInvIds);
+
+    // 4. Deduplicate Cash Accounts by (tenantId, name)
+    const cashAccs = await db.cashAccounts.toArray();
+    const seenCashAccs = new Set<string>();
+    const dupCashAccIds: number[] = [];
+    for (const acc of cashAccs) {
+      const tId = acc.tenantId || 'default-tenant';
+      const key = `${tId}_${(acc.name || '').trim().toLowerCase()}`;
+      if (seenCashAccs.has(key)) {
+        if (acc.id) dupCashAccIds.push(Number(acc.id));
+      } else {
+        seenCashAccs.add(key);
+      }
+    }
+    if (dupCashAccIds.length > 0) await db.cashAccounts.bulkDelete(dupCashAccIds);
+
+    // 5. Deduplicate Item Location Mappings by (tenantId, itemId, locationId)
+    const mappings = await db.itemLocations.toArray();
+    const seenMappings = new Set<string>();
+    const dupMappingIds: number[] = [];
+    for (const m of mappings) {
+      const tId = m.tenantId || 'default-tenant';
+      const key = `${tId}_item_${m.itemId}_loc_${m.locationId}`;
+      if (seenMappings.has(key)) {
+        if (m.id) dupMappingIds.push(Number(m.id));
+      } else {
+        seenMappings.add(key);
+      }
+    }
+    if (dupMappingIds.length > 0) await db.itemLocations.bulkDelete(dupMappingIds);
+
+    // 6. Purge Orphaned Item Location Mappings (referencing non-existent locations)
+    const validLocations = new Set((await db.locations.toArray()).map(l => Number(l.id)));
+    const orphanMappingIds = mappings
+      .filter(m => m.id && !validLocations.has(Number(m.locationId)))
+      .map(m => Number(m.id));
+    if (orphanMappingIds.length > 0) {
+      await db.itemLocations.bulkDelete(orphanMappingIds);
+    }
+  } catch (err) {
+    console.warn('Error during local database deduplication:', err);
   }
 }
 
@@ -587,3 +642,4 @@ export async function pruneSyncedJournalEntries() {
 }
 
 export const syncManager = new ClientSyncManager();
+

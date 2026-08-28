@@ -56,13 +56,13 @@ export const getAccessibleWarehouses = (
   const warehouses = locations.filter(l => l.type === 'WAREHOUSE');
   return warehouses.filter(w => {
     if (w.tenantId === storeTenantId) return true;
-    if (w.isShared) return true;
     if (w.allowedTenantIds && w.allowedTenantIds.includes(storeTenantId)) return true;
     return false;
   });
 };
 
 import { useLiveQuery } from 'dexie-react-hooks';
+import { getActiveTenantId } from '../../db';
 
 export const LocationScreen: React.FC<LocationScreenProps> = ({
   items,
@@ -79,16 +79,78 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   const [selectedWarehouseFilter, setSelectedWarehouseFilter] = useState<string>('ALL');
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
   const [primaryWarehouseId, setPrimaryWarehouseId] = useState<number | null>(null);
-  const activeTenantId = business?.tenantId || 'default-tenant';
+  const activeTenantId = getActiveTenantId(business);
 
   // Real-time Dexie Live Queries for Immediate Reactive UI Updating
   const liveAllItemLocations = useLiveQuery(() => db.itemLocations.toArray(), []);
   const liveAllItems = useLiveQuery(() => db.items.toArray(), []);
   const liveAllLocations = useLiveQuery(() => db.locations.toArray(), []);
 
-  const allItemLocations = liveAllItemLocations && liveAllItemLocations.length > 0 ? liveAllItemLocations : itemLocations;
-  const allItems = liveAllItems && liveAllItems.length > 0 ? liveAllItems : items;
-  const activeLocations = liveAllLocations && liveAllLocations.length > 0 ? liveAllLocations : locations;
+  // Compute accessible warehouses for active store based strictly on ownership or explicit allowedTenantIds linkage
+  const accessibleWhIds = useMemo(() => {
+    const set = new Set<number>();
+    const rawLocs = liveAllLocations && liveAllLocations.length > 0 ? liveAllLocations : locations;
+    rawLocs.forEach(loc => {
+      if (loc.type === 'WAREHOUSE') {
+        const locTenant = loc.tenantId || 'default-tenant';
+        const isOwner = locTenant === activeTenantId;
+        const isLinked = loc.allowedTenantIds && Array.isArray(loc.allowedTenantIds) && loc.allowedTenantIds.includes(activeTenantId);
+        if (isOwner || isLinked) {
+          set.add(Number(loc.id));
+        }
+      }
+    });
+    return set;
+  }, [liveAllLocations, locations, activeTenantId]);
+
+  const accessibleLocationIds = useMemo(() => {
+    const locIds = new Set<number>(accessibleWhIds);
+    const rawLocs = liveAllLocations && liveAllLocations.length > 0 ? liveAllLocations : locations;
+    let addedChild = true;
+    while (addedChild) {
+      addedChild = false;
+      for (const loc of rawLocs) {
+        if (loc.parentId && locIds.has(Number(loc.parentId)) && !locIds.has(Number(loc.id))) {
+          locIds.add(Number(loc.id));
+          addedChild = true;
+        }
+      }
+    }
+    return locIds;
+  }, [liveAllLocations, locations, accessibleWhIds]);
+
+  const activeLocations = useMemo(() => {
+    const rawLocs = liveAllLocations && liveAllLocations.length > 0 ? liveAllLocations : locations;
+    return rawLocs.filter(loc => {
+      if (!loc) return false;
+      const locTenant = loc.tenantId || 'default-tenant';
+      const isOwner = locTenant === activeTenantId;
+      const isLocAccessible = accessibleLocationIds.has(Number(loc.id));
+      return isOwner || isLocAccessible;
+    });
+  }, [liveAllLocations, locations, activeTenantId, accessibleLocationIds]);
+
+  const allItemLocations = useMemo(() => {
+    const rawMap = liveAllItemLocations && liveAllItemLocations.length > 0 ? liveAllItemLocations : itemLocations;
+    return rawMap.filter(il => {
+      if (!il) return false;
+      const ilTenant = il.tenantId || 'default-tenant';
+      const isOwner = ilTenant === activeTenantId;
+      const isLocAccessible = accessibleLocationIds.has(Number(il.locationId));
+      return isOwner || isLocAccessible;
+    });
+  }, [liveAllItemLocations, itemLocations, activeTenantId, accessibleLocationIds]);
+
+  const allItems = useMemo(() => {
+    const rawItems = liveAllItems && liveAllItems.length > 0 ? liveAllItems : items;
+    return rawItems.filter(item => {
+      if (!item) return false;
+      const itemTenant = item.tenantId || 'default-tenant';
+      const isOwner = itemTenant === activeTenantId;
+      const isStoredInAccessibleLoc = allItemLocations.some((il: any) => Number(il.itemId) === Number(item.id) && accessibleLocationIds.has(Number(il.locationId)));
+      return isOwner || isStoredInAccessibleLoc;
+    });
+  }, [liveAllItems, items, activeTenantId, allItemLocations, accessibleLocationIds]);
 
   const [storeProfiles, setStoreProfiles] = useState<Array<{ tenantId: string; name: string }>>([]);
 
@@ -445,7 +507,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     const zoneLocIds = new Set(locations.filter(l => l.type === 'ZONE' || l.type === 'WAREHOUSE').map(l => Number(l.id)));
 
     // Purge records that are either non-existent or pointing to broad ZONE containers
-    const invalidMappings = itemLocations.filter(il => 
+    const invalidMappings = itemLocations.filter(il =>
       il.id && (!validRackIds.has(Number(il.locationId)) || zoneLocIds.has(Number(il.locationId)))
     );
 
@@ -535,7 +597,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         createdAt: timestamp
       };
       const whId = await db.locations.add(whPayload);
-      saveServerLocation({ ...whPayload, id: whId }).catch(() => {});
+      saveServerLocation({ ...whPayload, id: whId }).catch(() => { });
 
       // 2. Create Zones and Racks
       const zoneLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
@@ -554,7 +616,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           createdAt: timestamp
         };
         const zoneId = await db.locations.add(zonePayload);
-        saveServerLocation({ ...zonePayload, id: zoneId }).catch(() => {});
+        saveServerLocation({ ...zonePayload, id: zoneId }).catch(() => { });
 
         for (let r = 1; r <= racksPerZone; r++) {
           const rackName = `Rack ${letter}-${r}`;
@@ -570,7 +632,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
             createdAt: timestamp
           };
           const rackId = await db.locations.add(rackPayload);
-          saveServerLocation({ ...rackPayload, id: rackId }).catch(() => {});
+          saveServerLocation({ ...rackPayload, id: rackId }).catch(() => { });
         }
       }
 
@@ -720,7 +782,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
           // Delete from Server
           idsToDelete.forEach(id => {
-            deleteServerLocation(id).catch(() => {});
+            deleteServerLocation(id).catch(() => { });
           });
 
           showToast(`Location "${loc.name}" deleted successfully!`, 'success');
@@ -738,7 +800,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       await db.locations.update(whId, { isShared: newSharedState });
       const targetWh = locations.find(l => Number(l.id) === Number(whId));
       if (targetWh) {
-        saveServerLocation({ ...targetWh, isShared: newSharedState }).catch(() => {});
+        saveServerLocation({ ...targetWh, isShared: newSharedState }).catch(() => { });
       }
       showToast(`Warehouse updated! Global Shared status set to ${newSharedState ? 'ENABLED (All Stores Linked)' : 'DISABLED (Dedicated Linkage)'}`, 'success');
     } catch (e: any) {
@@ -761,7 +823,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       }
 
       await db.locations.update(whId, { allowedTenantIds: updatedLinks });
-      saveServerLocation({ ...targetWh, allowedTenantIds: updatedLinks }).catch(() => {});
+      saveServerLocation({ ...targetWh, allowedTenantIds: updatedLinks }).catch(() => { });
       showToast('Store & Warehouse linkage updated successfully!', 'success');
     } catch (e: any) {
       showToast(`Failed to update store link: ${e.message}`, 'error');
@@ -814,7 +876,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         await db.itemLocations.bulkDelete(idsToDelete);
       }
     };
-    cleanupDuplicates().catch(() => {});
+    cleanupDuplicates().catch(() => { });
   }, [itemLocations]);
 
   // Detailed capacity stats for the currently selected parent location
@@ -1053,11 +1115,11 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     if (!locId || !locationMap.has(locId)) {
       return { warehouse: warehouseName, shelf: 'Unassigned', fullPath: 'Unassigned' };
     }
-    
+
     const targetLoc = locationMap.get(locId)!;
     let curr = targetLoc;
     const pathNames: string[] = [curr.name];
-    
+
     while (curr.parentId && locationMap.has(curr.parentId)) {
       curr = locationMap.get(curr.parentId)!;
       if (curr.type === 'WAREHOUSE') {
@@ -1078,9 +1140,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     };
   };
 
-  // Top Metrics Calculation (Scoped to Store Profile)
+  // Top Metrics Calculation (Scoped to Store Profile & Warehouse Permissions)
   const tenantLocations = useMemo(() => {
-    return activeLocations.filter(l => (l.tenantId || 'default-tenant') === activeTenantId || l.isShared || (l.allowedTenantIds && l.allowedTenantIds.includes(activeTenantId)));
+    return activeLocations.filter(l => (l.tenantId || 'default-tenant') === activeTenantId || (l.allowedTenantIds && Array.isArray(l.allowedTenantIds) && l.allowedTenantIds.includes(activeTenantId)));
   }, [activeLocations, activeTenantId]);
 
   const activeWarehouses = useMemo(() => {
@@ -1092,11 +1154,32 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   }, [tenantLocations]);
 
   const activeTenantItems = useMemo(() => {
-    return allItems.filter(i => (i.tenantId || 'default-tenant') === activeTenantId);
-  }, [allItems, activeTenantId]);
+    const accessibleWhIds = new Set(tenantLocations.filter(l => l.type === 'WAREHOUSE').map(l => Number(l.id)));
+    const accessibleLocIds = new Set<number>(accessibleWhIds);
+    let added = true;
+    while (added) {
+      added = false;
+      for (const loc of activeLocations) {
+        if (loc.parentId && accessibleLocIds.has(Number(loc.parentId)) && !accessibleLocIds.has(Number(loc.id))) {
+          accessibleLocIds.add(Number(loc.id));
+          added = true;
+        }
+      }
+    }
+
+    return allItems.filter(i => {
+      if (!i) return false;
+      const itemTenant = i.tenantId || 'default-tenant';
+      const isOwner = itemTenant === activeTenantId;
+      const itemMaps = allItemLocations.filter(il => Number(il.itemId) === Number(i.id));
+      const isStoredInAccessibleLoc = itemMaps.some(il => accessibleLocIds.has(Number(il.locationId)));
+      return isOwner || isStoredInAccessibleLoc;
+    });
+  }, [allItems, activeTenantId, tenantLocations, activeLocations, allItemLocations]);
 
   const itemLocationMapByItemId = useMemo(() => {
     const map = new Map<number, ItemLocationMapping[]>();
+    const tenantLocIds = new Set(tenantLocations.map(l => Number(l.id)));
 
     activeTenantItems.forEach((item, itemIdx) => {
       if (!item.id) return;
@@ -1105,17 +1188,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       const skuLower = item.skuCode ? item.skuCode.toLowerCase() : null;
 
       const matches = allItemLocations.filter(il => {
-        const mapTenant = il.tenantId || 'default-tenant';
-        if (mapTenant !== activeTenantId) return false;
+        if (!tenantLocIds.has(Number(il.locationId))) return false;
 
         const numItemId = Number(il.itemId);
         if (numItemId === itemIdNum) return true;
         if (cloudIdNum && numItemId === cloudIdNum) return true;
         if (skuLower && (il as any).skuCode && String((il as any).skuCode).toLowerCase() === skuLower) return true;
-
-        // Tenant-scoped legacy seed ID matching (125/1 for 1st tenant item, 126/2 for 2nd tenant item)
-        if ((numItemId === 125 || numItemId === 1) && itemIdx === 0) return true;
-        if ((numItemId === 126 || numItemId === 2) && itemIdx === 1) return true;
 
         return false;
       });
@@ -1124,30 +1202,34 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     });
 
     return map;
-  }, [allItemLocations, activeTenantItems, activeTenantId]);
+  }, [allItemLocations, activeTenantItems, tenantLocations]);
 
   const { assignedCount, unassignedCount } = useMemo(() => {
     let assigned = 0;
     let unassigned = 0;
     activeTenantItems.forEach(item => {
       if (item.id) {
-        const mappings = itemLocationMapByItemId.get(Number(item.id)) || [];
-        const hasMapping = mappings.some(m => m.quantity > 0);
-        if (hasMapping) assigned++;
-        else unassigned++;
+        const rawMappings = itemLocationMapByItemId.get(Number(item.id)) || [];
+        const validMappings = rawMappings.filter(m => m.quantity > 0 && locationMap.has(Number(m.locationId)));
+        const totalAssignedQty = validMappings.reduce((sum, m) => sum + m.quantity, 0);
+        const unassignedQty = Math.max(0, item.currentStock - totalAssignedQty);
+
+        if (totalAssignedQty > 0) assigned++;
+        if (unassignedQty > 0 || validMappings.length === 0) unassigned++;
       }
     });
     return { assignedCount: assigned, unassignedCount: unassigned };
-  }, [activeTenantItems, itemLocationMapByItemId]);
+  }, [activeTenantItems, itemLocationMapByItemId, locationMap]);
 
   const capacityUtilization = useMemo(() => {
     let totalCap = 0;
     tenantLocations.forEach(l => { totalCap += (l.capacity || 0); });
     let usedCap = 0;
-    allItemLocations.filter(il => (il.tenantId || 'default-tenant') === activeTenantId).forEach(il => { usedCap += il.quantity; });
+    const tenantLocIds = new Set(tenantLocations.map(l => Number(l.id)));
+    allItemLocations.filter(il => tenantLocIds.has(Number(il.locationId))).forEach(il => { usedCap += il.quantity; });
     if (totalCap === 0) return 0;
     return Math.min(100, Math.round((usedCap / totalCap) * 100));
-  }, [tenantLocations, allItemLocations, activeTenantId]);
+  }, [tenantLocations, allItemLocations]);
 
   const defaultWarehouseName = useMemo(() => {
     const mainWh = tenantLocations.find(l => l.type === 'WAREHOUSE');
@@ -1175,7 +1257,20 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       hasAllocations: boolean;
     }> = [];
 
+    // Deduplicate activeTenantItems by SKU code or ID to ensure 1 row per product
+    const uniqueItems: Item[] = [];
+    const seenSkus = new Set<string>();
+
     activeTenantItems.forEach(item => {
+      if (!item.id) return;
+      const skuKey = item.skuCode ? item.skuCode.trim().toLowerCase() : `id_${item.id}`;
+      if (!seenSkus.has(skuKey)) {
+        seenSkus.add(skuKey);
+        uniqueItems.push(item);
+      }
+    });
+
+    uniqueItems.forEach(item => {
       if (!item.id) return;
       const rawMappings = itemLocationMapByItemId.get(Number(item.id)) || [];
 
@@ -1223,12 +1318,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       if (unassignedQty > 0) {
         allocatedMappings.push({
           warehouseName: getTrueWarehouseName(),
-          shelfCode: '🏪 Store Front Stock (Available for Sale)',
-          fullPath: 'Store Front Floor / Display Counter (Unallocated Stock)',
+          shelfCode: '📦 Unallocated Warehouse Stock',
+          fullPath: 'Warehouse Reserve & Storage (Unallocated Stock)',
           availableQty: unassignedQty,
           capacityLimit: 0,
           isUnassigned: true,
-          isStoreFront: true
+          isStoreFront: false
         });
       }
 
@@ -1350,7 +1445,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
     try {
       await db.locations.add(payload);
-      saveServerLocation(payload).catch(() => {});
+      saveServerLocation(payload).catch(() => { });
 
       showToast(`Location "${locName}" created successfully!`, 'success');
       setIsAddLocationOpen(false);
@@ -1414,7 +1509,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         quantity: updatedSrcQty,
         updatedAt: new Date().toISOString()
       });
-      saveServerItemLocation({ tenantId, itemId: itemIdNum, skuCode: itemObj?.skuCode, name: itemObj?.name, locationId: srcLocIdNum, quantity: updatedSrcQty }).catch(() => {});
+      saveServerItemLocation({ tenantId, itemId: itemIdNum, skuCode: itemObj?.skuCode, name: itemObj?.name, locationId: srcLocIdNum, quantity: updatedSrcQty }).catch(() => { });
 
       // 2. Add to Destination Location Mapping
       const destMapping = await db.itemLocations
@@ -1437,7 +1532,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           updatedAt: new Date().toISOString()
         });
       }
-      saveServerItemLocation({ tenantId, itemId: itemIdNum, skuCode: itemObj?.skuCode, name: itemObj?.name, locationId: destLocIdNum, quantity: updatedDestQty }).catch(() => {});
+      saveServerItemLocation({ tenantId, itemId: itemIdNum, skuCode: itemObj?.skuCode, name: itemObj?.name, locationId: destLocIdNum, quantity: updatedDestQty }).catch(() => { });
 
       // 3. Log Stock Transfer History
       const trfNum = `TRF-${Date.now().toString().slice(-6)}`;
@@ -1453,7 +1548,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         createdAt: new Date().toISOString()
       };
       await db.stockTransfers.add(transferPayload);
-      createServerStockTransfer(transferPayload).catch(() => {});
+      createServerStockTransfer(transferPayload).catch(() => { });
 
       const selectedItem = items.find(i => i.id === itemIdNum);
       const srcLoc = locationMap.get(srcLocIdNum);
@@ -1564,7 +1659,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       }
 
       const destLoc = locationMap.get(destLocIdNum);
-      saveServerItemLocation({ tenantId, itemId: item.id!, skuCode: item.skuCode, name: item.name, locationId: destLocIdNum, locationCode: destLoc?.code, quantity: qty, maxCapacity: cap }).catch(() => {});
+      saveServerItemLocation({ tenantId, itemId: item.id!, skuCode: item.skuCode, name: item.name, locationId: destLocIdNum, locationCode: destLoc?.code, quantity: qty, maxCapacity: cap }).catch(() => { });
       showToast(`Item "${item.name}" assigned to "${destLoc?.name || 'Location'}" successfully!`, 'success');
       setRelocateItem(null);
     } catch (err: any) {
@@ -1715,16 +1810,15 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         {/* ── Section Views Header & Filters ─────────────────────────────── */}
         <div className="card p-5 bg-white border border-slate-200/80 rounded-2xl shadow-sm space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-            
+
             {/* View Switcher Tabs */}
             <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
               <button
                 onClick={() => setActiveViewTab('stock-table')}
-                className={`px-4 py-2 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${
-                  activeViewTab === 'stock-table'
+                className={`px-4 py-2 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${activeViewTab === 'stock-table'
                     ? 'bg-white text-purple-700 shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                  }`}
               >
                 <Package className="w-4 h-4" />
                 <span>Stock by Location</span>
@@ -1732,11 +1826,10 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
               <button
                 onClick={() => setActiveViewTab('hierarchy-master')}
-                className={`px-4 py-2 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${
-                  activeViewTab === 'hierarchy-master'
+                className={`px-4 py-2 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${activeViewTab === 'hierarchy-master'
                     ? 'bg-white text-purple-700 shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                  }`}
               >
                 <FolderTree className="w-4 h-4" />
                 <span>Location Hierarchy Master</span>
@@ -1744,26 +1837,24 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
               <button
                 onClick={() => setActiveViewTab('store-connections')}
-                className={`px-4 py-2 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${
-                  activeViewTab === 'store-connections'
+                className={`px-4 py-2 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${activeViewTab === 'store-connections'
                     ? 'bg-white text-purple-700 shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                  }`}
               >
                 <Building2 className="w-4 h-4" />
                 <span>🏬 Store & Warehouse Connections</span>
               </button>
 
               {(() => {
-                const tenantTransfersCount = stockTransfers.filter(st => (st.tenantId || 'default-tenant') === tenantId).length;
+                const tenantTransfersCount = (stockTransfers || []).filter(st => (st.tenantId || 'default-tenant') === activeTenantId || !st.tenantId).length;
                 return (
                   <button
                     onClick={() => setActiveViewTab('transfer-history')}
-                    className={`px-4 py-2 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${
-                      activeViewTab === 'transfer-history'
+                    className={`px-4 py-2 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${activeViewTab === 'transfer-history'
                         ? 'bg-white text-purple-700 shadow-sm'
                         : 'text-slate-600 hover:text-slate-900'
-                    }`}
+                      }`}
                   >
                     <ArrowLeftRight className="w-4 h-4" />
                     <span>Stock Transfer Logs ({tenantTransfersCount})</span>
@@ -1783,11 +1874,10 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                 return (
                   <button
                     onClick={() => setActiveViewTab('replenishment')}
-                    className={`px-4 py-2 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${
-                      activeViewTab === 'replenishment'
+                    className={`px-4 py-2 rounded-lg text-xs font-extrabold transition cursor-pointer flex items-center gap-2 ${activeViewTab === 'replenishment'
                         ? 'bg-purple-600 text-white shadow-md shadow-purple-200'
                         : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
-                    }`}
+                      }`}
                   >
                     <Sparkles className="w-4 h-4" />
                     <span>⚡ Store Replenishment ({lowStoreCount} Alerts)</span>
@@ -1902,9 +1992,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                           {/* Primary Product Row */}
                           <tr
                             onClick={() => toggleRowExpanded(group.item.id!)}
-                            className={`cursor-pointer transition-colors hover:bg-slate-50 ${
-                              isExpanded ? 'bg-purple-50/60 font-semibold' : ''
-                            }`}
+                            className={`cursor-pointer transition-colors hover:bg-slate-50 ${isExpanded ? 'bg-purple-50/60 font-semibold' : ''
+                              }`}
                           >
                             {/* Expand Toggle Chevron */}
                             <td className="text-center py-3">
@@ -1952,23 +2041,23 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
                             {/* Shelf & Rack Allocation Summary Badge */}
                             <td>
-                               {validAllocations.length > 0 && group.unassignedQty <= 0 ? (
-                                 <span className="badge badge-purple cursor-pointer" onClick={() => toggleRowExpanded(group.item.id!)}>
-                                   <MapPin className="w-3 h-3 text-purple-600" />
-                                   {validAllocations.length} Racks Allocated ({group.totalAssignedQty} {group.item.unitType})
-                                 </span>
-                               ) : validAllocations.length > 0 && group.unassignedQty > 0 ? (
-                                 <span className="badge badge-blue cursor-pointer" onClick={() => toggleRowExpanded(group.item.id!)}>
-                                   <MapPin className="w-3 h-3 text-blue-600" />
-                                   {validAllocations.length} Racks ({group.totalAssignedQty} {group.item.unitType}) + 🏪 {group.unassignedQty} Store Front
-                                 </span>
-                               ) : (
-                                 <span className="px-2.5 py-1 rounded-full bg-emerald-50/90 text-emerald-700 font-extrabold text-[10.5px] border border-emerald-200 inline-flex items-center gap-1 cursor-pointer hover:bg-emerald-100 transition" onClick={() => handleAutoAllocateStock(group.item)} title="Click to auto-allocate into available warehouse racks">
-                                   <Store className="w-3 h-3 text-emerald-600" />
-                                   <span>Store Front Stock ({group.totalStock} {group.item.unitType})</span>
-                                 </span>
-                               )}
-                             </td>
+                              {validAllocations.length > 0 && group.unassignedQty <= 0 ? (
+                                <span className="badge badge-purple cursor-pointer" onClick={() => toggleRowExpanded(group.item.id!)}>
+                                  <MapPin className="w-3 h-3 text-purple-600" />
+                                  {validAllocations.length} Racks Allocated ({group.totalAssignedQty} {group.item.unitType})
+                                </span>
+                              ) : validAllocations.length > 0 && group.unassignedQty > 0 ? (
+                                <span className="badge badge-amber cursor-pointer" onClick={() => toggleRowExpanded(group.item.id!)}>
+                                  <MapPin className="w-3 h-3 text-amber-600" />
+                                  {validAllocations.length} Racks ({group.totalAssignedQty} {group.item.unitType}) + 📦 {group.unassignedQty} Unallocated
+                                </span>
+                              ) : (
+                                <span className="px-2.5 py-1 rounded-full bg-amber-50/90 text-amber-800 font-extrabold text-[10.5px] border border-amber-200 inline-flex items-center gap-1 cursor-pointer hover:bg-amber-100 transition" onClick={() => handleAutoAllocateStock(group.item)} title="Click to auto-allocate into available warehouse racks">
+                                  <Package className="w-3 h-3 text-amber-600" />
+                                  <span>Unallocated Warehouse Stock ({group.totalStock} {group.item.unitType})</span>
+                                </span>
+                              )}
+                            </td>
 
                             {/* Total Available Qty */}
                             <td className="text-right font-mono text-xs font-black text-slate-900">
@@ -1978,16 +2067,16 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                             {/* Actions */}
                             <td className="text-center" onClick={e => e.stopPropagation()}>
                               <div className="inline-flex items-center gap-1.5">
-                                 {group.unassignedQty > 0 && (
-                                   <button
-                                     onClick={() => handleAutoAllocateStock(group.item)}
-                                     className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 text-[11px] font-extrabold transition cursor-pointer flex items-center gap-1 border border-amber-300 shadow-2xs"
-                                     title="Auto-fill unassigned stock into open warehouse racks"
-                                   >
-                                     <Wand2 className="w-3.5 h-3.5 text-amber-600 stroke-[2.5]" />
-                                     <span>Auto-Rack</span>
-                                   </button>
-                                 )}
+                                {group.unassignedQty > 0 && (
+                                  <button
+                                    onClick={() => handleAutoAllocateStock(group.item)}
+                                    className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 text-[11px] font-extrabold transition cursor-pointer flex items-center gap-1 border border-amber-300 shadow-2xs"
+                                    title="Auto-fill unassigned stock into open warehouse racks"
+                                  >
+                                    <Wand2 className="w-3.5 h-3.5 text-amber-600 stroke-[2.5]" />
+                                    <span>Auto-Rack</span>
+                                  </button>
+                                )}
 
                                 <button
                                   onClick={() => handleOpenTransferForRow(group.item)}
@@ -2009,11 +2098,10 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
                                 <button
                                   onClick={() => toggleRowExpanded(group.item.id!)}
-                                  className={`px-2 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer border ${
-                                    isExpanded
+                                  className={`px-2 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer border ${isExpanded
                                       ? 'bg-purple-600 text-white border-purple-600'
                                       : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
-                                  }`}
+                                    }`}
                                 >
                                   {isExpanded ? 'Hide' : 'Locations'}
                                 </button>
@@ -2054,11 +2142,13 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                           return (
                                             <tr key={mIdx}>
                                               <td>
-                                                <div className={`font-bold flex items-center gap-1.5 ${m.isStoreFront ? 'text-emerald-700 font-extrabold' : 'text-slate-800'}`}>
+                                                <div className={`font-bold flex items-center gap-1.5 ${m.isStoreFront ? 'text-emerald-700 font-extrabold' : m.isUnassigned ? 'text-amber-800 font-extrabold' : 'text-slate-800'}`}>
                                                   {m.isStoreFront ? (
                                                     <Store className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                                  ) : m.isUnassigned ? (
+                                                    <Package className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                                                   ) : (
-                                                    <MapPin className={`w-3.5 h-3.5 ${m.isUnassigned ? 'text-amber-500' : 'text-purple-600'}`} />
+                                                    <MapPin className="w-3.5 h-3.5 text-purple-600 shrink-0" />
                                                   )}
                                                   <span>{m.isStoreFront ? '🛒 Store Front Stock' : m.shelfCode}</span>
                                                 </div>
@@ -2214,36 +2304,30 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                     <div className="text-[10.5px] text-slate-400 italic py-0.5 col-span-2">No racks in this zone yet.</div>
                                   ) : (
                                     shelves.map(sh => {
-                                       const isSharedWh = !!wh.isShared;
-                                       const allowedTenants = new Set<string>([wh.tenantId || 'default-tenant']);
-                                       if (wh.allowedTenantIds && Array.isArray(wh.allowedTenantIds)) {
-                                         wh.allowedTenantIds.forEach(id => allowedTenants.add(id));
-                                       }
-                                       const mapsToUse = allItemLocations.filter(il => {
-                                         if (isSharedWh) return true;
-                                         const ilTenant = il.tenantId || 'default-tenant';
-                                         return allowedTenants.has(ilTenant);
-                                       });
-                                       const rackMappings = mapsToUse.filter(il => Number(il.locationId) === Number(sh.id) && il.quantity > 0);
-                                       const mappedProducts = rackMappings
-                                         .map(il => {
-                                           const ilTenant = il.tenantId || 'default-tenant';
-                                           const tenantItems = allItems.filter(i => (i.tenantId || 'default-tenant') === ilTenant);
-                                           let matchedItem = tenantItems.find(i => Number(i.id) === Number(il.itemId) || ((i as any).cloudId && Number((i as any).cloudId) === Number(il.itemId)));
-                                           if (!matchedItem && (il as any).skuCode) {
-                                             const skuLower = String((il as any).skuCode).toLowerCase();
-                                             matchedItem = tenantItems.find(i => i.skuCode && i.skuCode.toLowerCase() === skuLower);
-                                           }
-                                           if (!matchedItem) {
-                                             const numItemId = Number(il.itemId);
-                                             if ((numItemId === 125 || numItemId === 1) && tenantItems[0]) matchedItem = tenantItems[0];
-                                             if ((numItemId === 126 || numItemId === 2) && tenantItems[1]) matchedItem = tenantItems[1];
-                                           }
+                                      const isSharedWh = !!wh.isShared;
+                                      const allowedTenants = new Set<string>([wh.tenantId || 'default-tenant']);
+                                      if (wh.allowedTenantIds && Array.isArray(wh.allowedTenantIds)) {
+                                        wh.allowedTenantIds.forEach(id => allowedTenants.add(id));
+                                      }
+                                      const mapsToUse = allItemLocations.filter(il => {
+                                        if (isSharedWh || allowedTenants.has(activeTenantId)) return true;
+                                        const ilTenant = il.tenantId || 'default-tenant';
+                                        return allowedTenants.has(ilTenant);
+                                      });
+                                      const rackMappings = mapsToUse.filter(il => Number(il.locationId) === Number(sh.id) && il.quantity > 0);
+                                      const mappedProducts = rackMappings
+                                        .map(il => {
+                                          const ilTenant = il.tenantId || 'default-tenant';
+                                          let matchedItem = allItems.find(i => Number(i.id) === Number(il.itemId) || ((i as any).cloudId && Number((i as any).cloudId) === Number(il.itemId)));
+                                          if (!matchedItem && (il as any).skuCode) {
+                                            const skuLower = String((il as any).skuCode).toLowerCase();
+                                            matchedItem = allItems.find(i => i.skuCode && i.skuCode.toLowerCase() === skuLower);
+                                          }
 
-                                           const isOtherStore = ilTenant !== activeTenantId;
-                                           return { item: matchedItem, quantity: il.quantity, isOtherStore, mapping: il };
-                                         })
-                                         .filter(m => m.item);
+                                          const isOtherStore = ilTenant !== activeTenantId;
+                                          return { item: matchedItem, quantity: il.quantity, isOtherStore, mapping: il };
+                                        })
+                                        .filter(m => m.item);
 
                                       const totalUsedQty = rackMappings.reduce((sum, il) => sum + il.quantity, 0);
                                       const maxCap = sh.capacity || 100;
@@ -2257,9 +2341,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                               {sh.name} <span className="text-[9.5px] text-slate-400 font-mono">({sh.code})</span>
                                             </span>
                                             <div className="flex items-center gap-1">
-                                              <span className={`font-mono text-[9.5px] font-bold px-1.5 py-0.5 rounded ${
-                                                fillPct >= 100 ? 'bg-red-100 text-red-700' : fillPct > 0 ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-500'
-                                              }`}>
+                                              <span className={`font-mono text-[9.5px] font-bold px-1.5 py-0.5 rounded ${fillPct >= 100 ? 'bg-red-100 text-red-700' : fillPct > 0 ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-500'
+                                                }`}>
                                                 {totalUsedQty}/{maxCap} PCS {fillPct >= 100 ? '• FULL' : ''}
                                               </span>
                                               <button
@@ -2275,9 +2358,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                           {/* Mini Progress Bar */}
                                           <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden">
                                             <div
-                                              className={`h-full transition-all duration-300 ${
-                                                fillPct >= 100 ? 'bg-red-500' : fillPct > 0 ? 'bg-purple-600' : 'bg-slate-200'
-                                              }`}
+                                              className={`h-full transition-all duration-300 ${fillPct >= 100 ? 'bg-red-500' : fillPct > 0 ? 'bg-purple-600' : 'bg-slate-200'
+                                                }`}
                                               style={{ width: `${fillPct}%` }}
                                             />
                                           </div>
@@ -2419,7 +2501,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                 </thead>
                 <tbody>
                   {(() => {
-                    const tenantTransfers = stockTransfers.filter(st => (st.tenantId || 'default-tenant') === tenantId);
+                    const tenantTransfers = (stockTransfers || []).filter(st => (st.tenantId || 'default-tenant') === activeTenantId || !st.tenantId);
                     if (tenantTransfers.length === 0) {
                       return (
                         <tr>
@@ -2430,23 +2512,29 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                       );
                     }
                     return tenantTransfers.map((trf, idx) => {
-                      const item = items.find(i => i.id === trf.itemId);
-                      const srcLoc = locationMap.get(trf.sourceLocationId);
-                      const destLoc = locationMap.get(trf.destinationLocationId);
+                      const item = items.find(i => Number(i.id) === Number(trf.itemId));
+                      const srcLoc = locationMap.get(Number(trf.sourceLocationId));
+                      const destLoc = locationMap.get(Number(trf.destinationLocationId));
+
+                      const srcLocInfo = getLocationFullPath(trf.sourceLocationId);
+                      const destLocInfo = getLocationFullPath(trf.destinationLocationId);
+
+                      const srcName = srcLoc ? `${srcLoc.name} (${srcLoc.code})` : (srcLocInfo.shelf !== 'Unassigned' ? srcLocInfo.shelf : '📦 Unallocated Warehouse Reserve');
+                      const destName = destLoc ? (destLoc.isStoreFront || destLoc.code?.includes('SF') || destLoc.name?.toLowerCase().includes('store front') ? '🛒 Store Front Stock' : destLoc.name) : (destLocInfo.shelf !== 'Unassigned' ? destLocInfo.shelf : '🛒 Store Front Stock');
 
                       return (
-                        <tr key={trf.id}>
+                        <tr key={trf.id || idx}>
                           <td className="font-mono text-xs font-bold text-slate-400 text-center">{idx + 1}</td>
                           <td className="font-mono text-xs font-bold text-slate-800">{trf.transferNumber}</td>
                           <td className="text-xs text-slate-600">{trf.transferDate}</td>
-                          <td className="font-bold text-slate-800">{item?.name || 'Item'}</td>
+                          <td className="font-bold text-slate-800">{item?.name || `Item #${trf.itemId}`}</td>
                           <td>
-                            <span className="badge badge-red">{srcLoc?.name || 'Source'}</span>
+                            <span className="px-2 py-0.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-extrabold font-mono">{srcName}</span>
                           </td>
                           <td>
-                            <span className="badge badge-green">{destLoc?.name || 'Destination'}</span>
+                            <span className="px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-extrabold font-mono">{destName}</span>
                           </td>
-                          <td className="text-right font-black text-purple-700 text-xs">
+                          <td className="text-right font-black text-purple-700 text-xs font-mono">
                             {trf.quantity} PCS
                           </td>
                           <td className="text-xs text-slate-500">{trf.notes || '-'}</td>
@@ -2548,9 +2636,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                             <div className="text-[11px] text-slate-400 font-mono">SKU: {row.item.skuCode}</div>
                           </td>
                           <td className="text-center">
-                            <span className={`px-2.5 py-1 rounded-lg text-xs font-black ${
-                              row.storeStock <= 0 ? 'bg-red-100 text-red-700' : row.storeStock <= 5 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
-                            }`}>
+                            <span className={`px-2.5 py-1 rounded-lg text-xs font-black ${row.storeStock <= 0 ? 'bg-red-100 text-red-700' : row.storeStock <= 5 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                              }`}>
                               {row.storeStock} {row.item.unitType}
                             </span>
                           </td>
@@ -2580,11 +2667,10 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                 setIsTransferModalOpen(true);
                               }}
                               disabled={row.whStock <= 0}
-                              className={`px-3 py-1.5 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-1.5 mx-auto ${
-                                row.whStock > 0
+                              className={`px-3 py-1.5 rounded-xl font-extrabold text-xs transition flex items-center justify-center gap-1.5 mx-auto ${row.whStock > 0
                                   ? 'bg-purple-600 hover:bg-purple-700 text-white shadow-sm cursor-pointer'
                                   : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                              }`}
+                                }`}
                             >
                               <ArrowLeftRight className="w-3.5 h-3.5" />
                               <span>Restock Store Front</span>
@@ -2677,13 +2763,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                               <button
                                 disabled={!isOwner}
                                 onClick={() => isOwner && handleToggleGlobalShared(wh.id!, isGlobalShared)}
-                                className={`px-3 py-1.5 rounded-xl text-[11px] font-extrabold transition border flex items-center gap-1.5 ${
-                                  !isOwner
+                                className={`px-3 py-1.5 rounded-xl text-[11px] font-extrabold transition border flex items-center gap-1.5 ${!isOwner
                                     ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
                                     : isGlobalShared
-                                    ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs cursor-pointer'
-                                    : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50 cursor-pointer'
-                                }`}
+                                      ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs cursor-pointer'
+                                      : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50 cursor-pointer'
+                                  }`}
                                 title={!isOwner ? `Only the creator store (${ownerStoreName}) can change global access` : 'Toggle global sharing across all stores'}
                               >
                                 {isGlobalShared ? '✓ Global Access (All Stores)' : '○ Restrict to Specific Stores'}
@@ -2702,15 +2787,13 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                       key={profile.tenantId}
                                       disabled={!isOwner || isCreator}
                                       onClick={() => isOwner && !isCreator && handleToggleStoreLink(wh.id!, profile.tenantId)}
-                                      className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition flex items-center gap-1 ${
-                                        !isOwner || isCreator
+                                      className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition flex items-center gap-1 ${!isOwner || isCreator
                                           ? 'cursor-not-allowed opacity-90'
                                           : 'cursor-pointer'
-                                      } ${
-                                        isGranted
+                                        } ${isGranted
                                           ? 'bg-purple-50 text-purple-700 border-purple-200 font-extrabold'
                                           : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
-                                      }`}
+                                        }`}
                                       title={!isOwner ? `Only the creator store (${ownerStoreName}) can grant or revoke store access` : `Toggle access for ${profile.name}`}
                                     >
                                       <span>{isGranted ? '☑' : '☐'}</span>
@@ -2851,11 +2934,10 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                         value={locCapacity}
                         onChange={e => setLocCapacity(e.target.value)}
                         placeholder={locType === 'WAREHOUSE' ? '500' : 'Enter capacity...'}
-                        className={`w-full px-3 py-2.5 rounded-xl border font-bold text-xs focus:ring-2 outline-none ${
-                          parentCapacityStats && isExceeded
+                        className={`w-full px-3 py-2.5 rounded-xl border font-bold text-xs focus:ring-2 outline-none ${parentCapacityStats && isExceeded
                             ? 'border-red-500 text-red-700 focus:ring-red-500 bg-red-50/30'
                             : 'border-slate-300 focus:ring-purple-500'
-                        }`}
+                          }`}
                       />
                       {locType === 'WAREHOUSE' && (
                         <p className="text-[11px] text-slate-400 font-medium mt-1">
@@ -2869,16 +2951,14 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                         const usedPercent = parentCap > 0 ? Math.min(100, Math.round((usedCap / parentCap) * 100)) : 0;
 
                         return (
-                          <div className={`mt-2 p-2.5 rounded-xl border text-xs space-y-1.5 transition-all ${
-                            isExceeded
+                          <div className={`mt-2 p-2.5 rounded-xl border text-xs space-y-1.5 transition-all ${isExceeded
                               ? 'bg-red-50/80 border-red-200 text-red-700'
                               : 'bg-purple-50/50 border-purple-100 text-slate-700'
-                          }`}>
+                            }`}>
                             <div className="flex items-center justify-between font-bold">
                               <span className="truncate max-w-[200px]">{parent.name} Capacity Breakdown</span>
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] uppercase font-black shrink-0 ${
-                                isExceeded ? 'bg-red-200 text-red-800' : 'bg-emerald-100 text-emerald-800'
-                              }`}>
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] uppercase font-black shrink-0 ${isExceeded ? 'bg-red-200 text-red-800' : 'bg-emerald-100 text-emerald-800'
+                                }`}>
                                 {isExceeded ? 'Space Exceeded' : `${availableCap} units left`}
                               </span>
                             </div>
@@ -3029,9 +3109,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                             <div
                               key={item.id}
                               onClick={() => handleChooseItemFromSearch(item)}
-                              className={`p-2.5 rounded-lg text-xs cursor-pointer transition flex items-center justify-between ${
-                                isSelected ? 'bg-purple-100/70 border border-purple-300' : 'hover:bg-purple-50'
-                              }`}
+                              className={`p-2.5 rounded-lg text-xs cursor-pointer transition flex items-center justify-between ${isSelected ? 'bg-purple-100/70 border border-purple-300' : 'hover:bg-purple-50'
+                                }`}
                             >
                               <div>
                                 <div className="font-bold text-slate-800">{item.name}</div>
@@ -3168,22 +3247,22 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
                 const availableZones = selectedWhObj
                   ? locations.filter(l =>
-                      l.type === 'ZONE' &&
-                      (String(l.parentId) === String(selectedWhObj.id) || (selectedWhObj.code && l.code.startsWith(selectedWhObj.code + '-')))
-                    )
+                    l.type === 'ZONE' &&
+                    (String(l.parentId) === String(selectedWhObj.id) || (selectedWhObj.code && l.code.startsWith(selectedWhObj.code + '-')))
+                  )
                   : [];
 
                 const availableRacks = selectedZoneObj
                   ? locations.filter(l =>
-                      l.type === 'SHELF' &&
-                      (String(l.parentId) === String(selectedZoneObj.id) || (selectedZoneObj.code && l.code.startsWith(selectedZoneObj.code + '-')))
-                    )
+                    l.type === 'SHELF' &&
+                    (String(l.parentId) === String(selectedZoneObj.id) || (selectedZoneObj.code && l.code.startsWith(selectedZoneObj.code + '-')))
+                  )
                   : selectedWhObj
-                  ? locations.filter(l =>
+                    ? locations.filter(l =>
                       l.type === 'SHELF' &&
                       (String(l.parentId) === String(selectedWhObj.id) || (selectedWhObj.code && l.code.startsWith(selectedWhObj.code + '-')))
                     )
-                  : [];
+                    : [];
 
                 const isCapacityExceeded = Number(relocateQty) > Number(relocateMaxCap);
 
@@ -3230,9 +3309,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                           setRelocateDestLocId(activeId);
                           updateCapacityDefaults(activeId);
                         }}
-                        className={`w-full px-3 py-2.5 rounded-xl border font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none ${
-                          !relocateWhId ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'border-slate-300'
-                        }`}
+                        className={`w-full px-3 py-2.5 rounded-xl border font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none ${!relocateWhId ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'border-slate-300'
+                          }`}
                       >
                         <option value="">
                           {!relocateWhId ? 'Select Warehouse first...' : availableZones.length === 0 ? 'No Zones in this Warehouse (Pick Direct Rack below)' : 'Select Zone / Aisle...'}
@@ -3261,9 +3339,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                           setRelocateDestLocId(activeId);
                           updateCapacityDefaults(activeId);
                         }}
-                        className={`w-full px-3 py-2.5 rounded-xl border font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none ${
-                          !relocateWhId ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'border-slate-300'
-                        }`}
+                        className={`w-full px-3 py-2.5 rounded-xl border font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none ${!relocateWhId ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'border-slate-300'
+                          }`}
                       >
                         <option value="">
                           {!relocateWhId ? 'Select Warehouse first...' : availableRacks.length === 0 ? 'No Racks in this Zone' : 'Select Rack / Shelf / Bin...'}
@@ -3302,9 +3379,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                           value={relocateQty}
                           onChange={e => setRelocateQty(e.target.value)}
                           placeholder="20"
-                          className={`w-full px-3 py-2.5 rounded-xl border font-bold text-xs outline-none focus:ring-2 ${
-                            isCapacityExceeded ? 'border-red-500 text-red-700 bg-red-50 focus:ring-red-500' : 'border-slate-300 focus:ring-purple-500'
-                          }`}
+                          className={`w-full px-3 py-2.5 rounded-xl border font-bold text-xs outline-none focus:ring-2 ${isCapacityExceeded ? 'border-red-500 text-red-700 bg-red-50 focus:ring-red-500' : 'border-slate-300 focus:ring-purple-500'
+                            }`}
                         />
                       </div>
                       <div>
@@ -3428,9 +3504,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                         return (
                           <div
                             key={idx}
-                            className={`flex items-center justify-between p-2.5 rounded-xl border text-xs font-bold ${
-                              isCurrent ? 'bg-purple-50 border-purple-300 ring-1 ring-purple-300' : 'bg-slate-50 border-slate-200'
-                            }`}
+                            className={`flex items-center justify-between p-2.5 rounded-xl border text-xs font-bold ${isCurrent ? 'bg-purple-50 border-purple-300 ring-1 ring-purple-300' : 'bg-slate-50 border-slate-200'
+                              }`}
                           >
                             <span className="flex items-center gap-1.5 text-slate-700">
                               <MapPin className="w-3.5 h-3.5 text-purple-600" />
@@ -3510,11 +3585,10 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                       <div
                         key={p.id}
                         onClick={() => handleSelectPreset(p.id as any)}
-                        className={`p-3 rounded-xl border cursor-pointer transition flex flex-col justify-between ${
-                          isSelected
+                        className={`p-3 rounded-xl border cursor-pointer transition flex flex-col justify-between ${isSelected
                             ? 'bg-amber-50/80 border-amber-300 ring-2 ring-amber-400/40 shadow-sm'
                             : 'bg-white border-slate-200 hover:bg-slate-50'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center justify-between">
                           <span className={`font-extrabold text-xs ${isSelected ? 'text-amber-900' : 'text-slate-800'}`}>
@@ -3602,9 +3676,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                         setZoneCapacity(Number(e.target.value) || 0);
                         setPresetTemplate('CUSTOM');
                       }}
-                      className={`w-full px-3 py-2 rounded-xl border font-bold text-xs bg-white outline-none focus:ring-2 ${
-                        isZoneCapExceeded ? 'border-red-500 text-red-700 focus:ring-red-500 bg-red-50' : 'border-slate-300 focus:ring-amber-500'
-                      }`}
+                      className={`w-full px-3 py-2 rounded-xl border font-bold text-xs bg-white outline-none focus:ring-2 ${isZoneCapExceeded ? 'border-red-500 text-red-700 focus:ring-red-500 bg-red-50' : 'border-slate-300 focus:ring-amber-500'
+                        }`}
                     />
                   </div>
 
@@ -3633,9 +3706,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                         setRackCapacity(Number(e.target.value) || 0);
                         setPresetTemplate('CUSTOM');
                       }}
-                      className={`w-full px-3 py-2 rounded-xl border font-bold text-xs bg-white outline-none focus:ring-2 ${
-                        isRackCapExceeded ? 'border-red-500 text-red-700 focus:ring-red-500 bg-red-50' : 'border-slate-300 focus:ring-amber-500'
-                      }`}
+                      className={`w-full px-3 py-2 rounded-xl border font-bold text-xs bg-white outline-none focus:ring-2 ${isRackCapExceeded ? 'border-red-500 text-red-700 focus:ring-red-500 bg-red-50' : 'border-slate-300 focus:ring-amber-500'
+                        }`}
                     />
                   </div>
                 </div>
@@ -3715,11 +3787,10 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                 <button
                   type="submit"
                   disabled={isZoneCapExceeded || isRackCapExceeded}
-                  className={`flex-1 py-3 rounded-xl font-extrabold text-xs text-white shadow-md transition flex items-center justify-center gap-2 ${
-                    isZoneCapExceeded || isRackCapExceeded
+                  className={`flex-1 py-3 rounded-xl font-extrabold text-xs text-white shadow-md transition flex items-center justify-center gap-2 ${isZoneCapExceeded || isRackCapExceeded
                       ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
                       : 'bg-amber-600 hover:bg-amber-700 shadow-amber-200 cursor-pointer'
-                  }`}
+                    }`}
                 >
                   <Wand2 className="w-4 h-4" />
                   <span>Generate Entire Store Layout ({totalLocationsToGenerate} Locations)</span>

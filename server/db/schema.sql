@@ -160,3 +160,11 @@ CREATE TABLE IF NOT EXISTS payment_in (
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- MULTI-TENANT PERFORMANCE INDEXES
+CREATE INDEX IF NOT EXISTS idx_items_tenant_id ON items(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_parties_tenant_id ON parties(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_tenant_id ON invoices(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_estimates_tenant_id ON estimates(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_payment_in_tenant_id ON payment_in(tenant_id);
+

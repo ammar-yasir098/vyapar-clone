@@ -55,6 +55,10 @@ class CloudDataStore {
     this.syncLogs = [];
     this.currentSequence = 1000;
   }
+
+  public clearTenant(tenantId: string): void {
+    this.syncLogs = this.syncLogs.filter(log => log.tenantId !== tenantId);
+  }
 }
 
 export const cloudStore = new CloudDataStore();

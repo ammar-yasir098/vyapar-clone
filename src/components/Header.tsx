@@ -119,14 +119,14 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="h-14 bg-white border-b border-slate-200 px-4 flex items-center justify-between shrink-0 select-none z-30 relative" style={{ boxShadow: '0 1px 0 0 #e2e8f0, 0 2px 8px -1px rgba(0,0,0,0.06)' }}>
-      {/* Left: Brand / Store Name & Search Bar */}
-      <div className="flex items-center gap-5">
+    <header className="h-15 bg-white/90 backdrop-blur-md border-b border-slate-200/80 px-4 flex items-center justify-between shrink-0 select-none z-30 relative shadow-xs">
+      {/* Left: Brand / Store Selector & Search */}
+      <div className="flex items-center gap-4">
         {/* Business Selector Dropdown */}
         <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className="flex items-center gap-2.5 px-2.5 py-1 rounded-xl hover:bg-slate-100/90 transition cursor-pointer text-left border border-transparent hover:border-slate-200"
+            className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl hover:bg-slate-100/90 transition-all cursor-pointer text-left border border-slate-200/60 hover:border-slate-300 shadow-2xs group"
           >
             {(() => {
               const offlineCached = localStorage.getItem('vyapar_offline_logo');
@@ -136,29 +136,29 @@ export const Header: React.FC<HeaderProps> = ({
               return logoSrc ? (
                 <img src={logoSrc} alt="Logo" className="w-8 h-8 rounded-lg object-cover border border-slate-200 shadow-xs shrink-0" />
               ) : (
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-600 to-rose-700 text-white font-extrabold flex items-center justify-center text-sm shadow-sm shrink-0">
+                <div className="w-8.5 h-8.5 rounded-xl bg-gradient-to-br from-indigo-600 via-violet-600 to-rose-600 text-white font-extrabold flex items-center justify-center text-sm shadow-sm shrink-0 group-hover:scale-105 transition-transform">
                   {business.name ? business.name.charAt(0).toUpperCase() : 'V'}
                 </div>
               );
             })()}
             <div>
-              <div className="flex items-center gap-1 font-bold text-slate-900 text-sm">
-                <span className="max-w-[180px] truncate">{business.name}</span>
-                <ChevronDown className={`w-3.5 h-3.5 text-slate-500 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
+              <div className="flex items-center gap-1 font-bold text-slate-900 text-xs sm:text-sm">
+                <span className="max-w-[170px] truncate tracking-tight">{business.name}</span>
+                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-indigo-600' : 'group-hover:text-slate-600'}`} />
               </div>
-              <div className="text-[10px] font-semibold text-slate-700 font-mono flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
-                <span>{business.gstin || 'NTN: 7654321-0'}</span>
+              <div className="text-[10px] font-semibold text-slate-500 font-mono flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
+                <span className="truncate max-w-[150px]">{business.gstin || 'NTN: 7654321-0'}</span>
               </div>
             </div>
           </button>
 
           {/* Dropdown Menu */}
           {isDropdownOpen && (
-            <div className="absolute left-0 top-12 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-              <div className="px-3.5 py-2 text-[11px] font-extrabold uppercase tracking-wider text-slate-400 border-b border-slate-100 flex items-center justify-between">
+            <div className="absolute left-0 top-13 w-76 bg-white/95 backdrop-blur-xl rounded-2xl shadow-xl border border-slate-200/90 py-2 z-50 animate-scale-in">
+              <div className="px-4 py-2 text-[10.5px] font-extrabold uppercase tracking-wider text-slate-400 border-b border-slate-100 flex items-center justify-between">
                 <span>Select Store / Branch</span>
-                <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-mono">{safeCompanies.length} Active</span>
+                <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full text-[10px] font-extrabold font-mono">{safeCompanies.length} Active</span>
               </div>
 
               <div className="max-h-60 overflow-y-auto py-1">
@@ -174,25 +174,25 @@ export const Header: React.FC<HeaderProps> = ({
                         }
                         setIsDropdownOpen(false);
                       }}
-                      className={`w-full px-3.5 py-2.5 flex items-center justify-between hover:bg-slate-50 transition cursor-pointer text-left ${
-                        isSelected ? 'bg-blue-50/60 font-bold' : ''
+                      className={`w-full px-3.5 py-2.5 flex items-center justify-between hover:bg-slate-50/90 transition cursor-pointer text-left ${
+                        isSelected ? 'bg-indigo-50/70 font-bold border-l-3 border-indigo-600' : ''
                       }`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         {cLogoUrl ? (
-                          <img src={cLogoUrl} alt="" className="w-7 h-7 rounded-lg object-cover shrink-0 border border-slate-200" />
+                          <img src={cLogoUrl} alt="" className="w-7.5 h-7.5 rounded-lg object-cover shrink-0 border border-slate-200" />
                         ) : (
-                          <div className={`w-7 h-7 rounded-lg text-xs font-bold flex items-center justify-center shrink-0 ${
-                            isSelected ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700'
+                          <div className={`w-7.5 h-7.5 rounded-lg text-xs font-black flex items-center justify-center shrink-0 ${
+                            isSelected ? 'bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700'
                           }`}>
                             {c.name ? c.name.charAt(0).toUpperCase() : 'S'}
                           </div>
                         )}
                         <div className="min-w-0">
-                          <div className={`text-xs truncate ${isSelected ? 'text-blue-900 font-bold' : 'text-slate-800 font-semibold'}`}>
+                          <div className={`text-xs truncate ${isSelected ? 'text-indigo-950 font-bold' : 'text-slate-800 font-semibold'}`}>
                             {c.name}
                           </div>
-                          <div className="text-[10px] text-slate-400 truncate">
+                          <div className="text-[10px] text-slate-400 truncate font-mono">
                             {c.gstin || c.phone || 'Branch Account'}
                           </div>
                         </div>
@@ -200,7 +200,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                       <div className="flex items-center gap-1 shrink-0 ml-2">
                         {isSelected && (
-                          <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0">
+                          <div className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0">
                             <Check className="w-3 h-3 stroke-[3]" />
                           </div>
                         )}
@@ -215,7 +215,7 @@ export const Header: React.FC<HeaderProps> = ({
                                 onDeleteCompany(c.tenantId, c.name);
                               }
                             }}
-                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -226,15 +226,15 @@ export const Header: React.FC<HeaderProps> = ({
                 })}
               </div>
 
-              <div className="p-2 border-t border-slate-100 gap-1.5 flex flex-col">
+              <div className="p-2.5 border-t border-slate-100 gap-1.5 flex flex-col">
                 <button
                   onClick={() => {
                     setIsDropdownOpen(false);
                     setIsCreateModalOpen(true);
                   }}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-gradient-to-r from-slate-900 to-slate-800 hover:from-slate-800 hover:to-slate-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-4 h-4 stroke-[2.5]" />
                   <span>Add New Store / Branch</span>
                 </button>
 
@@ -246,7 +246,7 @@ export const Header: React.FC<HeaderProps> = ({
                   className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg text-[11px] font-semibold transition cursor-pointer"
                 >
                   <Building2 className="w-3.5 h-3.5" />
-                  <span>Edit Company Details</span>
+                  <span>Store & Account Settings</span>
                 </button>
 
                 {userSession && (
@@ -275,47 +275,47 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* Search */}
+        {/* Command Palette Search Box */}
         <div
           onClick={onOpenCommandPalette}
           className="hidden md:flex items-center relative cursor-pointer group"
-          style={{ width: '260px' }}
+          style={{ width: '270px' }}
         >
           <input
             type="text"
             readOnly
-            placeholder="Search items, bills, parties (Ctrl+F)..."
-            className="w-full cursor-pointer outline-none transition"
+            placeholder="Search items, bills, parties..."
+            className="w-full cursor-pointer outline-none transition-all"
             style={{
-              height: '34px', paddingLeft: '34px', paddingRight: '12px',
+              height: '36px', paddingLeft: '34px', paddingRight: '48px',
               background: '#f8fafc', border: '1.5px solid #e2e8f0',
-              borderRadius: '10px', fontSize: '12px', fontWeight: 500,
-              color: '#334155', fontFamily: 'inherit',
+              borderRadius: '11px', fontSize: '12px', fontWeight: 500,
+              color: '#1e293b', fontFamily: 'inherit',
             }}
-            onMouseEnter={e => { (e.target as HTMLInputElement).style.borderColor = '#3b82f6'; (e.target as HTMLInputElement).style.background = '#fff'; }}
+            onMouseEnter={e => { (e.target as HTMLInputElement).style.borderColor = '#6366f1'; (e.target as HTMLInputElement).style.background = '#ffffff'; }}
             onMouseLeave={e => { (e.target as HTMLInputElement).style.borderColor = '#e2e8f0'; (e.target as HTMLInputElement).style.background = '#f8fafc'; }}
           />
-          <Search className="w-3.5 h-3.5 absolute left-2.5" style={{ top: '10px', color: '#94a3b8' }} />
-          <kbd className="absolute right-2.5 text-[10px] font-bold text-slate-400 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded" style={{ top: '8px' }}>⌘F</kbd>
+          <Search className="w-3.5 h-3.5 absolute left-3 text-slate-400 group-hover:text-indigo-600 transition-colors" />
+          <kbd className="absolute right-2.5 text-[10px] font-bold text-slate-500 bg-white border border-slate-200 shadow-2xs px-1.5 py-0.5 rounded-md font-mono">Ctrl+F</kbd>
         </div>
       </div>
 
-      {/* CTA Buttons */}
+      {/* Center Top Quick Action Buttons */}
       <div className="flex items-center gap-2">
         <button
           onClick={() => onNavigateToTab('pos')}
-          className="btn-vyapar-red cursor-pointer"
+          className="btn-vyapar-red cursor-pointer shadow-sm hover:shadow-md transition-all"
         >
           <Plus className="w-3.5 h-3.5 stroke-[3]" />
-          + Add Sale
+          <span>+ Add Sale</span>
         </button>
 
         <button
           onClick={() => onNavigateToTab('purchase')}
-          className="btn-vyapar-blue cursor-pointer"
+          className="btn-vyapar-blue cursor-pointer shadow-sm hover:shadow-md transition-all"
         >
           <Plus className="w-3.5 h-3.5 stroke-[3]" />
-          + Add Purchase
+          <span>+ Add Purchase</span>
         </button>
 
         <button
@@ -323,61 +323,57 @@ export const Header: React.FC<HeaderProps> = ({
           className="btn-vyapar-outline cursor-pointer hidden sm:flex"
         >
           <Plus className="w-3.5 h-3.5 stroke-[3]" />
-          + Add Party
+          <span>+ Add Party</span>
         </button>
       </div>
 
-      {/* Right: Support · Sync · Clock · User */}
+      {/* Right Utilities: Support · Sync Status · Live Clock · User Profile */}
       <div className="flex items-center gap-2.5">
-        {/* Support number */}
+        {/* Support Phone Pill */}
         <div
-          className="hidden xl:flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg"
-          style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' }}
+          className="hidden xl:flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl border border-emerald-200/80 bg-emerald-50/60 text-emerald-800 shadow-2xs"
         >
-          <PhoneCall className="w-3.5 h-3.5" style={{ color: '#16a34a' }} />
-          <span>Support: <strong>+92 300 xxxxxxx</strong></span>
+          <PhoneCall className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+          <span>Support: <strong className="font-bold text-emerald-900">+92 300 xxxxxxx</strong></span>
         </div>
 
-        {/* Cloud Sync */}
+        {/* Cloud Sync Status */}
         <button
           onClick={onOpenSyncModal}
-          title="Click to force sync"
-          className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
+          title="Click to view & trigger cloud sync"
+          className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl border transition-all cursor-pointer shadow-2xs"
           style={{
             background: syncStatus.isSyncing ? '#fffbeb' : syncStatus.pendingCount > 0 ? '#eff6ff' : '#f0fdf4',
-            color:      syncStatus.isSyncing ? '#92400e' : syncStatus.pendingCount > 0 ? '#1e40af' : '#166534',
-            borderColor: syncStatus.isSyncing ? '#fcd34d' : syncStatus.pendingCount > 0 ? '#bfdbfe' : '#bbf7d0',
+            color:      syncStatus.isSyncing ? '#92400e' : syncStatus.pendingCount > 0 ? '#1d4ed8' : '#047857',
+            borderColor: syncStatus.isSyncing ? '#fcd34d' : syncStatus.pendingCount > 0 ? '#bfdbfe' : '#a7f3d0',
           }}
         >
           {syncStatus.isSyncing ? (
-            <><RefreshCw className="w-3.5 h-3.5 animate-spin" /><span>Syncing...</span></>
+            <><RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" /><span>Syncing...</span></>
           ) : syncStatus.pendingCount > 0 ? (
-            <><Cloud className="w-3.5 h-3.5" /><span>{syncStatus.pendingCount} Pending</span></>
+            <><Cloud className="w-3.5 h-3.5 text-blue-600" /><span>{syncStatus.pendingCount} Pending</span></>
           ) : (
-            <><Cloud className="w-3.5 h-3.5" /><span>Cloud Synced</span></>
+            <><Cloud className="w-3.5 h-3.5 text-emerald-600 animate-pulse" /><span>Cloud Synced</span></>
           )}
         </button>
 
-        {/* Clock */}
+        {/* Monospace Live Clock */}
         <div
-          className="font-mono text-xs font-bold flex items-center gap-1.5 px-3 py-1.5 rounded-lg"
-          style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#334155' }}
+          className="font-mono text-xs font-bold flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100/70 border border-slate-200 text-slate-700 shadow-2xs"
         >
-          <Clock className="w-3.5 h-3.5" style={{ color: '#94a3b8' }} />
+          <Clock className="w-3.5 h-3.5 text-slate-400" />
           <span>{time}</span>
         </div>
 
-        {/* User chip */}
+        {/* User Account Chip */}
         {userSession && (
-          <div className="hidden lg:flex items-center gap-1.5" style={{ paddingLeft: '6px', borderLeft: '1px solid #e2e8f0' }}>
+          <div className="hidden lg:flex items-center gap-1.5 pl-2 border-l border-slate-200">
             <div
-              className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-bold cursor-default"
-              style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#1e293b' }}
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-bold bg-slate-50 border border-slate-200 text-slate-800 shadow-2xs"
               title={userSession.email}
             >
               <div
-                className="w-5 h-5 rounded-lg flex items-center justify-center text-white font-black text-[10px] shrink-0"
-                style={{ background: 'linear-gradient(135deg, #3b82f6, #6366f1)' }}
+                className="w-5.5 h-5.5 rounded-lg flex items-center justify-center text-white font-black text-[10px] shrink-0 bg-gradient-to-br from-indigo-600 to-violet-600 shadow-2xs"
               >
                 {(userSession.fullName || userSession.email).charAt(0).toUpperCase()}
               </div>
@@ -388,10 +384,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 onClick={onSignOut}
                 title="Sign Out"
-                className="w-8 h-8 flex items-center justify-center rounded-xl transition cursor-pointer"
-                style={{ color: '#94a3b8' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#fff1f2'; (e.currentTarget as HTMLButtonElement).style.color = '#e53e3e'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; }}
+                className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
               >
                 <LogOut className="w-3.5 h-3.5 stroke-[2.5]" />
               </button>

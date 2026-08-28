@@ -15,7 +15,7 @@ import {
   Pencil
 } from 'lucide-react';
 import { Party, PartyType, BalanceType, Invoice, BusinessDetails } from '../../types';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 import { createServerParty, recordServerPartyPayment, updateServerParty, deleteServerParty } from '../../services/api';
 import { syncManager } from '../../services/sync';
 
@@ -43,12 +43,14 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
   const [paymentRemarks, setPaymentRemarks] = useState('');
 
 
-  const allInvoices = useLiveQuery(() => db.invoices.toArray(), []) || [];
-  const allPurchaseBills = useLiveQuery(() => db.purchaseBills.toArray(), []) || [];
-  const allPaymentsIn = useLiveQuery(() => db.paymentIn.toArray(), []) || [];
-  const allPaymentsOut = useLiveQuery(() => db.paymentOut.toArray(), []) || [];
-  const allSaleReturns = useLiveQuery(() => db.saleReturns.toArray(), []) || [];
-  const allPurchaseReturns = useLiveQuery(() => db.purchaseReturns.toArray(), []) || [];
+  const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+
+  const allInvoices = useLiveQuery(() => db.invoices.filter(i => (i.tenantId || 'default-tenant') === activeTenantId).toArray(), [activeTenantId]) || [];
+  const allPurchaseBills = useLiveQuery(() => db.purchaseBills.filter(b => (b.tenantId || 'default-tenant') === activeTenantId).toArray(), [activeTenantId]) || [];
+  const allPaymentsIn = useLiveQuery(() => db.paymentIn.filter(p => (p.tenantId || 'default-tenant') === activeTenantId).toArray(), [activeTenantId]) || [];
+  const allPaymentsOut = useLiveQuery(() => db.paymentOut.filter(p => (p.tenantId || 'default-tenant') === activeTenantId).toArray(), [activeTenantId]) || [];
+  const allSaleReturns = useLiveQuery(() => db.saleReturns.filter(s => (s.tenantId || 'default-tenant') === activeTenantId).toArray(), [activeTenantId]) || [];
+  const allPurchaseReturns = useLiveQuery(() => db.purchaseReturns.filter(pr => (pr.tenantId || 'default-tenant') === activeTenantId).toArray(), [activeTenantId]) || [];
 
   const partyLedgerReport = useMemo(() => {
     if (!selectedPartyForStatement) return null;
@@ -71,6 +73,35 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
 
   // Helper to compute dynamic party ledger balance considering payments & sales dues safely
   const getPartyEffectiveBalance = (party: Party): number => {
+    if (party.type === 'SUPPLIER' || party.type === 'BOTH') {
+      const supplierBills = (allPurchaseBills || []).filter(b => 
+        (party.id !== undefined && Number(b.supplierId) === Number(party.id)) ||
+        (b.supplierName && b.supplierName.trim().toLowerCase() === party.name.trim().toLowerCase())
+      );
+      if (supplierBills.length > 0) {
+        const billsDueSum = supplierBills.reduce((sum, b) => {
+          if (b.paymentStatus === 'PAID') return sum;
+          const due = b.dueAmount !== undefined && b.dueAmount >= 0 ? b.dueAmount : Math.max(0, (b.grandTotal || 0) - (b.paidAmount || 0));
+          return sum + due;
+        }, 0);
+        const opening = party.openingBalance && party.balanceType === 'PAYABLE' ? Number(party.openingBalance) : 0;
+        return Math.max(0, billsDueSum + opening);
+      }
+    } else if (party.type === 'CUSTOMER') {
+      const customerInvoices = (allInvoices || []).filter(inv =>
+        (party.id !== undefined && Number(inv.partyId) === Number(party.id)) ||
+        (inv.partyName && inv.partyName.trim().toLowerCase() === party.name.trim().toLowerCase())
+      );
+      if (customerInvoices.length > 0) {
+        const invDueSum = customerInvoices.reduce((sum, inv) => {
+          if (inv.paymentStatus === 'PAID') return sum;
+          const due = inv.dueAmount !== undefined && inv.dueAmount >= 0 ? inv.dueAmount : Math.max(0, (inv.grandTotal || 0) - (inv.receivedAmount || 0));
+          return sum + due;
+        }, 0);
+        const opening = party.openingBalance && party.balanceType === 'RECEIVABLE' ? Number(party.openingBalance) : 0;
+        return Math.max(0, invDueSum + opening);
+      }
+    }
     return safeNum(party.currentBalance !== undefined ? party.currentBalance : party.openingBalance);
   };
 
@@ -107,7 +138,7 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
     if (!newParty.name || !newParty.phone) return;
 
     const partyPayload = {
-      tenantId: business?.tenantId || 'default-tenant',
+      tenantId: getActiveTenantId(business),
       name: newParty.name,
       phone: newParty.phone,
       type: (newParty.type as PartyType) || 'CUSTOMER',
@@ -144,7 +175,7 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
 
     const partyId = Number(editingParty.id);
     const partyPayload = {
-      tenantId: editingParty.tenantId || business?.tenantId || 'default-tenant',
+      tenantId: editingParty.tenantId || getActiveTenantId(business),
       name: editingParty.name.trim(),
       phone: editingParty.phone.trim(),
       type: editingParty.type || 'CUSTOMER',

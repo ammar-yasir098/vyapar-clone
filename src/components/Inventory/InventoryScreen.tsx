@@ -23,7 +23,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { Item, UnitType, BusinessDetails, Party, ItemRestock, ItemLocationMapping } from '../../types';
-import { db } from '../../db';
+import { db, getActiveTenantId } from '../../db';
 import { createServerItem, updateServerItem, deleteServerItem, adjustServerItemStock } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { useToast } from '../Common/ToastContext';
@@ -62,18 +62,26 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
   // Multi-Location Inventory Breakdown State (Phase 5)
   const [itemLocs, setItemLocs] = useState<ItemLocationMapping[]>([]);
   const [whLocationIds, setWhLocationIds] = useState<Set<number>>(new Set());
+  const [storeFrontLocationIds, setStoreFrontLocationIds] = useState<Set<number>>(new Set());
 
-  const activeTenantId = business?.tenantId || 'default-tenant';
+  const activeTenantId = getActiveTenantId(business);
 
   React.useEffect(() => {
     async function loadLocationData() {
       const locs = await db.locations.toArray();
-      const tenantLocs = locs.filter(l => (l.tenantId || 'default-tenant') === activeTenantId || l.isShared || (l.allowedTenantIds && l.allowedTenantIds.includes(activeTenantId)));
+      const tenantLocs = locs.filter(l => (l.tenantId || 'default-tenant') === activeTenantId || (l.allowedTenantIds && l.allowedTenantIds.includes(activeTenantId)));
       const whIds = new Set(tenantLocs.filter(l => l.type === 'WAREHOUSE').map(l => Number(l.id)));
+      const storeIds = new Set(
+        tenantLocs
+          .filter(l => l.isStoreFront || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE_FRONT')
+          .map(l => Number(l.id))
+      );
       setWhLocationIds(whIds);
+      setStoreFrontLocationIds(storeIds);
 
       const mappings = await db.itemLocations.toArray();
-      const tenantMappings = mappings.filter(il => (il.tenantId || 'default-tenant') === activeTenantId);
+      const tenantLocIds = new Set(tenantLocs.map(l => Number(l.id)));
+      const tenantMappings = mappings.filter(il => (il.tenantId || 'default-tenant') === activeTenantId || tenantLocIds.has(Number(il.locationId)));
       setItemLocs(tenantMappings);
     }
     loadLocationData();
@@ -421,19 +429,12 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                           const itemIdx = items.findIndex(i => Number(i.id) === targetItemId);
 
                           const itemMaps = itemLocs.filter(il => {
-                            const mapTenant = il.tenantId || 'default-tenant';
-                            if (mapTenant !== activeTenantId) return false;
-
                             let numId = Number(il.itemId);
                             if (numId === targetItemId) return true;
                             if ((item as any).cloudId && numId === Number((item as any).cloudId)) return true;
 
                             const mapSku = (il as any).skuCode;
                             if (mapSku && item.skuCode && String(mapSku).toLowerCase() === item.skuCode.toLowerCase()) return true;
-
-                            // Tenant-scoped legacy seed ID matching (125/1 for 1st tenant item, 126/2 for 2nd tenant item)
-                            if ((numId === 125 || numId === 1) && itemIdx === 0) return true;
-                            if ((numId === 126 || numId === 2) && itemIdx === 1) return true;
 
                             return false;
                           });
@@ -450,7 +451,8 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                           });
 
                           const validMappings = Array.from(uniqueMap.values()).filter(m => m.quantity > 0);
-                          const storeStock = validMappings.reduce((sum, m) => sum + m.quantity, 0);
+                          const storeMaps = validMappings.filter(m => storeFrontLocationIds.has(Number(m.locationId)));
+                          const storeStock = storeMaps.reduce((sum, m) => sum + m.quantity, 0);
                           const whStock = Math.max(0, stock - storeStock);
 
                           return (
