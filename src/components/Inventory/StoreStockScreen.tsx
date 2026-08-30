@@ -81,7 +81,7 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
         }
       }).catch(err => console.error('Error purging invalid mappings:', err));
     }
-  }, [locations, itemLocations, tenantId]);
+  }, [locations.length, itemLocations.length, tenantId]);
 
   // Helper to match item location mapping to product (handles local ID, cloud ID, and SKU)
   const isItemMatch = (il: ItemLocationMapping, item: Item) => {

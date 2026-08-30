@@ -535,20 +535,19 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     locationId?: string | number;
   } | null>(null);
 
-  // Auto-purge orphaned or zone-level item location mappings from IndexedDB
+  // Auto-purge orphaned item location mappings from IndexedDB
   React.useEffect(() => {
     if (locations.length === 0 || itemLocations.length === 0) return;
 
-    const validRackIds = new Set(locations.filter(l => l.type === 'SHELF').map(l => Number(l.id)));
-    const zoneLocIds = new Set(locations.filter(l => l.type === 'ZONE' || l.type === 'WAREHOUSE').map(l => Number(l.id)));
+    const validLocIds = new Set(locations.map(l => String(l.id)));
 
-    // Purge records that are either non-existent or pointing to broad ZONE containers
+    // Purge records that point to non-existent location IDs
     const invalidMappings = itemLocations.filter(il =>
-      il.id && (!validRackIds.has(Number(il.locationId)) || zoneLocIds.has(Number(il.locationId)))
+      il.id && !validLocIds.has(String(il.locationId))
     );
 
     if (invalidMappings.length > 0) {
-      console.log(`[Auto-Purge] Deleting ${invalidMappings.length} invalid/zone mapping records from IndexedDB...`, invalidMappings);
+      console.log(`[Auto-Purge] Deleting ${invalidMappings.length} invalid mapping records from IndexedDB...`);
       db.transaction('rw', db.itemLocations, async () => {
         for (const inv of invalidMappings) {
           if (inv.id) {
@@ -557,7 +556,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         }
       }).catch(err => console.error('Error purging invalid mappings:', err));
     }
-  }, [locations, itemLocations]);
+  }, [locations.length, itemLocations.length]);
 
   const handleSelectPreset = (preset: 'RETAIL' | 'SUPERMARKET' | 'BOUTIQUE' | 'CUSTOM') => {
     setPresetTemplate(preset);

@@ -435,17 +435,17 @@ export function App() {
     });
   }, [allItems, activeTenantId, itemLocations, accessibleLocationIds]);
 
-  const parties = allParties.filter(party => party && (party.tenantId || 'default-tenant') === activeTenantId);
-  const invoices = allInvoices.filter(inv => inv && (inv.tenantId || 'default-tenant') === activeTenantId);
-  const estimates = allEstimates.filter(est => est && (est.tenantId || 'default-tenant') === activeTenantId);
-  const paymentsIn = allPaymentsIn.filter(p => p && (p.tenantId || 'default-tenant') === activeTenantId);
-  const purchaseOrders = allPurchaseOrders.filter(po => po && (po.tenantId || 'default-tenant') === activeTenantId);
-  const purchaseBills = allPurchaseBills.filter(pb => pb && (pb.tenantId || 'default-tenant') === activeTenantId);
-  const paymentsOut = allPaymentsOut.filter(po => po && (po.tenantId || 'default-tenant') === activeTenantId);
-  const expenses = allExpenses.filter(e => e && (e.tenantId || 'default-tenant') === activeTenantId);
-  const purchaseReturns = allPurchaseReturns.filter(pr => pr && (pr.tenantId || 'default-tenant') === activeTenantId);
-  const saleReturns = allSaleReturns.filter(sr => sr && (sr.tenantId || 'default-tenant') === activeTenantId);
-  const cashTransactions = allCashTransactions.filter(ct => ct && (ct.tenantId || 'default-tenant') === activeTenantId);
+  const parties = useMemo(() => allParties.filter(party => party && (party.tenantId || 'default-tenant') === activeTenantId), [allParties, activeTenantId]);
+  const invoices = useMemo(() => allInvoices.filter(inv => inv && (inv.tenantId || 'default-tenant') === activeTenantId), [allInvoices, activeTenantId]);
+  const estimates = useMemo(() => allEstimates.filter(est => est && (est.tenantId || 'default-tenant') === activeTenantId), [allEstimates, activeTenantId]);
+  const paymentsIn = useMemo(() => allPaymentsIn.filter(p => p && (p.tenantId || 'default-tenant') === activeTenantId), [allPaymentsIn, activeTenantId]);
+  const purchaseOrders = useMemo(() => allPurchaseOrders.filter(po => po && (po.tenantId || 'default-tenant') === activeTenantId), [allPurchaseOrders, activeTenantId]);
+  const purchaseBills = useMemo(() => allPurchaseBills.filter(pb => pb && (pb.tenantId || 'default-tenant') === activeTenantId), [allPurchaseBills, activeTenantId]);
+  const paymentsOut = useMemo(() => allPaymentsOut.filter(po => po && (po.tenantId || 'default-tenant') === activeTenantId), [allPaymentsOut, activeTenantId]);
+  const expenses = useMemo(() => allExpenses.filter(e => e && (e.tenantId || 'default-tenant') === activeTenantId), [allExpenses, activeTenantId]);
+  const purchaseReturns = useMemo(() => allPurchaseReturns.filter(pr => pr && (pr.tenantId || 'default-tenant') === activeTenantId), [allPurchaseReturns, activeTenantId]);
+  const saleReturns = useMemo(() => allSaleReturns.filter(sr => sr && (sr.tenantId || 'default-tenant') === activeTenantId), [allSaleReturns, activeTenantId]);
+  const cashTransactions = useMemo(() => allCashTransactions.filter(ct => ct && (ct.tenantId || 'default-tenant') === activeTenantId), [allCashTransactions, activeTenantId]);
 
   const stockTransfers = useMemo(() => {
     return allStockTransfers.filter(st => {
