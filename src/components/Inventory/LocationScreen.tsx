@@ -101,9 +101,10 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       if (loc.type === 'WAREHOUSE') {
         const locTenant = loc.tenantId || 'default-tenant';
         const locIdStr = String(loc.id);
-        const isOwner = locTenant === activeTenantId || (activeTenantId === 'default-tenant' && locTenant === 'default-tenant');
-        const isLinked = (loc.allowedTenantIds && Array.isArray(loc.allowedTenantIds) && loc.allowedTenantIds.includes(activeTenantId)) || accessWhSet.has(locIdStr) || loc.isShared === true;
-        if (isOwner || isLinked) {
+        const isOwner = locTenant === activeTenantId;
+        const isLinked = (loc.allowedTenantIds && Array.isArray(loc.allowedTenantIds) && loc.allowedTenantIds.includes(activeTenantId)) || accessWhSet.has(locIdStr);
+        const isGlobalShared = loc.isShared === true;
+        if (isOwner || isLinked || isGlobalShared) {
           set.add(loc.id as any);
           set.add(locIdStr);
           if (typeof loc.id === 'number') set.add(loc.id);
@@ -136,13 +137,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     const rawLocs = liveAllLocations && liveAllLocations.length > 0 ? liveAllLocations : locations;
     return rawLocs.filter(loc => {
       if (!loc) return false;
-      const locTenant = loc.tenantId || 'default-tenant';
-      const isOwner = locTenant === activeTenantId || (activeTenantId === 'default-tenant' && locTenant === 'default-tenant');
-      const isLocAccessible = accessibleLocationIds.has(loc.id as any) || accessibleLocationIds.has(String(loc.id));
-      const isShared = loc.isShared === true;
-      return isOwner || isLocAccessible || isShared;
+      if (loc.type === 'WAREHOUSE') {
+        return accessibleWhIds.has(loc.id as any) || accessibleWhIds.has(String(loc.id));
+      }
+      return accessibleLocationIds.has(loc.id as any) || accessibleLocationIds.has(String(loc.id));
     });
-  }, [liveAllLocations, locations, activeTenantId, accessibleLocationIds]);
+  }, [liveAllLocations, locations, accessibleWhIds, accessibleLocationIds]);
 
   const tenantLocations = activeLocations;
 
@@ -1402,8 +1402,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       const validMappings = Array.from(uniqueMappingMap.values()).filter(m => {
         if (m.quantity <= 0) return false;
         const locIdStr = String(m.locationId);
-        if (locationMap.has(m.locationId) || locationMap.has(locIdStr)) return true;
-        return activeLocations.some(l => String(l.id) === locIdStr);
+        const locObj = locationMap.get(m.locationId) || locationMap.get(locIdStr) || activeLocations.find(l => String(l.id) === locIdStr);
+        if (!locObj) return false;
+        return locObj.type !== 'WAREHOUSE';
       });
 
       const allocatedMappings: Array<{
@@ -1793,6 +1794,25 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           };
           await db.itemLocations.put(mapPayload);
           ClientSyncManager.logMutation('ITEM_LOCATION', mapId, 'INSERT', mapPayload);
+        }
+
+        // Deduct from any root warehouse reserve mappings if placing unassigned stock into a rack
+        const selectedDestObj = locationMap.get(destLocId) || locationMap.get(String(destLocId));
+        if (selectedDestObj && selectedDestObj.type !== 'WAREHOUSE') {
+          const whLocIds = new Set(locations.filter(l => l.type === 'WAREHOUSE').map(l => String(l.id)));
+          const rootWhMappings = await db.itemLocations
+            .filter(il => (il.tenantId || 'default-tenant') === tenantId && (String(il.itemId) === String(item.id) || Number(il.itemId) === Number(item.id)) && whLocIds.has(String(il.locationId)))
+            .toArray();
+
+          for (const rootMap of rootWhMappings) {
+            if (!rootMap.id) continue;
+            const newRootQty = Math.max(0, rootMap.quantity - qty);
+            if (newRootQty <= 0) {
+              await db.itemLocations.delete(rootMap.id);
+            } else {
+              await db.itemLocations.update(rootMap.id, { quantity: newRootQty, updatedAt: new Date().toISOString() });
+            }
+          }
         }
       }
 
