@@ -1,6 +1,8 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import { bootstrapSequelize } from './db/sequelize.js';
 import { syncRouter } from './routes/sync.js';
 import { authRouter } from './routes/auth.js';
@@ -22,8 +24,6 @@ import { initWhatsAppService } from './services/whatsappService.js';
 
 import path from 'path';
 import { fileURLToPath } from 'url';
-
-dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

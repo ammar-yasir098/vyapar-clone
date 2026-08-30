@@ -97,10 +97,37 @@ itemsRouter.put('/:id', async (req: Request, res: Response) => {
 itemsRouter.put('/:id/stock', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { delta } = req.body;
+    const { delta, tenantId, skuCode, name } = req.body;
 
     if (isDbConnected()) {
-      const item = await Item.findByPk(Number(id));
+      let item: any = null;
+      const numId = Number(id);
+      if (!isNaN(numId) && numId > 0) {
+        try {
+          item = await Item.findByPk(numId);
+        } catch {}
+      }
+      if (!item && tenantId && skuCode && String(skuCode).trim()) {
+        try {
+          item = await Item.findOne({ where: { tenantId: String(tenantId), skuCode: String(skuCode).trim() } });
+        } catch {}
+      }
+      if (!item && tenantId && name && String(name).trim()) {
+        try {
+          item = await Item.findOne({ where: { tenantId: String(tenantId), name: String(name).trim() } });
+        } catch {}
+      }
+      if (!item && skuCode && String(skuCode).trim()) {
+        try {
+          item = await Item.findOne({ where: { skuCode: String(skuCode).trim() } });
+        } catch {}
+      }
+      if (!item && name && String(name).trim()) {
+        try {
+          item = await Item.findOne({ where: { name: String(name).trim() } });
+        } catch {}
+      }
+
       if (item) {
         const newStock = Math.max(0, (item.get('currentStock') as number || 0) + (Number(delta) || 0));
         await item.update({ currentStock: newStock });
@@ -117,9 +144,26 @@ itemsRouter.put('/:id/stock', async (req: Request, res: Response) => {
 itemsRouter.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const { tenantId, skuCode, name } = req.query;
+
     if (isDbConnected()) {
-      await InvoiceItem.destroy({ where: { itemId: Number(id) } });
-      await Item.destroy({ where: { id: Number(id) } });
+      const numId = Number(id);
+      if (!isNaN(numId) && numId > 0) {
+        await InvoiceItem.destroy({ where: { itemId: numId } }).catch(() => {});
+        await Item.destroy({ where: { id: numId } }).catch(() => {});
+      }
+      if (tenantId && skuCode && String(skuCode).trim()) {
+        await Item.destroy({ where: { tenantId: String(tenantId), skuCode: String(skuCode).trim() } }).catch(() => {});
+      }
+      if (tenantId && name && String(name).trim()) {
+        await Item.destroy({ where: { tenantId: String(tenantId), name: String(name).trim() } }).catch(() => {});
+      }
+      if (skuCode && String(skuCode).trim()) {
+        await Item.destroy({ where: { skuCode: String(skuCode).trim() } }).catch(() => {});
+      }
+      if (name && String(name).trim()) {
+        await Item.destroy({ where: { name: String(name).trim() } }).catch(() => {});
+      }
     }
     return res.json({ success: true, message: `Product ${id} deleted` });
   } catch (err: any) {

@@ -915,8 +915,8 @@ export function App() {
 
       {/* No Company Profile Setup Prompt Modal */}
       {isDbLoaded && companies.length === 0 && (
-        <div className="fixed inset-0 bg-slate-900/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-8 max-w-lg w-full shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 bg-slate-900/85 backdrop-blur-md z-[9999] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl p-8 max-w-lg w-full shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200 my-auto max-h-[90vh] overflow-y-auto">
             <div className="text-center space-y-2 mb-6">
               <div className="w-16 h-16 rounded-2xl bg-blue-600 flex items-center justify-center text-white mx-auto shadow-lg">
                 <Building2 className="w-9 h-9 stroke-[2.5]" />

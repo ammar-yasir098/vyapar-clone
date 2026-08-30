@@ -23,7 +23,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { Item, UnitType, BusinessDetails, Party, ItemRestock, ItemLocationMapping } from '../../types';
-import { db, getActiveTenantId } from '../../db';
+import { db, getActiveTenantId, allocateStockToMainWarehouse } from '../../db';
 import { createServerItem, updateServerItem, deleteServerItem, adjustServerItemStock } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { useToast } from '../Common/ToastContext';
@@ -79,7 +79,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
       });
       const storeIds = new Set<string | number>();
       tenantLocs
-        .filter(l => l.isStoreFront || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE_FRONT')
+        .filter(l => l.isStoreFront || l.code?.includes('SF') || l.code?.includes('STORE') || l.name?.toLowerCase().includes('store') || (l as any).type === 'STORE' || (l as any).type === 'STORE_FRONT')
         .forEach(l => {
           if (l.id !== undefined && l.id !== null) {
             storeIds.add(l.id as any);
@@ -90,8 +90,8 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
       setStoreFrontLocationIds(storeIds);
 
       const mappings = await db.itemLocations.toArray();
-      const tenantLocIds = new Set(tenantLocs.map(l => Number(l.id)));
-      const tenantMappings = mappings.filter(il => (il.tenantId || 'default-tenant') === activeTenantId || tenantLocIds.has(Number(il.locationId)));
+      const tenantLocIds = new Set(tenantLocs.map(l => String(l.id)));
+      const tenantMappings = mappings.filter(il => (il.tenantId || 'default-tenant') === activeTenantId || tenantLocIds.has(String(il.locationId)));
       setItemLocs(tenantMappings);
     }
     loadLocationData();
@@ -127,7 +127,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
       name.toLowerCase().includes(search.toLowerCase()) ||
       sku.toLowerCase().includes(search.toLowerCase()) ||
       barcode.includes(search);
-    const matchesLowStock = filterLowStock ? Number(item?.currentStock || 0) <= Number(item?.minStockAlert || 0) : true;
+    const matchesLowStock = filterLowStock ? Number(item?.currentStock || 0) <= Number(item?.minStockAlert ?? 5) : true;
     return matchesSearch && matchesLowStock;
   });
 
@@ -135,13 +135,13 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
   const handleOpenItemHistory = async (item: Item) => {
     setSelectedItemForHistory(item);
 
-    // 1. Fetch Sales History (Customers who purchased this item)
-    const allInvoices = await db.invoices.toArray();
+    // 1. Fetch Sales History (Customers who purchased this item, strictly scoped to active store tenant)
+    const allInvoices = await db.invoices.filter(i => (i.tenantId || 'default-tenant') === activeTenantId).toArray();
     const salesLogs: any[] = [];
 
     for (const inv of allInvoices) {
       for (const invItem of inv.items || []) {
-        if ((item.id && invItem.itemId === item.id) || (invItem.itemName && invItem.itemName.trim().toLowerCase() === item.name.trim().toLowerCase())) {
+        if ((item.id && String(invItem.itemId) === String(item.id)) || (invItem.itemName && invItem.itemName.trim().toLowerCase() === item.name.trim().toLowerCase())) {
           salesLogs.push({
             customerName: inv.partyName || 'Walk-in Customer',
             customerPhone: inv.partyPhone || '',
@@ -158,10 +158,10 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
     }
     setItemSalesHistory(salesLogs);
 
-    // 2. Fetch Restock & Supplier History
-    const allRestocks = await db.itemRestocks.toArray();
+    // 2. Fetch Restock & Supplier History strictly scoped to active store tenant
+    const allRestocks = await db.itemRestocks.filter(r => (r.tenantId || 'default-tenant') === activeTenantId).toArray();
     const restockLogs = allRestocks.filter(r =>
-      (item.id && r.itemId === item.id) ||
+      (item.id && String(r.itemId) === String(item.id)) ||
       (r.itemName && r.itemName.trim().toLowerCase() === item.name.trim().toLowerCase())
     );
     setItemRestockHistory(restockLogs);
@@ -195,8 +195,16 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
     await createServerItem(fullItem);
     await syncManager.logMutation('ITEM', String(savedId), 'INSERT', fullItem);
 
-    // Log initial restock entry if opening stock > 0
+    // Automatically allocate opening stock to Main Warehouse location
     if (Number(newItem.currentStock) > 0) {
+      await allocateStockToMainWarehouse(
+        business?.tenantId || 'default-tenant',
+        savedId,
+        Number(newItem.currentStock),
+        itemPayload.skuCode,
+        itemPayload.name
+      );
+
       await db.itemRestocks.add({
         itemId: savedId,
         itemName: newItem.name,
@@ -271,8 +279,17 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
 
     if (item.id) {
       await db.items.update(item.id, { currentStock: newStock, updatedAt: new Date().toISOString() });
-      await adjustServerItemStock(item.id, delta);
-      await syncManager.logMutation('ITEM', String(item.id), 'UPDATE', { id: item.id, currentStock: newStock });
+      await adjustServerItemStock(item.id, delta, business?.tenantId || 'default-tenant', item.skuCode, item.name);
+      await syncManager.logMutation('ITEM', String(item.id), 'UPDATE', { id: item.id, currentStock: newStock, skuCode: item.skuCode, name: item.name });
+
+      // Automatically allocate added/reduced stock to Main Warehouse location mapping
+      await allocateStockToMainWarehouse(
+        business?.tenantId || 'default-tenant',
+        item.id,
+        delta,
+        item.skuCode,
+        item.name
+      );
 
       // If adding stock, log supplier restock history entry
       if (adjustType === 'ADD') {
@@ -308,9 +325,28 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
       type: 'danger',
       confirmText: 'Yes, Delete',
       onConfirm: async () => {
+        const itemToDelete = await db.items.get(id);
         await db.items.delete(id);
-        await deleteServerItem(id);
-        await syncManager.logMutation('ITEM', String(id), 'DELETE', { id });
+
+        // Delete associated item location mappings for deleted item
+        const locMaps = await db.itemLocations.filter(il => String(il.itemId) === String(id)).toArray();
+        for (const m of locMaps) {
+          if (m.id) await db.itemLocations.delete(m.id);
+        }
+
+        if (itemToDelete) {
+          await deleteServerItem(id, activeTenantId, itemToDelete.skuCode, itemToDelete.name);
+          await syncManager.logMutation('ITEM', String(id), 'DELETE', {
+            id,
+            tenantId: activeTenantId,
+            skuCode: itemToDelete.skuCode,
+            name: itemToDelete.name
+          });
+        } else {
+          await deleteServerItem(id, activeTenantId);
+          await syncManager.logMutation('ITEM', String(id), 'DELETE', { id, tenantId: activeTenantId });
+        }
+
         showToast('Product SKU deleted successfully', 'info');
         onItemUpdated();
       }
@@ -434,14 +470,12 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                       </td>
                       <td>
                         {(() => {
-                          const targetItemId = Number(item.id);
-                          const validItemIds = new Set(items.map(i => Number(i.id)));
-                          const itemIdx = items.findIndex(i => Number(i.id) === targetItemId);
+                          const targetItemId = String(item.id);
+                          const stock = Number(item?.currentStock || 0);
 
                           const itemMaps = itemLocs.filter(il => {
-                            let numId = Number(il.itemId);
-                            if (numId === targetItemId) return true;
-                            if ((item as any).cloudId && numId === Number((item as any).cloudId)) return true;
+                            if (String(il.itemId) === targetItemId) return true;
+                            if ((item as any).cloudId && String(il.itemId) === String((item as any).cloudId)) return true;
 
                             const mapSku = (il as any).skuCode;
                             if (mapSku && item.skuCode && String(mapSku).toLowerCase() === item.skuCode.toLowerCase()) return true;

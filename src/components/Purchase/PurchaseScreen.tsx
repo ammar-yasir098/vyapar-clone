@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShoppingCart, Plus, Trash2, CheckCircle2, User, FileText, ArrowUpRight } from 'lucide-react';
 import { Item, Party, InvoiceItem, PaymentMethod, BusinessDetails, PurchaseBill, InventoryLocation } from '../../types';
-import { db, getActiveTenantId } from '../../db';
+import { db, getActiveTenantId, allocateStockToMainWarehouse } from '../../db';
 import { createServerPurchase } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { useToast } from '../Common/ToastContext';
@@ -205,12 +205,20 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
           updatedAt: new Date().toISOString()
         });
         await syncManager.logMutation('ITEM', String(pItem.itemId), 'UPDATE', { id: pItem.itemId, name: dbItem.name, skuCode: dbItem.skuCode, currentStock: newStock, purchasePrice: pItem.unitPrice });
+        
+        await allocateStockToMainWarehouse(
+          currentTenantId,
+          pItem.itemId,
+          safeNum(pItem.quantity),
+          dbItem.skuCode,
+          dbItem.name
+        );
       }
 
       if (receivingLocationId) {
-        const locIdNum = Number(receivingLocationId);
+        const locIdStr = String(receivingLocationId);
         const existingMapping = await db.itemLocations
-          .filter(il => Number(il.itemId) === Number(pItem.itemId) && Number(il.locationId) === locIdNum)
+          .filter(il => String(il.itemId) === String(pItem.itemId) && String(il.locationId) === locIdStr)
           .first();
 
         if (existingMapping && existingMapping.id) {
@@ -222,9 +230,10 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
         } else {
           await db.itemLocations.add({
             tenantId: currentTenantId,
-            itemId: pItem.itemId,
-            locationId: locIdNum,
+            itemId: String(pItem.itemId),
+            locationId: locIdStr,
             quantity: pItem.quantity,
+            maxCapacity: 1000,
             updatedAt: new Date().toISOString()
           });
         }

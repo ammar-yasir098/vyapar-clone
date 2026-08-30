@@ -155,12 +155,12 @@ export function updateServerItem(id: number, itemData: any) {
   }
 }
 
-export async function adjustServerItemStock(id: number, delta: number) {
+export async function adjustServerItemStock(id: number, delta: number, tenantId?: string, skuCode?: string, name?: string) {
   try {
     const res = await fetchWithTimeout(`${API_BASE_URL}/items/${id}/stock`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ delta })
+      body: JSON.stringify({ delta, tenantId, skuCode, name })
     });
     return await res.json();
   } catch (err: any) {
@@ -168,9 +168,15 @@ export async function adjustServerItemStock(id: number, delta: number) {
   }
 }
 
-export async function deleteServerItem(id: number) {
+export async function deleteServerItem(id: number, tenantId?: string, skuCode?: string, name?: string) {
   try {
-    const res = await fetchWithTimeout(`${API_BASE_URL}/items/${id}`, { method: 'DELETE' });
+    const params = new URLSearchParams();
+    if (tenantId) params.append('tenantId', tenantId);
+    if (skuCode) params.append('skuCode', skuCode);
+    if (name) params.append('name', name);
+    const queryString = params.toString() ? `?${params.toString()}` : '';
+
+    const res = await fetchWithTimeout(`${API_BASE_URL}/items/${id}${queryString}`, { method: 'DELETE' });
     return await res.json();
   } catch (err: any) {
     return { success: false, error: err.message };

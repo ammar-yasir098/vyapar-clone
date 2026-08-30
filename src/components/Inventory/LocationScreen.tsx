@@ -185,7 +185,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         for (const wh of warehouses) {
           if (!wh.id) continue;
           const tenantKey = wh.tenantId || 'default-tenant';
-          const key = `${tenantKey}_${(wh.code || wh.name).toLowerCase()}`;
+          const key = `${tenantKey}_${(wh.code || wh.name || '').toLowerCase()}`;
 
           if (whKeyToKeptId.has(key)) {
             duplicateWhIdsToDelete.push(wh.id);
@@ -202,7 +202,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
             const parentWh = warehouses.find(w => w.id === child.parentId);
             if (parentWh) {
               const tenantKey = parentWh.tenantId || 'default-tenant';
-              const key = `${tenantKey}_${(parentWh.code || parentWh.name).toLowerCase()}`;
+              const key = `${tenantKey}_${(parentWh.code || parentWh.name || '').toLowerCase()}`;
               const keptId = whKeyToKeptId.get(key);
               if (keptId && child.id) {
                 await db.locations.update(child.id, { parentId: keptId });
@@ -238,7 +238,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
             const parentZone = zoneMap.get(loc.parentId);
             const parentWh = parentZone?.parentId ? whMap.get(parentZone.parentId) : null;
             if (parentWh) {
-              const whCode = (parentWh.code || parentWh.name).toUpperCase();
+              const whCode = (parentWh.code || parentWh.name || '').toUpperCase();
               const locCode = (loc.code || '').toUpperCase();
               if (whCode.startsWith('GGS') && locCode.startsWith('SW-LHR')) {
                 alienRackIdsToDelete.push(loc.id);
@@ -261,7 +261,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
         for (const zone of zones) {
           if (!zone.id || !zone.parentId) continue;
-          const key = `p${zone.parentId}_${(zone.code || zone.name).toLowerCase()}`;
+          const key = `p${zone.parentId}_${(zone.code || zone.name || '').toLowerCase()}`;
           if (zoneKeyToKeptId.has(key)) {
             duplicateZoneIdsToDelete.push(zone.id);
           } else {
@@ -276,7 +276,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           for (const rack of childRacks) {
             const parentZone = zones.find(z => z.id === rack.parentId);
             if (parentZone && parentZone.parentId) {
-              const key = `p${parentZone.parentId}_${(parentZone.code || parentZone.name).toLowerCase()}`;
+              const key = `p${parentZone.parentId}_${(parentZone.code || parentZone.name || '').toLowerCase()}`;
               const keptZoneId = zoneKeyToKeptId.get(key);
               if (keptZoneId && rack.id) {
                 await db.locations.update(rack.id, { parentId: keptZoneId });
@@ -295,7 +295,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
         for (const rack of racks) {
           if (!rack.id || !rack.parentId) continue;
-          const key = `z${rack.parentId}_${(rack.code || rack.name).toLowerCase()}`;
+          const key = `z${rack.parentId}_${(rack.code || rack.name || '').toLowerCase()}`;
           if (rackKeyToKeptId.has(key)) {
             duplicateRackIdsToDelete.push(rack.id);
           } else {
@@ -307,7 +307,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           for (const dupRackId of duplicateRackIdsToDelete) {
             const dupRack = racks.find(r => r.id === dupRackId);
             if (dupRack && dupRack.parentId) {
-              const key = `z${dupRack.parentId}_${(dupRack.code || dupRack.name).toLowerCase()}`;
+              const key = `z${dupRack.parentId}_${(dupRack.code || dupRack.name || '').toLowerCase()}`;
               const keptRackId = rackKeyToKeptId.get(key);
               if (keptRackId) {
                 const mapsToMove = allMappings.filter(m => String(m.locationId) === String(dupRackId));
@@ -716,7 +716,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         if (!item.id || item.currentStock <= 0) continue;
 
         // Check existing assigned qty
-        const existingMaps = await db.itemLocations.filter(il => (il.tenantId || 'default-tenant') === activeTenantId && (Number(il.itemId) === Number(item.id) || (item.skuCode && (il as any).skuCode && String((il as any).skuCode).toLowerCase() === item.skuCode.toLowerCase()))).toArray();
+        const existingMaps = await db.itemLocations.filter(il => (il.tenantId || 'default-tenant') === activeTenantId && (String(il.itemId) === String(item.id) || (item.skuCode && (il as any).skuCode && String((il as any).skuCode).toLowerCase() === item.skuCode.toLowerCase()))).toArray();
         const alreadyAssigned = existingMaps.reduce((sum, m) => sum + m.quantity, 0);
         let unassignedToPlace = Math.max(0, item.currentStock - alreadyAssigned);
 
@@ -726,12 +726,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         for (const rack of availableRacks) {
           if (unassignedToPlace <= 0) break;
           const rackCap = rack.capacity || 100;
-          const currentOccupancy = allItemLocations.filter(il => Number(il.locationId) === Number(rack.id)).reduce((sum, il) => sum + il.quantity, 0);
+          const currentOccupancy = allItemLocations.filter(il => String(il.locationId) === String(rack.id)).reduce((sum, il) => sum + il.quantity, 0);
           const spaceAvailable = Math.max(0, rackCap - currentOccupancy);
 
           if (spaceAvailable > 0) {
             const placeQty = Math.min(unassignedToPlace, spaceAvailable);
-            const existingRackMap = existingMaps.find(m => Number(m.locationId) === Number(rack.id));
+            const existingRackMap = existingMaps.find(m => String(m.locationId) === String(rack.id));
 
             if (existingRackMap && existingRackMap.id) {
               const newQty = existingRackMap.quantity + placeQty;
@@ -958,9 +958,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     if (!itemSearchQuery.trim()) return items;
     const q = itemSearchQuery.toLowerCase();
     return items.filter(i =>
-      i.name.toLowerCase().includes(q) ||
-      i.skuCode.toLowerCase().includes(q) ||
-      i.barcode.toLowerCase().includes(q)
+      (i.name || '').toLowerCase().includes(q) ||
+      (i.skuCode || '').toLowerCase().includes(q) ||
+      (i.barcode || '').toLowerCase().includes(q)
     );
   }, [items, itemSearchQuery]);
 
@@ -1055,19 +1055,19 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     const max = loc.capacity || 100;
 
     // Collect all location IDs that belong to this location (itself + child zones/racks)
-    const targetLocIds = new Set<number>();
-    targetLocIds.add(Number(loc.id));
+    const targetLocIds = new Set<string>();
+    targetLocIds.add(String(loc.id));
 
     if (loc.type === 'WAREHOUSE') {
       locations.forEach(l => {
         if (l.id && (String(l.parentId) === String(loc.id) || (loc.code && l.code.startsWith(loc.code + '-')))) {
-          targetLocIds.add(Number(l.id));
+          targetLocIds.add(String(l.id));
         }
       });
     } else if (loc.type === 'ZONE') {
       locations.forEach(l => {
         if (l.type === 'SHELF' && l.id && (String(l.parentId) === String(loc.id) || (loc.code && l.code.startsWith(loc.code + '-')))) {
-          targetLocIds.add(Number(l.id));
+          targetLocIds.add(String(l.id));
         }
       });
     }
@@ -1093,11 +1093,11 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     });
 
     const totalAssignedAtLoc = mapsToUse
-      .filter(il => targetLocIds.has(Number(il.locationId)))
+      .filter(il => targetLocIds.has(String(il.locationId)))
       .reduce((sum, il) => sum + (il.quantity || 0), 0);
 
     let currentMappingQty = 0;
-    if (relocateItem && relocateItem.currentMapping && targetLocIds.has(Number(relocateItem.currentMapping.locationId))) {
+    if (relocateItem && relocateItem.currentMapping && targetLocIds.has(String(relocateItem.currentMapping.locationId))) {
       currentMappingQty = relocateItem.currentMapping.quantity || 0;
     }
 
@@ -1111,7 +1111,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   // Helper to dynamically update Available Capacity & Quantity when picking a target location
   const updateCapacityDefaults = (targetLocId: string) => {
     if (!targetLocId) return;
-    const targetLoc = locationMap.get(Number(targetLocId)) || locations.find(l => String(l.id) === String(targetLocId));
+    const targetLoc = locationMap.get(targetLocId) || locationMap.get(String(targetLocId)) || locations.find(l => String(l.id) === String(targetLocId));
     if (targetLoc) {
       const capInfo = getLocCapacityInfo(targetLoc);
       setRelocateMaxCap(String(capInfo.remaining));
@@ -1171,16 +1171,22 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
   const getLocationFullPath = (locId?: string | number): { warehouse: string; shelf: string; fullPath: string } => {
     const warehouseName = getTrueWarehouseName(locId);
-    if (locId === undefined || locId === null || !locationMap.has(locId)) {
+    if (locId === undefined || locId === null) {
       return { warehouse: warehouseName, shelf: 'Unassigned', fullPath: 'Unassigned' };
     }
 
-    const targetLoc = locationMap.get(locId)!;
+    const targetLoc = locationMap.get(locId) || locationMap.get(String(locId));
+    if (!targetLoc) {
+      return { warehouse: warehouseName, shelf: 'Unassigned', fullPath: 'Unassigned' };
+    }
+
     let curr = targetLoc;
     const pathNames: string[] = [curr.name];
 
-    while (curr.parentId !== undefined && curr.parentId !== null && locationMap.has(curr.parentId)) {
-      curr = locationMap.get(curr.parentId)!;
+    while (curr.parentId !== undefined && curr.parentId !== null) {
+      const parent = locationMap.get(curr.parentId) || locationMap.get(String(curr.parentId));
+      if (!parent) break;
+      curr = parent;
       if (curr.type === 'WAREHOUSE') {
         const trueWhName = getTrueWarehouseName(curr.id);
         pathNames.unshift(trueWhName);
@@ -1307,10 +1313,10 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         const rawMappings = itemLocationMapByItemId.get(item.id) || itemLocationMapByItemId.get(String(item.id)) || [];
         const validMappings = rawMappings.filter(m => m.quantity > 0 && (locationMap.has(m.locationId as any) || locationMap.has(String(m.locationId))));
         const totalAssignedQty = validMappings.reduce((sum, m) => sum + m.quantity, 0);
-        const unassignedQty = Math.max(0, item.currentStock - totalAssignedQty);
+        const unassignedQty = Math.max(0, (item.currentStock || 0) - totalAssignedQty);
 
         if (totalAssignedQty > 0) assigned++;
-        if (unassignedQty > 0 || validMappings.length === 0) unassigned++;
+        if ((item.currentStock || 0) > 0 && unassignedQty > 0) unassigned++;
       }
     });
     return { assignedCount: assigned, unassignedCount: unassigned };
@@ -1454,19 +1460,19 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       // Search term filter
       const matchesSearch =
         !searchTerm ||
-        row.item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.item.skuCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.item.barcode.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (row.item?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (row.item?.skuCode || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (row.item?.barcode || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         row.allocatedMappings.some(m =>
-          m.shelfCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          m.fullPath.toLowerCase().includes(searchTerm.toLowerCase())
+          (m.shelfCode || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (m.fullPath || '').toLowerCase().includes(searchTerm.toLowerCase())
         );
 
       // Barcode quick search filter
       const matchesBarcode =
         !barcodeSearch ||
-        row.item.barcode.toLowerCase() === barcodeSearch.trim().toLowerCase() ||
-        row.item.skuCode.toLowerCase() === barcodeSearch.trim().toLowerCase();
+        ((row.item?.barcode || '').toLowerCase() === barcodeSearch.trim().toLowerCase()) ||
+        ((row.item?.skuCode || '').toLowerCase() === barcodeSearch.trim().toLowerCase());
 
       // Warehouse filter
       const matchesWh =
@@ -1475,7 +1481,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         row.allocatedMappings.some(m => m.warehouseName === selectedWarehouseFilter);
 
       // Unassigned filter
-      const matchesUnassigned = !showUnassignedOnly || row.unassignedQty > 0 || !row.hasAllocations;
+      const matchesUnassigned = !showUnassignedOnly || (row.totalStock > 0 && row.unassignedQty > 0);
 
       return matchesSearch && matchesBarcode && matchesWh && matchesUnassigned;
     });
@@ -1571,28 +1577,27 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   // Inter-Location Transfer Handler
   const handleExecuteTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
-    const itemIdNum = Number(transferItemId);
-    const srcLocIdNum = Number(transferSourceLocId);
-    const destLocIdNum = Number(transferDestLocId);
     const qty = Number(transferQty);
 
-    if (!itemIdNum || !srcLocIdNum || !destLocIdNum || qty <= 0) {
+    if (!transferItemId || !transferSourceLocId || !transferDestLocId || isNaN(qty) || qty <= 0) {
       showToast('Please fill all transfer details with a valid quantity.', 'error');
       return;
     }
 
-    if (srcLocIdNum === destLocIdNum) {
+    if (String(transferSourceLocId) === String(transferDestLocId)) {
       showToast('Source and Destination locations must be different.', 'error');
       return;
     }
 
     try {
+      const tenantId = activeTenantId;
+
       // 1. Deduct from Source Location Mapping
       let srcMapping = await db.itemLocations
-        .filter(il => (il.tenantId || 'default-tenant') === tenantId && Number(il.itemId) === itemIdNum && Number(il.locationId) === srcLocIdNum)
+        .filter(il => (il.tenantId || 'default-tenant') === tenantId && String(il.itemId) === String(transferItemId) && String(il.locationId) === String(transferSourceLocId))
         .first();
 
-      const itemObj = items.find(i => i.id === itemIdNum);
+      const itemObj = items.find(i => String(i.id) === String(transferItemId));
 
       // Auto-fallback: If item has stock in store but no explicit source mapping record yet
       if (!srcMapping && itemObj && itemObj.currentStock >= qty) {
@@ -1622,7 +1627,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         updatedAt: new Date().toISOString()
       });
       ClientSyncManager.logMutation('ITEM_LOCATION', String(srcMapping.id), 'UPDATE', { ...srcMapping, quantity: updatedSrcQty, updatedAt: new Date().toISOString() });
-      saveServerItemLocation({ tenantId, itemId: itemIdNum, skuCode: itemObj?.skuCode, name: itemObj?.name, locationId: srcLocIdNum, quantity: updatedSrcQty }).catch(() => { });
+      saveServerItemLocation({ tenantId, itemId: Number(transferItemId) || 0, skuCode: itemObj?.skuCode, name: itemObj?.name, locationId: Number(transferSourceLocId) || 0, quantity: updatedSrcQty }).catch(() => { });
 
       // 2. Add to Destination Location Mapping
       const destMapping = await db.itemLocations
@@ -1650,7 +1655,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         await db.itemLocations.put(destMapPayload);
         ClientSyncManager.logMutation('ITEM_LOCATION', newDestMapId, 'INSERT', destMapPayload);
       }
-      saveServerItemLocation({ tenantId, itemId: itemIdNum, skuCode: itemObj?.skuCode, name: itemObj?.name, locationId: destLocIdNum, quantity: updatedDestQty }).catch(() => { });
+      saveServerItemLocation({ tenantId, itemId: Number(transferItemId) || 0, skuCode: itemObj?.skuCode, name: itemObj?.name, locationId: Number(transferDestLocId) || 0, quantity: updatedDestQty }).catch(() => { });
 
       // 3. Log Stock Transfer History
       const trfId = `trf-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
@@ -1671,12 +1676,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       createServerStockTransfer(transferPayload).catch(() => { });
       ClientSyncManager.logMutation('STOCK_TRANSFER', trfId, 'INSERT', transferPayload);
 
-      const selectedItem = items.find(i => i.id === itemIdNum);
-      const srcLoc = locationMap.get(srcLocIdNum);
-      const destLoc = locationMap.get(destLocIdNum);
+      const selectedItem = items.find(i => String(i.id) === String(transferItemId));
+      const srcLoc = locations.find(l => String(l.id) === String(transferSourceLocId));
+      const destLoc = locations.find(l => String(l.id) === String(transferDestLocId));
 
       showToast(
-        `Transferred ${qty} PCS of ${selectedItem?.name || 'Item'} from ${srcLoc?.name || 'Source'} to ${destLoc?.name || 'Destination'}.`,
+        `Transferred ${qty} PCS of ${selectedItem?.name || 'Item'} from ${srcLoc?.name || 'Source Location'} to ${destLoc?.name || 'Destination Location'}.`,
         'success'
       );
 
@@ -1700,7 +1705,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     }
 
     const item = relocateItem.item;
-    const destLocIdNum = Number(relocateDestLocId);
+    const destLocId = relocateDestLocId;
     const qty = Number(relocateQty);
     const cap = Number(relocateMaxCap);
 
@@ -1709,7 +1714,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       return;
     }
 
-    const selectedDestLoc = locationMap.get(destLocIdNum);
+    const selectedDestLoc = locationMap.get(destLocId) || locationMap.get(String(destLocId));
     if (selectedDestLoc) {
       const capInfo = getLocCapacityInfo(selectedDestLoc);
       if (qty > capInfo.remaining) {
@@ -1724,12 +1729,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     try {
       // Find if a mapping already exists at the destination locationId for this active tenant
       const existingDestMapping = await db.itemLocations
-        .filter(il => (il.tenantId || 'default-tenant') === tenantId && Number(il.itemId) === Number(item.id) && Number(il.locationId) === destLocIdNum)
+        .filter(il => (il.tenantId || 'default-tenant') === tenantId && (String(il.itemId) === String(item.id) || Number(il.itemId) === Number(item.id)) && String(il.locationId) === String(destLocId))
         .first();
 
       if (relocateItem.currentMapping && relocateItem.currentMapping.id) {
-        const oldLocId = Number(relocateItem.currentMapping.locationId);
-        if (oldLocId !== destLocIdNum) {
+        const oldLocId = String(relocateItem.currentMapping.locationId);
+        if (oldLocId !== String(destLocId)) {
           // Moving from old location to new destination location
           if (existingDestMapping && existingDestMapping.id) {
             await db.itemLocations.update(existingDestMapping.id, {
@@ -1743,7 +1748,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           } else {
             await db.itemLocations.update(relocateItem.currentMapping.id, {
               tenantId,
-              locationId: destLocIdNum,
+              locationId: destLocId,
               quantity: qty,
               maxCapacity: cap,
               updatedAt: new Date().toISOString()
@@ -1769,12 +1774,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
           });
           ClientSyncManager.logMutation('ITEM_LOCATION', String(existingDestMapping.id), 'UPDATE', { ...existingDestMapping, quantity: qty, maxCapacity: cap, updatedAt: new Date().toISOString() });
         } else {
-          const mapId = `map-${item.id}-${destLocIdNum}`;
+          const mapId = `map-${item.id}-${destLocId}`;
           const mapPayload = {
             id: mapId,
             tenantId,
             itemId: String(item.id!),
-            locationId: String(destLocIdNum),
+            locationId: String(destLocId),
             quantity: qty,
             maxCapacity: cap,
             updatedAt: new Date().toISOString()
@@ -1784,8 +1789,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         }
       }
 
-      const destLoc = locationMap.get(destLocIdNum);
-      saveServerItemLocation({ tenantId, itemId: item.id!, skuCode: item.skuCode, name: item.name, locationId: destLocIdNum, locationCode: destLoc?.code, quantity: qty, maxCapacity: cap }).catch(() => { });
+      const destLoc = locationMap.get(destLocId) || locationMap.get(String(destLocId));
+      saveServerItemLocation({ tenantId, itemId: item.id!, skuCode: item.skuCode, name: item.name, locationId: destLocId, locationCode: destLoc?.code, quantity: qty, maxCapacity: cap }).catch(() => { });
       showToast(`Item "${item.name}" assigned to "${destLoc?.name || 'Location'}" successfully!`, 'success');
       setRelocateItem(null);
     } catch (err: any) {
@@ -2177,10 +2182,15 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                   <MapPin className="w-3 h-3 text-amber-600" />
                                   {validAllocations.length} Racks ({group.totalAssignedQty} {group.item.unitType}) + 📦 {group.unassignedQty} Unallocated
                                 </span>
-                              ) : (
+                              ) : group.totalStock > 0 ? (
                                 <span className="px-2.5 py-1 rounded-full bg-amber-50/90 text-amber-800 font-extrabold text-[10.5px] border border-amber-200 inline-flex items-center gap-1 cursor-pointer hover:bg-amber-100 transition" onClick={() => handleAutoAllocateStock(group.item)} title="Click to auto-allocate into available warehouse racks">
                                   <Package className="w-3 h-3 text-amber-600" />
                                   <span>Unallocated Warehouse Stock ({group.totalStock} {group.item.unitType})</span>
+                                </span>
+                              ) : (
+                                <span className="px-2.5 py-1 rounded-full bg-slate-100/90 text-slate-500 font-extrabold text-[10.5px] border border-slate-200 inline-flex items-center gap-1">
+                                  <Package className="w-3 h-3 text-slate-400" />
+                                  <span>Out of Stock (0 {group.item.unitType})</span>
                                 </span>
                               )}
                             </td>
@@ -2193,7 +2203,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                             {/* Actions */}
                             <td className="text-center" onClick={e => e.stopPropagation()}>
                               <div className="inline-flex items-center gap-1.5">
-                                {group.unassignedQty > 0 && (
+                                {group.unassignedQty > 0 && group.totalStock > 0 && (
                                   <button
                                     onClick={() => handleAutoAllocateStock(group.item)}
                                     className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 text-[11px] font-extrabold transition cursor-pointer flex items-center gap-1 border border-amber-300 shadow-2xs"
@@ -3490,7 +3500,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
                     {/* Selected Target Path Summary */}
                     {relocateDestLocId && (() => {
-                      const fullInfo = getLocationFullPath(Number(relocateDestLocId));
+                      const fullInfo = getLocationFullPath(relocateDestLocId);
                       return (
                         <div className="bg-purple-50 p-2.5 rounded-xl border border-purple-200/80 text-xs flex items-center justify-between font-bold">
                           <span className="text-slate-500 font-medium">Selected Location:</span>

@@ -78,26 +78,49 @@ export function getActiveTenantId(business?: { tenantId?: string }): string {
 export async function seedWalkInCustomerForTenant(tenantId: string) {
   if (!tenantId) return;
   const walkIns = await db.parties
-    .filter(p => p.tenantId === tenantId && p.name === 'Walk-in Retail Customer')
+    .filter(p => (p.tenantId || 'default-tenant') === tenantId && (p.name === 'Walk-in Customer' || p.name === 'Walk-in Retail Customer'))
     .toArray();
 
+  let targetParty: Party | null = null;
+
   if (walkIns.length === 0) {
-    await db.parties.add({
+    const partyData: Party = {
       tenantId,
-      name: 'Walk-in Retail Customer',
+      name: 'Walk-in Customer',
       phone: '03009999999',
       type: 'CUSTOMER',
       openingBalance: 0,
       balanceType: 'RECEIVABLE',
       currentBalance: 0,
       createdAt: new Date().toISOString()
-    });
-  } else if (walkIns.length > 1) {
-    for (let i = 1; i < walkIns.length; i++) {
-      if (walkIns[i].id) {
-        await db.parties.delete(walkIns[i].id!);
+    };
+    const id = await db.parties.add(partyData);
+    targetParty = { ...partyData, id };
+  } else {
+    targetParty = walkIns[0];
+    if (walkIns.length > 1) {
+      for (let i = 1; i < walkIns.length; i++) {
+        if (walkIns[i].id) {
+          await db.parties.delete(walkIns[i].id!);
+        }
       }
     }
+  }
+
+  if (targetParty && targetParty.id) {
+    try {
+      const { syncManager } = await import('../services/sync');
+      await syncManager.logMutation('PARTY', String(targetParty.id), 'INSERT', {
+        id: targetParty.id,
+        tenantId,
+        name: targetParty.name || 'Walk-in Customer',
+        phone: targetParty.phone || '03009999999',
+        type: 'CUSTOMER',
+        openingBalance: 0,
+        balanceType: 'RECEIVABLE',
+        currentBalance: 0
+      });
+    } catch {}
   }
 }
 
@@ -173,6 +196,75 @@ export async function seedDatabaseIfEmpty(tenantId?: string) {
 
   await seedWalkInCustomerForTenant(tId);
   await seedCashAccountForTenant(tId);
+}
+
+/**
+ * Automatically allocates or updates stock to the store's primary Warehouse location mapping.
+ */
+export async function allocateStockToMainWarehouse(
+  tenantId: string,
+  itemId: string | number,
+  deltaQty: number,
+  skuCode?: string,
+  itemName?: string
+) {
+  if (!tenantId || !itemId || deltaQty === 0) return;
+
+  try {
+    const locs = await db.locations.filter(l => (l.tenantId || 'default-tenant') === tenantId && l.type === 'WAREHOUSE').toArray();
+    let mainWh = locs[0];
+
+    if (!mainWh) {
+      const mainWhId = `wh-main-${tenantId}`;
+      mainWh = {
+        id: mainWhId,
+        tenantId,
+        name: 'Main Store / Godown',
+        code: 'WH-MAIN',
+        type: 'WAREHOUSE',
+        capacity: 5000,
+        description: 'Primary retail storefront warehouse',
+        createdAt: new Date().toISOString()
+      };
+      await db.locations.put(mainWh);
+    }
+
+    const whId = String(mainWh.id);
+    const existingMap = await db.itemLocations
+      .filter(il => (il.tenantId || 'default-tenant') === tenantId && String(il.itemId) === String(itemId) && String(il.locationId) === whId)
+      .first();
+
+    const { syncManager } = await import('../services/sync');
+    const { saveServerItemLocation } = await import('../services/api');
+
+    if (existingMap && existingMap.id) {
+      const newQty = Math.max(0, (existingMap.quantity || 0) + deltaQty);
+      await db.itemLocations.update(existingMap.id, {
+        quantity: newQty,
+        updatedAt: new Date().toISOString()
+      });
+      syncManager.logMutation('ITEM_LOCATION', String(existingMap.id), 'UPDATE', { ...existingMap, quantity: newQty, updatedAt: new Date().toISOString() });
+      saveServerItemLocation({ tenantId, itemId: Number(itemId) || 0, skuCode: skuCode || '', name: itemName || '', locationId: Number(whId) || 0, quantity: newQty }).catch(() => {});
+    } else {
+      const initialQty = Math.max(0, deltaQty);
+      const newMapId = `map-${itemId}-${whId}`;
+      const newPayload = {
+        id: newMapId,
+        tenantId,
+        itemId: String(itemId),
+        locationId: whId,
+        quantity: initialQty,
+        maxCapacity: 10000,
+        skuCode: skuCode || '',
+        updatedAt: new Date().toISOString()
+      };
+      await db.itemLocations.put(newPayload);
+      syncManager.logMutation('ITEM_LOCATION', newMapId, 'INSERT', newPayload);
+      saveServerItemLocation({ tenantId, itemId: Number(itemId) || 0, skuCode: skuCode || '', name: itemName || '', locationId: Number(whId) || 0, quantity: initialQty }).catch(() => {});
+    }
+  } catch (err) {
+    console.error('Error in allocateStockToMainWarehouse:', err);
+  }
 }
 
 /**

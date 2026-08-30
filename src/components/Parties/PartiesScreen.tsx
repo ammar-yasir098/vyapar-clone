@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
   Users,
@@ -15,7 +15,7 @@ import {
   Pencil
 } from 'lucide-react';
 import { Party, PartyType, BalanceType, Invoice, BusinessDetails } from '../../types';
-import { db, getActiveTenantId } from '../../db';
+import { db, getActiveTenantId, seedWalkInCustomerForTenant } from '../../db';
 import { createServerParty, recordServerPartyPayment, updateServerParty, deleteServerParty } from '../../services/api';
 import { syncManager } from '../../services/sync';
 
@@ -44,6 +44,12 @@ export const PartiesScreen: React.FC<PartiesScreenProps> = ({ parties, invoices 
 
 
   const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+
+  useEffect(() => {
+    seedWalkInCustomerForTenant(activeTenantId).then(() => {
+      onPartyUpdated();
+    }).catch(() => {});
+  }, [activeTenantId]);
 
   const allInvoices = useLiveQuery(() => db.invoices.filter(i => (i.tenantId || 'default-tenant') === activeTenantId).toArray(), [activeTenantId]) || [];
   const allPurchaseBills = useLiveQuery(() => db.purchaseBills.filter(b => (b.tenantId || 'default-tenant') === activeTenantId).toArray(), [activeTenantId]) || [];

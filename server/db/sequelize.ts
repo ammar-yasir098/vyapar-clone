@@ -813,29 +813,33 @@ StoreWarehouseAccess.init(
  * Bootstrap database creation and sync Sequelize ORM models
  */
 export async function bootstrapSequelize() {
-  const rootClient = new Client({
-    host,
-    port,
-    user,
-    password,
-    database: 'postgres',
-    connectionTimeoutMillis: 3000
-  });
-
   try {
-    await rootClient.connect();
-    console.log(`🔌 Checking PostgreSQL server connection at ${host}:${port}...`);
+    const rootClient = new Client({
+      host,
+      port,
+      user,
+      password,
+      database: 'postgres',
+      connectionTimeoutMillis: 3000
+    });
 
-    const checkRes = await rootClient.query(
-      `SELECT 1 FROM pg_database WHERE datname = $1`,
-      [databaseName]
-    );
+    try {
+      await rootClient.connect();
+      console.log(`🔌 Checking PostgreSQL server connection at ${host}:${port}...`);
 
-    if (checkRes.rows.length === 0) {
-      console.log(`🔨 Creating database '${databaseName}' for Sequelize ORM...`);
-      await rootClient.query(`CREATE DATABASE "${databaseName}"`);
+      const checkRes = await rootClient.query(
+        `SELECT 1 FROM pg_database WHERE datname = $1`,
+        [databaseName]
+      );
+
+      if (checkRes.rows.length === 0) {
+        console.log(`🔨 Creating database '${databaseName}' for Sequelize ORM...`);
+        await rootClient.query(`CREATE DATABASE "${databaseName}"`);
+      }
+      await rootClient.end();
+    } catch (rootErr: any) {
+      console.warn(`⚠️ PostgreSQL root database check note: ${rootErr.message}. Attempting direct connection to '${databaseName}'...`);
     }
-    await rootClient.end();
 
     await sequelize.authenticate();
     console.log(`✅ Sequelize ORM successfully authenticated with PostgreSQL database '${databaseName}'`);
@@ -844,8 +848,8 @@ export async function bootstrapSequelize() {
     await sequelize.query(`DROP TABLE IF EXISTS "journal_entries" CASCADE;`).catch(() => {});
     await sequelize.query(`DROP TABLE IF EXISTS "ledger_accounts" CASCADE;`).catch(() => {});
 
-    // Sync ORM models with PostgreSQL tables
-    await sequelize.sync({ alter: true });
+    // Sync ORM models with PostgreSQL tables safely (creates missing tables without heavy locks)
+    await sequelize.sync();
     console.log(`✨ Sequelize Migration Complete: Document-driven database tables ready!`);
     isSequelizeConnected = true;
   } catch (err: any) {

@@ -52,30 +52,29 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
 
   const tenantId = getActiveTenantId(business);
 
-  // Auto-purge orphaned or zone-level item location mappings from IndexedDB & Cloud Server
+  // Auto-purge orphaned or invalid item location mappings from IndexedDB & Cloud Server
   React.useEffect(() => {
     if (locations.length === 0 || itemLocations.length === 0) return;
 
-    const validRackIds = new Set(locations.filter(l => l.type === 'SHELF').map(l => Number(l.id)));
-    const zoneLocIds = new Set(locations.filter(l => l.type === 'ZONE' || l.type === 'WAREHOUSE').map(l => Number(l.id)));
+    const validLocIds = new Set(locations.map(l => String(l.id)));
 
-    // Purge records that are either non-existent or pointing to broad ZONE containers
+    // Purge records that point to non-existent location IDs
     const invalidMappings = itemLocations.filter(il => 
-      il.id && (!validRackIds.has(Number(il.locationId)) || zoneLocIds.has(Number(il.locationId)))
+      il.id && !validLocIds.has(String(il.locationId))
     );
 
     if (invalidMappings.length > 0) {
-      console.log(`[Auto-Purge] Deleting ${invalidMappings.length} invalid/zone mapping records from IndexedDB...`, invalidMappings);
+      console.log(`[Auto-Purge] Deleting ${invalidMappings.length} invalid mapping records from IndexedDB...`, invalidMappings);
       db.transaction('rw', db.itemLocations, async () => {
         for (const inv of invalidMappings) {
           if (inv.id) {
             await db.itemLocations.delete(inv.id);
             saveServerItemLocation({
               tenantId,
-              itemId: Number(inv.itemId),
+              itemId: String(inv.itemId) as any,
               skuCode: '',
               name: '',
-              locationId: Number(inv.locationId),
+              locationId: String(inv.locationId) as any,
               quantity: 0
             }).catch(() => {});
           }
@@ -86,9 +85,9 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
 
   // Helper to match item location mapping to product (handles local ID, cloud ID, and SKU)
   const isItemMatch = (il: ItemLocationMapping, item: Item) => {
-    if (Number(il.itemId) === Number(item.id)) return true;
+    if (String(il.itemId) === String(item.id)) return true;
     const cloudId = (item as any).cloudId;
-    if (cloudId && Number(il.itemId) === Number(cloudId)) return true;
+    if (cloudId && String(il.itemId) === String(cloudId)) return true;
     const mapSku = (il as any).skuCode;
     if (item.skuCode && mapSku && item.skuCode.toLowerCase() === String(mapSku).toLowerCase()) return true;
     return false;
@@ -116,9 +115,8 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
     whLocs.forEach(l => {
       whIds.add(l.id as any);
       whIds.add(String(l.id));
-      if (typeof l.id === 'number') whIds.add(l.id);
     });
-    const storeLocs = locations.filter(l => l.type === 'SHELF' || l.type === 'ZONE');
+    const storeLocs = locations.filter(l => l.type === 'SHELF' || l.type === 'ZONE' || l.isStoreFront || l.code?.includes('SF') || (l as any).type === 'STORE');
     return {
       whLocationIds: whIds,
       storeLocations: storeLocs,
@@ -134,18 +132,13 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
   // Helper to resolve specific item location mappings (filtering out non-existent/deleted location IDs)
   const getItemLocationMappings = useCallback((item: Item) => {
     if (!item.id) return [];
-    const targetItemId = Number(item.id);
-    const validItemIds = new Set(items.map(i => Number(i.id)));
-    const validLocationIds = new Set(locations.map(l => Number(l.id)));
-    const itemIdx = items.findIndex(i => Number(i.id) === targetItemId);
+    const validLocationIds = new Set(locations.map(l => String(l.id)));
 
     const matches = itemLocations.filter(il => {
-      let numId = Number(il.itemId);
-      // Ensure the location actually exists in locations table
-      if (!validLocationIds.has(Number(il.locationId))) return false;
+      if (!validLocationIds.has(String(il.locationId))) return false;
 
-      if (numId === targetItemId) return true;
-      if ((item as any).cloudId && numId === Number((item as any).cloudId)) return true;
+      if (String(il.itemId) === String(item.id)) return true;
+      if ((item as any).cloudId && String(il.itemId) === String((item as any).cloudId)) return true;
 
       const mapSku = (il as any).skuCode;
       if (mapSku && item.skuCode && String(mapSku).toLowerCase() === item.skuCode.toLowerCase()) return true;
@@ -165,22 +158,22 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
     });
 
     return Array.from(uniqueMap.values()).filter(
-      m => m.quantity > 0 && validLocationIds.has(Number(m.locationId))
+      m => m.quantity > 0 && validLocationIds.has(String(m.locationId))
     );
   }, [items, itemLocations, locations]);
 
   // Aggregate items with Store Front Stock vs Warehouse Stock
   const storeStockRows = useMemo(() => {
-    const locMap = new Map<number, InventoryLocation>();
-    locations.forEach(l => { if (l.id) locMap.set(Number(l.id), l); });
+    const locMap = new Map<string, InventoryLocation>();
+    locations.forEach(l => { if (l.id) locMap.set(String(l.id), l); });
 
     return items.map(item => {
       const validMappings = getItemLocationMappings(item);
 
       // Store Front Stock = explicit stock transferred/allocated to store front shelves or zones
       const storeMaps = validMappings.filter(m => {
-        const loc = locMap.get(Number(m.locationId));
-        return loc && (loc.isStoreFront || loc.code?.includes('SF') || loc.name?.toLowerCase().includes('store front') || (loc as any).type === 'STORE_FRONT');
+        const loc = locMap.get(String(m.locationId));
+        return loc && (loc.isStoreFront || loc.code?.includes('SF') || loc.code?.includes('STORE') || loc.name?.toLowerCase().includes('store') || (loc as any).type === 'STORE' || (loc as any).type === 'STORE_FRONT');
       });
       const storeStock = storeMaps.reduce((sum: number, m: ItemLocationMapping) => sum + m.quantity, 0);
 
@@ -213,9 +206,9 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
     return storeStockRows.filter(row => {
       const matchesSearch =
         !searchTerm ||
-        row.item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.item.skuCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.item.barcode.toLowerCase().includes(searchTerm.toLowerCase());
+        (row.item?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (row.item?.skuCode || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (row.item?.barcode || '').toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesFilter =
         filterStatus === 'ALL' ||
@@ -250,7 +243,7 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
 
     if (validMappings.length > 0) {
       return validMappings.map((m: ItemLocationMapping) => {
-        const loc = locations.find(l => Number(l.id) === Number(m.locationId));
+        const loc = locations.find(l => String(l.id) === String(m.locationId));
         const locCode = loc ? loc.code : `LOC-${m.locationId}`;
         const locName = loc ? loc.name : `Rack ${m.locationId}`;
         return {

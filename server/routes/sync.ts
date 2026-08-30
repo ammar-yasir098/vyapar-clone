@@ -296,13 +296,31 @@ syncRouter.get('/pull', async (req: Request, res: Response) => {
       return tId === tenantId || sId === tenantId;
     });
 
+    let finalParties = parties;
+    if (finalParties.length === 0 && tenantId) {
+      try {
+        const defaultWalkIn = await Party.create({
+          tenantId,
+          name: 'Walk-in Customer',
+          phone: '03009999999',
+          type: 'CUSTOMER',
+          openingBalance: 0,
+          balanceType: 'RECEIVABLE',
+          currentBalance: 0
+        });
+        finalParties = [defaultWalkIn];
+      } catch (e) {
+        // Soft catch if party already created
+      }
+    }
+
     return res.json({
       success: true,
       tenantId,
       serverVersion: cloudStore.getLatestVersion(),
       data: {
         items,
-        parties,
+        parties: finalParties,
         invoices,
         estimates,
         paymentsIn,
@@ -356,44 +374,70 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
 
         if (entityType === 'ITEM') {
           if (mutationType === 'DELETE') {
-            if (payload.skuCode && payload.skuCode.trim()) await Item.destroy({ where: { tenantId, skuCode: payload.skuCode.trim() } });
-            else if (payload.name) await Item.destroy({ where: { tenantId, name: payload.name.trim() } });
-          } else if (payload.name) {
-            let existing = null;
+            if (payload.id && !isNaN(Number(payload.id))) {
+              await Item.destroy({ where: { tenantId, id: Number(payload.id) }, transaction: dbTx }).catch(() => {});
+            }
             if (payload.skuCode && payload.skuCode.trim()) {
-              existing = await Item.findOne({ where: { tenantId, skuCode: payload.skuCode.trim() } });
+              await Item.destroy({ where: { tenantId, skuCode: payload.skuCode.trim() }, transaction: dbTx }).catch(() => {});
+            }
+            if (payload.name && payload.name.trim()) {
+              await Item.destroy({ where: { tenantId, name: payload.name.trim() }, transaction: dbTx }).catch(() => {});
+            }
+            if (payload.id) {
+              await ItemLocationMapping.destroy({ where: { tenantId, itemId: String(payload.id) }, transaction: dbTx }).catch(() => {});
+            }
+          } else if (payload.name || payload.skuCode || payload.id) {
+            let existing = null;
+            if (payload.id && !isNaN(Number(payload.id))) {
+              existing = await Item.findByPk(Number(payload.id), { transaction: dbTx }).catch(() => null);
+            }
+            if (!existing && payload.skuCode && payload.skuCode.trim()) {
+              existing = await Item.findOne({ where: { tenantId, skuCode: payload.skuCode.trim() }, transaction: dbTx });
             }
             if (!existing && payload.name) {
-              existing = await Item.findOne({ where: { tenantId, name: payload.name.trim() } });
+              existing = await Item.findOne({ where: { tenantId, name: payload.name.trim() }, transaction: dbTx });
             }
 
-            const itemData = {
-              tenantId,
-              name: (payload.name || '').trim(),
-              skuCode: (payload.skuCode || '').trim(),
-              barcode: payload.barcode || '',
-              hsnSacCode: payload.hsnSacCode || '1000',
-              unitType: payload.unitType || 'PCS',
-              purchasePrice: payload.purchasePrice || 0,
-              salesPrice: payload.salesPrice || 0,
-              minStockAlert: payload.minStockAlert || 5,
-              currentStock: payload.currentStock || 0,
-              cgstRate: payload.cgstRate || 0,
-              sgstRate: payload.sgstRate || 0,
-              igstRate: payload.igstRate || 0
-            };
-
             if (existing) {
-              await existing.update(itemData);
-            } else {
-              await Item.create(itemData);
+              const updateFields: any = { tenantId };
+              if (payload.name !== undefined) updateFields.name = String(payload.name).trim();
+              if (payload.skuCode !== undefined) updateFields.skuCode = String(payload.skuCode).trim();
+              if (payload.barcode !== undefined) updateFields.barcode = payload.barcode;
+              if (payload.hsnSacCode !== undefined) updateFields.hsnSacCode = payload.hsnSacCode;
+              if (payload.unitType !== undefined) updateFields.unitType = payload.unitType;
+              if (payload.purchasePrice !== undefined) updateFields.purchasePrice = Number(payload.purchasePrice) || 0;
+              if (payload.salesPrice !== undefined) updateFields.salesPrice = Number(payload.salesPrice) || 0;
+              if (payload.minStockAlert !== undefined) updateFields.minStockAlert = Number(payload.minStockAlert) || 5;
+              if (payload.currentStock !== undefined) updateFields.currentStock = Number(payload.currentStock) || 0;
+              if (payload.cgstRate !== undefined) updateFields.cgstRate = Number(payload.cgstRate) || 0;
+              if (payload.sgstRate !== undefined) updateFields.sgstRate = Number(payload.sgstRate) || 0;
+              if (payload.igstRate !== undefined) updateFields.igstRate = Number(payload.igstRate) || 0;
+
+              await existing.update(updateFields, { transaction: dbTx });
+            } else if (payload.name) {
+              const newItemData = {
+                tenantId,
+                name: (payload.name || '').trim(),
+                skuCode: (payload.skuCode || '').trim(),
+                barcode: payload.barcode || '',
+                hsnSacCode: payload.hsnSacCode || '1000',
+                unitType: payload.unitType || 'PCS',
+                purchasePrice: payload.purchasePrice || 0,
+                salesPrice: payload.salesPrice || 0,
+                minStockAlert: payload.minStockAlert || 5,
+                currentStock: payload.currentStock || 0,
+                cgstRate: payload.cgstRate || 0,
+                sgstRate: payload.sgstRate || 0,
+                igstRate: payload.igstRate || 0
+              };
+              await Item.create(newItemData, { transaction: dbTx });
             }
           }
         } else if (entityType === 'PARTY') {
           if (mutationType === 'DELETE' && payload.name) {
-            await Party.destroy({ where: { tenantId, name: payload.name.trim() } });
+            await Party.destroy({ where: { tenantId, name: payload.name.trim() }, transaction: dbTx });
           } else if (payload.name) {
-            let existing = await Party.findOne({ where: { tenantId, name: payload.name.trim() } });
+            let existing = await Party.findOne({ where: { tenantId, name: payload.name.trim() }, transaction: dbTx });
 
             const partyData = {
               tenantId,
@@ -408,24 +452,29 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
             };
 
             if (existing) {
-              await existing.update(partyData);
+              await existing.update(partyData, { transaction: dbTx });
             } else {
-              await Party.create(partyData);
+              await Party.create(partyData, { transaction: dbTx });
             }
           }
         } else if (entityType === 'INVOICE') {
           if (mutationType === 'DELETE' && payload.invoiceNumber) {
-            await Invoice.destroy({ where: { tenantId, invoiceNumber: payload.invoiceNumber } });
+            await Invoice.destroy({ where: { tenantId, invoiceNumber: payload.invoiceNumber }, transaction: dbTx });
           } else if (payload.invoiceNumber) {
             let existingInvoice = await Invoice.findOne({
-              where: { tenantId, invoiceNumber: payload.invoiceNumber }
+              where: { tenantId, invoiceNumber: payload.invoiceNumber },
+              transaction: dbTx
             });
 
-            // Verify partyId foreign key in PostgreSQL
+            // Resilient partyId foreign key resolution
             let validPartyId: number | null = null;
             if (payload.partyId && typeof payload.partyId === 'number') {
-              const partyExists = await Party.findByPk(payload.partyId);
-              if (partyExists) validPartyId = payload.partyId;
+              const partyExists = await Party.findByPk(payload.partyId, { transaction: dbTx });
+              if (partyExists) validPartyId = partyExists.id;
+            }
+            if (!validPartyId && payload.partyName) {
+              const partyByName = await Party.findOne({ where: { tenantId, name: payload.partyName.trim() }, transaction: dbTx });
+              if (partyByName) validPartyId = partyByName.id;
             }
 
             let targetInvoice: any;
@@ -441,10 +490,9 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
                 dueAmount: payload.dueAmount || 0,
                 paymentStatus: payload.paymentStatus || 'PAID',
                 paymentMethod: payload.paymentMethod || 'CASH'
-              });
+              }, { transaction: dbTx });
               targetInvoice = existingInvoice;
-              // Clear existing items before inserting new ones to avoid duplicates
-              await InvoiceItem.destroy({ where: { invoiceId: existingInvoice.get('id') as number } });
+              await InvoiceItem.destroy({ where: { invoiceId: existingInvoice.get('id') as number }, transaction: dbTx });
             } else {
               targetInvoice = await Invoice.create({
                 invoiceId: payload.invoiceId || `INV-${Date.now()}`,
@@ -463,7 +511,7 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
                 dueAmount: payload.dueAmount || 0,
                 paymentStatus: payload.paymentStatus || 'PAID',
                 paymentMethod: payload.paymentMethod || 'CASH'
-              });
+              }, { transaction: dbTx });
             }
 
             // Save line items with safe foreign key resolution
@@ -472,11 +520,15 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
                 const rawItemId = item.itemId || item.id;
                 let validItemId: number | null = null;
                 if (rawItemId && typeof rawItemId === 'number') {
-                  const itemExists = await Item.findByPk(rawItemId);
+                  const itemExists = await Item.findByPk(rawItemId, { transaction: dbTx });
                   if (itemExists) validItemId = rawItemId;
                 }
+                if (!validItemId && item.skuCode) {
+                  const itemBySku = await Item.findOne({ where: { tenantId, skuCode: String(item.skuCode).trim() }, transaction: dbTx });
+                  if (itemBySku) validItemId = itemBySku.id;
+                }
                 if (!validItemId && (item.itemName || item.name)) {
-                  const itemByName = await Item.findOne({ where: { name: item.itemName || item.name } });
+                  const itemByName = await Item.findOne({ where: { tenantId, name: (item.itemName || item.name).trim() }, transaction: dbTx });
                   if (itemByName) validItemId = itemByName.id;
                 }
 
@@ -491,18 +543,18 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
                   purchasePrice: item.purchasePrice || 0,
                   taxAmount: item.taxAmount || 0,
                   totalAmount: item.totalAmount || (item.quantity * item.unitPrice) || 0
-                });
+                }, { transaction: dbTx });
               }
             }
           }
         } else if (entityType === 'ESTIMATE') {
           const { Estimate, EstimateItem } = await import('../db/sequelize.js');
           if (mutationType === 'DELETE' && payload.id) {
-            await Estimate.destroy({ where: { id: payload.id } });
+            await Estimate.destroy({ where: { id: payload.id }, transaction: dbTx });
           } else if (payload.estimateId || payload.estimateNumber) {
-            let existingEst = payload.estimateId ? await Estimate.findOne({ where: { estimateId: payload.estimateId } }) : null;
+            let existingEst = payload.estimateId ? await Estimate.findOne({ where: { estimateId: payload.estimateId }, transaction: dbTx }) : null;
             if (!existingEst && payload.estimateNumber) {
-              existingEst = await Estimate.findOne({ where: { estimateNumber: payload.estimateNumber } });
+              existingEst = await Estimate.findOne({ where: { estimateNumber: payload.estimateNumber }, transaction: dbTx });
             }
 
             const estData = {
@@ -523,11 +575,11 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
 
             let targetEst: any;
             if (existingEst) {
-              await existingEst.update(estData);
+              await existingEst.update(estData, { transaction: dbTx });
               targetEst = existingEst;
-              await EstimateItem.destroy({ where: { estimateId: existingEst.get('id') as number } });
+              await EstimateItem.destroy({ where: { estimateId: existingEst.get('id') as number }, transaction: dbTx });
             } else {
-              targetEst = await Estimate.create(estData);
+              targetEst = await Estimate.create(estData, { transaction: dbTx });
             }
 
             if (payload.items && Array.isArray(payload.items)) {
@@ -542,15 +594,15 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
                   unitPrice: item.unitPrice || item.salesPrice || 0,
                   taxAmount: item.taxAmount || 0,
                   totalAmount: item.totalAmount || (item.quantity * (item.unitPrice || 0))
-                });
+                }, { transaction: dbTx });
               }
             }
           }
         } else if (entityType === 'PAYMENT_IN') {
           if (mutationType === 'DELETE' && payload.id) {
-            await PaymentIn.destroy({ where: { id: payload.id } });
+            await PaymentIn.destroy({ where: { id: payload.id }, transaction: dbTx });
           } else if (payload.receiptNumber) {
-            let existing = await PaymentIn.findOne({ where: { receiptNumber: payload.receiptNumber } });
+            let existing = await PaymentIn.findOne({ where: { receiptNumber: payload.receiptNumber }, transaction: dbTx });
             const payData = {
               receiptNumber: payload.receiptNumber,
               tenantId: tenantId || 'default-tenant',
@@ -562,18 +614,18 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               notes: payload.notes || ''
             };
             if (existing) {
-              await existing.update(payData);
+              await existing.update(payData, { transaction: dbTx });
             } else {
-              await PaymentIn.create(payData);
+              await PaymentIn.create(payData, { transaction: dbTx });
             }
           }
         } else if (entityType === 'PURCHASE_ORDER') {
           if (mutationType === 'DELETE' && payload.id) {
-            await PurchaseOrder.destroy({ where: { id: payload.id } });
+            await PurchaseOrder.destroy({ where: { id: payload.id }, transaction: dbTx });
           } else if (payload.poId || payload.poNumber) {
-            let existingPO = payload.poId ? await PurchaseOrder.findOne({ where: { poId: payload.poId } }) : null;
+            let existingPO = payload.poId ? await PurchaseOrder.findOne({ where: { poId: payload.poId }, transaction: dbTx }) : null;
             if (!existingPO && payload.poNumber) {
-              existingPO = await PurchaseOrder.findOne({ where: { poNumber: payload.poNumber } });
+              existingPO = await PurchaseOrder.findOne({ where: { poNumber: payload.poNumber }, transaction: dbTx });
             }
             const poData = {
               poId: payload.poId || `PO-${Date.now()}`,
@@ -592,11 +644,11 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
             };
             let targetPO: any;
             if (existingPO) {
-              await existingPO.update(poData);
+              await existingPO.update(poData, { transaction: dbTx });
               targetPO = existingPO;
-              await PurchaseOrderItem.destroy({ where: { purchaseOrderId: existingPO.get('id') as number } });
+              await PurchaseOrderItem.destroy({ where: { purchaseOrderId: existingPO.get('id') as number }, transaction: dbTx });
             } else {
-              targetPO = await PurchaseOrder.create(poData);
+              targetPO = await PurchaseOrder.create(poData, { transaction: dbTx });
             }
             if (payload.items && Array.isArray(payload.items)) {
               for (const item of payload.items) {
@@ -608,24 +660,35 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
                   quantity: item.quantity || 1,
                   purchasePrice: item.purchasePrice || item.unitPrice || 0,
                   totalAmount: item.totalAmount || ((item.quantity || 1) * (item.purchasePrice || item.unitPrice || 0))
-                });
+                }, { transaction: dbTx });
               }
             }
           }
         } else if (entityType === 'PURCHASE_BILL') {
           if (mutationType === 'DELETE' && payload.id) {
-            await PurchaseBill.destroy({ where: { id: payload.id } });
+            await PurchaseBill.destroy({ where: { id: payload.id }, transaction: dbTx });
           } else if (payload.billId || payload.billNumber) {
-            let existingBill = payload.billId ? await PurchaseBill.findOne({ where: { billId: payload.billId } }) : null;
+            let existingBill = payload.billId ? await PurchaseBill.findOne({ where: { billId: payload.billId }, transaction: dbTx }) : null;
             if (!existingBill && payload.billNumber) {
-              existingBill = await PurchaseBill.findOne({ where: { billNumber: payload.billNumber } });
+              existingBill = await PurchaseBill.findOne({ where: { billNumber: payload.billNumber }, transaction: dbTx });
             }
+
+            let validSupplierId: number | null = null;
+            if (payload.supplierId && typeof payload.supplierId === 'number') {
+              const sExists = await Party.findByPk(payload.supplierId, { transaction: dbTx });
+              if (sExists) validSupplierId = sExists.id;
+            }
+            if (!validSupplierId && payload.supplierName) {
+              const sByName = await Party.findOne({ where: { tenantId, name: payload.supplierName.trim() }, transaction: dbTx });
+              if (sByName) validSupplierId = sByName.id;
+            }
+
             const billData = {
               billId: payload.billId || `PB-${Date.now()}`,
               tenantId: tenantId || 'default-tenant',
               billNumber: payload.billNumber || `PB-${Math.floor(1000 + Math.random() * 9000)}`,
               billDate: payload.billDate || new Date().toISOString().split('T')[0],
-              supplierId: payload.supplierId || null,
+              supplierId: validSupplierId,
               supplierName: payload.supplierName || 'Supplier',
               supplierPhone: payload.supplierPhone || '',
               supplierGstin: payload.supplierGstin || '',
@@ -636,17 +699,32 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
             };
             let targetBill: any;
             if (existingBill) {
-              await existingBill.update(billData);
+              await existingBill.update(billData, { transaction: dbTx });
               targetBill = existingBill;
-              await PurchaseBillItem.destroy({ where: { purchaseBillId: existingBill.get('id') as number } });
+              await PurchaseBillItem.destroy({ where: { purchaseBillId: existingBill.get('id') as number }, transaction: dbTx });
             } else {
-              targetBill = await PurchaseBill.create(billData);
+              targetBill = await PurchaseBill.create(billData, { transaction: dbTx });
             }
             if (payload.items && Array.isArray(payload.items)) {
               for (const item of payload.items) {
+                const rawItemId = item.itemId || item.id;
+                let validItemId: number | null = null;
+                if (rawItemId && typeof rawItemId === 'number') {
+                  const itemExists = await Item.findByPk(rawItemId, { transaction: dbTx });
+                  if (itemExists) validItemId = itemExists.id;
+                }
+                if (!validItemId && item.skuCode) {
+                  const itemBySku = await Item.findOne({ where: { tenantId, skuCode: String(item.skuCode).trim() }, transaction: dbTx });
+                  if (itemBySku) validItemId = itemBySku.id;
+                }
+                if (!validItemId && (item.itemName || item.name)) {
+                  const itemByName = await Item.findOne({ where: { tenantId, name: (item.itemName || item.name).trim() }, transaction: dbTx });
+                  if (itemByName) validItemId = itemByName.id;
+                }
+
                 await PurchaseBillItem.create({
                   purchaseBillId: targetBill.id,
-                  itemId: item.itemId || item.id || null,
+                  itemId: validItemId,
                   itemName: item.itemName || item.name || 'Purchased Product',
                   hsnSacCode: item.hsnSacCode || '1000',
                   unitType: item.unitType || 'PCS',
@@ -655,15 +733,15 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
                   purchasePrice: item.purchasePrice || item.unitPrice || 0,
                   taxAmount: item.taxAmount || 0,
                   totalAmount: item.totalAmount || ((item.quantity || 1) * (item.unitPrice || 0))
-                });
+                }, { transaction: dbTx });
               }
             }
           }
         } else if (entityType === 'PAYMENT_OUT') {
           if (mutationType === 'DELETE' && payload.id) {
-            await PaymentOut.destroy({ where: { id: payload.id } });
+            await PaymentOut.destroy({ where: { id: payload.id }, transaction: dbTx });
           } else if (payload.receiptNumber) {
-            let existing = await PaymentOut.findOne({ where: { receiptNumber: payload.receiptNumber } });
+            let existing = await PaymentOut.findOne({ where: { receiptNumber: payload.receiptNumber }, transaction: dbTx });
             const payData = {
               receiptNumber: payload.receiptNumber,
               tenantId: tenantId || 'default-tenant',
@@ -676,16 +754,16 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               notes: payload.notes || ''
             };
             if (existing) {
-              await existing.update(payData);
+              await existing.update(payData, { transaction: dbTx });
             } else {
-              await PaymentOut.create(payData);
+              await PaymentOut.create(payData, { transaction: dbTx });
             }
           }
         } else if (entityType === 'EXPENSE') {
           if (mutationType === 'DELETE' && payload.id) {
-            await Expense.destroy({ where: { id: payload.id } });
+            await Expense.destroy({ where: { id: payload.id }, transaction: dbTx });
           } else if (payload.expenseNumber) {
-            let existing = await Expense.findOne({ where: { expenseNumber: payload.expenseNumber } });
+            let existing = await Expense.findOne({ where: { expenseNumber: payload.expenseNumber }, transaction: dbTx });
             const expData = {
               expenseNumber: payload.expenseNumber,
               tenantId: tenantId || 'default-tenant',
@@ -696,18 +774,18 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               notes: payload.notes || ''
             };
             if (existing) {
-              await existing.update(expData);
+              await existing.update(expData, { transaction: dbTx });
             } else {
-              await Expense.create(expData);
+              await Expense.create(expData, { transaction: dbTx });
             }
           }
         } else if (entityType === 'PURCHASE_RETURN') {
           if (mutationType === 'DELETE' && payload.id) {
-            await PurchaseReturn.destroy({ where: { id: payload.id } });
+            await PurchaseReturn.destroy({ where: { id: payload.id }, transaction: dbTx });
           } else if (payload.returnId || payload.debitNoteNumber) {
-            let existingReturn = payload.returnId ? await PurchaseReturn.findOne({ where: { returnId: payload.returnId } }) : null;
+            let existingReturn = payload.returnId ? await PurchaseReturn.findOne({ where: { returnId: payload.returnId }, transaction: dbTx }) : null;
             if (!existingReturn && payload.debitNoteNumber) {
-              existingReturn = await PurchaseReturn.findOne({ where: { debitNoteNumber: payload.debitNoteNumber } });
+              existingReturn = await PurchaseReturn.findOne({ where: { debitNoteNumber: payload.debitNoteNumber }, transaction: dbTx });
             }
             const retData = {
               returnId: payload.returnId || `PR-${Date.now()}`,
@@ -724,11 +802,11 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
             };
             let targetReturn: any;
             if (existingReturn) {
-              await existingReturn.update(retData);
+              await existingReturn.update(retData, { transaction: dbTx });
               targetReturn = existingReturn;
-              await PurchaseReturnItem.destroy({ where: { purchaseReturnId: existingReturn.get('id') as number } });
+              await PurchaseReturnItem.destroy({ where: { purchaseReturnId: existingReturn.get('id') as number }, transaction: dbTx });
             } else {
-              targetReturn = await PurchaseReturn.create(retData);
+              targetReturn = await PurchaseReturn.create(retData, { transaction: dbTx });
             }
             if (payload.items && Array.isArray(payload.items)) {
               for (const item of payload.items) {
@@ -741,17 +819,17 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
                   quantity: item.quantity || 1,
                   unitPrice: item.unitPrice || item.purchasePrice || 0,
                   totalAmount: item.totalAmount || ((item.quantity || 1) * (item.unitPrice || 0))
-                });
+                }, { transaction: dbTx });
               }
             }
           }
         } else if (entityType === 'SALE_RETURN') {
           if (mutationType === 'DELETE' && payload.id) {
-            await SaleReturn.destroy({ where: { id: payload.id } });
+            await SaleReturn.destroy({ where: { id: payload.id }, transaction: dbTx });
           } else if (payload.returnId || payload.creditNoteNumber) {
-            let existingReturn = payload.returnId ? await SaleReturn.findOne({ where: { returnId: payload.returnId } }) : null;
+            let existingReturn = payload.returnId ? await SaleReturn.findOne({ where: { returnId: payload.returnId }, transaction: dbTx }) : null;
             if (!existingReturn && payload.creditNoteNumber) {
-              existingReturn = await SaleReturn.findOne({ where: { creditNoteNumber: payload.creditNoteNumber } });
+              existingReturn = await SaleReturn.findOne({ where: { creditNoteNumber: payload.creditNoteNumber }, transaction: dbTx });
             }
             const retData = {
               returnId: payload.returnId || `CR-${Date.now()}`,
@@ -770,11 +848,11 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
             };
             let targetReturn: any;
             if (existingReturn) {
-              await existingReturn.update(retData);
+              await existingReturn.update(retData, { transaction: dbTx });
               targetReturn = existingReturn;
-              await SaleReturnItem.destroy({ where: { saleReturnId: existingReturn.get('id') as number } });
+              await SaleReturnItem.destroy({ where: { saleReturnId: existingReturn.get('id') as number }, transaction: dbTx });
             } else {
-              targetReturn = await SaleReturn.create(retData);
+              targetReturn = await SaleReturn.create(retData, { transaction: dbTx });
             }
             if (payload.items && Array.isArray(payload.items)) {
               for (const item of payload.items) {
@@ -788,17 +866,17 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
                   unitPrice: item.unitPrice || item.price || 0,
                   taxAmount: item.taxAmount || 0,
                   totalAmount: item.totalAmount || ((item.returnQuantity || item.quantity || 1) * (item.unitPrice || item.price || 0))
-                });
+                }, { transaction: dbTx });
               }
             }
           }
         } else if (entityType === 'CASH_ACCOUNT') {
           if (mutationType === 'DELETE' && payload.id) {
-            await CashAccount.destroy({ where: { id: payload.id } });
+            await CashAccount.destroy({ where: { id: payload.id }, transaction: dbTx });
           } else if (payload.name) {
-            let existing = payload.id ? await CashAccount.findByPk(payload.id) : null;
+            let existing = payload.id ? await CashAccount.findByPk(payload.id, { transaction: dbTx }) : null;
             if (!existing) {
-              existing = await CashAccount.findOne({ where: { tenantId: tenantId || 'default-tenant' } });
+              existing = await CashAccount.findOne({ where: { tenantId: tenantId || 'default-tenant' }, transaction: dbTx });
             }
             const accData = {
               tenantId: tenantId || 'default-tenant',
@@ -806,20 +884,20 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               openingBalance: payload.openingBalance || 0
             };
             if (existing) {
-              await existing.update(accData);
+              await existing.update(accData, { transaction: dbTx });
             } else {
-              await CashAccount.create(accData);
+              await CashAccount.create(accData, { transaction: dbTx });
             }
           }
         } else if (entityType === 'CASH_TRANSACTION') {
           if (mutationType === 'DELETE' && payload.id) {
-            await CashTransaction.destroy({ where: { id: payload.id } });
+            await CashTransaction.destroy({ where: { id: payload.id }, transaction: dbTx });
           } else if (payload.amount && payload.type) {
-            let cAcc = await CashAccount.findOne({ where: { tenantId: tenantId || 'default-tenant' } });
+            let cAcc = await CashAccount.findOne({ where: { tenantId: tenantId || 'default-tenant' }, transaction: dbTx });
             if (!cAcc) {
-              cAcc = await CashAccount.create({ tenantId: tenantId || 'default-tenant', name: 'Main Cash Drawer', openingBalance: 0 });
+              cAcc = await CashAccount.create({ tenantId: tenantId || 'default-tenant', name: 'Main Cash Drawer', openingBalance: 0 }, { transaction: dbTx });
             }
-            let existingTx = payload.referenceId ? await CashTransaction.findOne({ where: { referenceId: payload.referenceId, tenantId: tenantId || 'default-tenant' } }) : null;
+            let existingTx = payload.referenceId ? await CashTransaction.findOne({ where: { referenceId: payload.referenceId, tenantId: tenantId || 'default-tenant' }, transaction: dbTx }) : null;
             const txData = {
               cashAccountId: (cAcc as any).id,
               tenantId: tenantId || 'default-tenant',
@@ -831,14 +909,14 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               transactionDate: payload.transactionDate || new Date().toISOString()
             };
             if (existingTx) {
-              await existingTx.update(txData);
+              await existingTx.update(txData, { transaction: dbTx });
             } else {
-              await CashTransaction.create(txData);
+              await CashTransaction.create(txData, { transaction: dbTx });
             }
           }
         } else if (entityType === 'LOCATION') {
           if (mutationType === 'DELETE' && payload.id) {
-            await InventoryLocation.destroy({ where: { id: String(payload.id) } });
+            await InventoryLocation.destroy({ where: { id: String(payload.id) }, transaction: dbTx });
           } else if (payload.name || payload.code) {
             const locId = payload.id ? String(payload.id) : `wh-${Date.now()}`;
             await InventoryLocation.upsert({
@@ -852,11 +930,11 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               description: payload.description || '',
               isShared: !!payload.isShared,
               allowedTenantIds: payload.allowedTenantIds || []
-            });
+            }, { transaction: dbTx });
           }
         } else if (entityType === 'ITEM_LOCATION') {
           if (mutationType === 'DELETE' && payload.id) {
-            await ItemLocationMapping.destroy({ where: { id: String(payload.id) } });
+            await ItemLocationMapping.destroy({ where: { id: String(payload.id) }, transaction: dbTx });
           } else if (payload.itemId && payload.locationId) {
             const mapId = payload.id ? String(payload.id) : `map-${payload.itemId}-${payload.locationId}`;
             await ItemLocationMapping.upsert({
@@ -866,11 +944,11 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               locationId: String(payload.locationId),
               quantity: payload.quantity || 0,
               maxCapacity: payload.maxCapacity || 100
-            });
+            }, { transaction: dbTx });
           }
         } else if (entityType === 'STOCK_TRANSFER') {
           if (mutationType === 'DELETE' && payload.id) {
-            await StockTransfer.destroy({ where: { id: String(payload.id) } });
+            await StockTransfer.destroy({ where: { id: String(payload.id) }, transaction: dbTx });
           } else if (payload.sourceLocationId && payload.destinationLocationId) {
             const trfId = payload.id ? String(payload.id) : `trf-${Date.now()}`;
             await StockTransfer.upsert({
@@ -883,12 +961,12 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               quantity: payload.quantity || 1,
               transferDate: payload.transferDate || new Date().toISOString().split('T')[0],
               notes: payload.notes || ''
-            });
+            }, { transaction: dbTx });
           }
         } else if (entityType === 'STORE_WAREHOUSE_ACCESS') {
           if (mutationType === 'DELETE' && (payload.id || (payload.storeId && payload.warehouseId))) {
-            if (payload.id) await StoreWarehouseAccess.destroy({ where: { id: String(payload.id) } });
-            else await StoreWarehouseAccess.destroy({ where: { storeId: payload.storeId, warehouseId: String(payload.warehouseId) } });
+            if (payload.id) await StoreWarehouseAccess.destroy({ where: { id: String(payload.id) }, transaction: dbTx });
+            else await StoreWarehouseAccess.destroy({ where: { storeId: payload.storeId, warehouseId: String(payload.warehouseId) }, transaction: dbTx });
           } else if (payload.storeId && payload.warehouseId) {
             const accessId = payload.id ? String(payload.id) : `access-${payload.storeId}-${payload.warehouseId}`;
             await StoreWarehouseAccess.upsert({
@@ -896,11 +974,11 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               tenantId: payload.tenantId || tenantId || 'default-tenant',
               storeId: payload.storeId,
               warehouseId: String(payload.warehouseId)
-            });
+            }, { transaction: dbTx });
           }
         }
-      } catch (err) {
-        console.error('Error persisting individual sync mutation to PostgreSQL:', err);
+      } catch (err: any) {
+        console.error('⚠️ Error persisting individual sync mutation to PostgreSQL:', err?.message || err, err?.stack || '');
       }
     }
     await dbTx.commit();

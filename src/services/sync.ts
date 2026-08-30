@@ -194,12 +194,56 @@ export class ClientSyncManager {
         storeWarehouseAccess
       } = json.data;
 
+      const pendingJournal = await db.syncJournal.filter(record => !record.synced).toArray();
+      const pendingSyncItemIds = new Set<string>();
+      const pendingSyncItemKeys = new Set<string>();
+      const pendingSyncLocMapIds = new Set<string>();
+      const pendingDeleteIds = new Set<string>();
+      const pendingDeleteKeys = new Set<string>();
+
+      for (const j of pendingJournal) {
+        if (j.entityType === 'ITEM') {
+          if (j.mutationType === 'DELETE') {
+            pendingDeleteIds.add(String(j.entityId));
+          } else {
+            pendingSyncItemIds.add(String(j.entityId));
+          }
+          try {
+            const p = typeof j.payload === 'string' ? JSON.parse(j.payload) : j.payload;
+            if (p?.id) {
+              if (j.mutationType === 'DELETE') pendingDeleteIds.add(String(p.id));
+              else pendingSyncItemIds.add(String(p.id));
+            }
+            if (p?.skuCode) {
+              const skuKey = String(p.skuCode).trim().toLowerCase();
+              if (j.mutationType === 'DELETE') pendingDeleteKeys.add(skuKey);
+              else pendingSyncItemKeys.add(skuKey);
+            }
+            if (p?.name) {
+              const nameKey = String(p.name).trim().toLowerCase();
+              if (j.mutationType === 'DELETE') pendingDeleteKeys.add(nameKey);
+              else pendingSyncItemKeys.add(nameKey);
+            }
+          } catch {}
+        } else if (j.entityType === 'ITEM_LOCATION') {
+          pendingSyncLocMapIds.add(String(j.entityId));
+        }
+      }
+
       // 1. Merge items safely with non-empty SKU or case-insensitive name match
       if (Array.isArray(items) && items.length > 0) {
         for (const sItem of items) {
           const sTenant = sItem.tenantId || activeTenantId;
           if (sTenant !== activeTenantId) continue;
           const sId = Number(sItem.id);
+
+          const sSku = (sItem.skuCode || '').trim().toLowerCase();
+          const sName = (sItem.name || '').trim().toLowerCase();
+
+          // If item is marked for DELETE locally, skip re-adding it from server
+          if (pendingDeleteIds.has(String(sId)) || (sSku && pendingDeleteKeys.has(sSku)) || (sName && pendingDeleteKeys.has(sName))) {
+            continue;
+          }
 
           const skuMatch = sItem.skuCode && sItem.skuCode.trim() !== '';
           const nameMatch = sItem.name && sItem.name.trim() !== '';
@@ -217,7 +261,21 @@ export class ClientSyncManager {
             .first();
 
           if (existing && existing.id) {
-            await db.items.update(existing.id, { ...sItem, id: existing.id, cloudId: sId, tenantId: activeTenantId });
+            const isPendingSync = pendingSyncItemIds.has(String(existing.id)) ||
+                                  (existing.skuCode && pendingSyncItemKeys.has(existing.skuCode.trim().toLowerCase())) ||
+                                  (existing.name && pendingSyncItemKeys.has(existing.name.trim().toLowerCase()));
+
+            const finalStock = isPendingSync
+              ? Math.max(Number(existing.currentStock) || 0, Number(sItem.currentStock) || 0)
+              : (sItem.currentStock !== undefined && sItem.currentStock !== null ? Number(sItem.currentStock) : Number(existing.currentStock) || 0);
+
+            await db.items.update(existing.id, {
+              ...sItem,
+              id: existing.id,
+              cloudId: sId,
+              tenantId: activeTenantId,
+              currentStock: finalStock
+            });
           } else {
             await db.items.put({ ...sItem, id: sId, cloudId: sId, tenantId: activeTenantId });
           }
@@ -535,14 +593,27 @@ export class ClientSyncManager {
           const itemId = String(sMap.itemId);
           const locationId = String(sMap.locationId);
 
-          await db.itemLocations.put({
-            ...sMap,
-            id: mapId,
-            tenantId: sTenant,
-            itemId,
-            locationId,
-            quantity: Number(sMap.quantity) || 0
-          });
+          const existingMap = await db.itemLocations.get(mapId);
+          if (existingMap && pendingSyncLocMapIds.has(mapId)) {
+            const maxQty = Math.max(Number(existingMap.quantity) || 0, Number(sMap.quantity) || 0);
+            await db.itemLocations.update(mapId, {
+              ...sMap,
+              id: mapId,
+              tenantId: sTenant,
+              itemId,
+              locationId,
+              quantity: maxQty
+            });
+          } else {
+            await db.itemLocations.put({
+              ...sMap,
+              id: mapId,
+              tenantId: sTenant,
+              itemId,
+              locationId,
+              quantity: Number(sMap.quantity) || 0
+            });
+          }
         }
       }
 
@@ -586,11 +657,21 @@ export class ClientSyncManager {
       try {
         const pendingJournal = await db.syncJournal.toArray();
         const pendingIdsByTable = new Map<string, Set<string>>();
+        const pendingKeysByTable = new Map<string, Set<string>>();
+        
         for (const j of pendingJournal) {
           if (!j.synced) {
             const tableKey = j.entityType;
             if (!pendingIdsByTable.has(tableKey)) pendingIdsByTable.set(tableKey, new Set());
+            if (!pendingKeysByTable.has(tableKey)) pendingKeysByTable.set(tableKey, new Set());
+            
             pendingIdsByTable.get(tableKey)!.add(String(j.entityId));
+            try {
+              const p = typeof j.payload === 'string' ? JSON.parse(j.payload) : j.payload;
+              if (p?.id) pendingIdsByTable.get(tableKey)!.add(String(p.id));
+              if (p?.skuCode) pendingKeysByTable.get(tableKey)!.add(String(p.skuCode).trim().toLowerCase());
+              if (p?.name) pendingKeysByTable.get(tableKey)!.add(String(p.name).trim().toLowerCase());
+            } catch {}
           }
         }
 
@@ -599,6 +680,7 @@ export class ClientSyncManager {
           const sSkus = new Set(items.map(i => (i.skuCode || '').trim().toLowerCase()).filter(Boolean));
           const sNames = new Set(items.map(i => (i.name || '').trim().toLowerCase()).filter(Boolean));
           const pendingItemIds = pendingIdsByTable.get('ITEM') || new Set();
+          const pendingItemKeys = pendingKeysByTable.get('ITEM') || new Set();
 
           const localItems = await db.items.filter(i => (i.tenantId || 'default-tenant') === activeTenantId).toArray();
           const staleItemIds = localItems
@@ -607,6 +689,9 @@ export class ClientSyncManager {
               if (pendingItemIds.has(String(i.id))) return false;
               const sku = (i.skuCode || '').trim().toLowerCase();
               const name = (i.name || '').trim().toLowerCase();
+              if (sku && pendingItemKeys.has(sku)) return false;
+              if (name && pendingItemKeys.has(name)) return false;
+
               const inSkus = sku && sSkus.has(sku);
               const inNames = name && sNames.has(name);
               return !inSkus && !inNames;
@@ -629,6 +714,7 @@ export class ClientSyncManager {
               if (!p.id) return false;
               if (pendingPartyIds.has(String(p.id))) return false;
               const pName = (p.name || '').trim().toLowerCase();
+              if (pName === 'walk-in customer' || pName === 'walk-in retail customer') return false;
               return pName && !sPartyNames.has(pName);
             })
             .map(p => Number(p.id));
