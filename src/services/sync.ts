@@ -19,6 +19,10 @@ export class ClientSyncManager {
   private lastSyncedAt?: string;
   private listeners: Set<Listener> = new Set();
 
+  private lastNotifiedCount: number | null = null;
+  private lastNotifiedOnline: boolean | null = null;
+  private lastNotifiedSyncing: boolean | null = null;
+
   constructor() {
     if (typeof window !== 'undefined') {
       setInterval(() => {
@@ -41,8 +45,22 @@ export class ClientSyncManager {
 
   private notify(serverVersion?: number) {
     db.syncJournal.where('synced').equals(0).count().then(count => {
+      const isOnline = navigator.onLine;
+      if (
+        this.lastNotifiedCount === count &&
+        this.lastNotifiedOnline === isOnline &&
+        this.lastNotifiedSyncing === this.isSyncing &&
+        !serverVersion
+      ) {
+        return; // No state change -- skip notifying subscribers to prevent React re-renders!
+      }
+
+      this.lastNotifiedCount = count;
+      this.lastNotifiedOnline = isOnline;
+      this.lastNotifiedSyncing = this.isSyncing;
+
       const status: SyncStatus = {
-        isOnline: navigator.onLine,
+        isOnline,
         pendingCount: count,
         lastSyncedAt: this.lastSyncedAt,
         isSyncing: this.isSyncing,
@@ -269,13 +287,22 @@ export class ClientSyncManager {
               ? Math.max(Number(existing.currentStock) || 0, Number(sItem.currentStock) || 0)
               : (sItem.currentStock !== undefined && sItem.currentStock !== null ? Number(sItem.currentStock) : Number(existing.currentStock) || 0);
 
-            await db.items.update(existing.id, {
-              ...sItem,
-              id: existing.id,
-              cloudId: sId,
-              tenantId: activeTenantId,
-              currentStock: finalStock
-            });
+            const hasChanged = Number(existing.currentStock) !== finalStock ||
+                               existing.name !== sItem.name ||
+                               existing.salesPrice !== sItem.salesPrice ||
+                               existing.purchasePrice !== sItem.purchasePrice ||
+                               existing.minStockAlert !== sItem.minStockAlert ||
+                               (sId && Number((existing as any).cloudId) !== sId);
+
+            if (hasChanged) {
+              await db.items.update(existing.id, {
+                ...sItem,
+                id: existing.id,
+                cloudId: sId,
+                tenantId: activeTenantId,
+                currentStock: finalStock
+              });
+            }
           } else {
             await db.items.put({ ...sItem, id: sId, cloudId: sId, tenantId: activeTenantId });
           }
@@ -594,16 +621,22 @@ export class ClientSyncManager {
           const locationId = String(sMap.locationId);
 
           const existingMap = await db.itemLocations.get(mapId);
-          if (existingMap && pendingSyncLocMapIds.has(mapId)) {
-            const maxQty = Math.max(Number(existingMap.quantity) || 0, Number(sMap.quantity) || 0);
-            await db.itemLocations.update(mapId, {
-              ...sMap,
-              id: mapId,
-              tenantId: sTenant,
-              itemId,
-              locationId,
-              quantity: maxQty
-            });
+          if (existingMap) {
+            const isPendingSync = pendingSyncLocMapIds.has(mapId);
+            const targetQty = isPendingSync
+              ? Math.max(Number(existingMap.quantity) || 0, Number(sMap.quantity) || 0)
+              : Number(sMap.quantity) || 0;
+
+            if (Number(existingMap.quantity) !== targetQty || String(existingMap.tenantId) !== String(sTenant)) {
+              await db.itemLocations.update(mapId, {
+                ...sMap,
+                id: mapId,
+                tenantId: sTenant,
+                itemId,
+                locationId,
+                quantity: targetQty
+              });
+            }
           } else {
             await db.itemLocations.put({
               ...sMap,
