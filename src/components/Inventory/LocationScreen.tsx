@@ -714,10 +714,16 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       for (const item of itemsToAllocate) {
         if (!item.id || item.currentStock <= 0) continue;
 
-        // Check existing assigned qty
+        // Check existing assigned qty in SHELF / RACK locations only
         const existingMaps = await db.itemLocations.filter(il => (il.tenantId || 'default-tenant') === activeTenantId && (String(il.itemId) === String(item.id) || (item.skuCode && (il as any).skuCode && String((il as any).skuCode).toLowerCase() === item.skuCode.toLowerCase()))).toArray();
-        const alreadyAssigned = existingMaps.reduce((sum, m) => sum + m.quantity, 0);
-        let unassignedToPlace = Math.max(0, item.currentStock - alreadyAssigned);
+        const alreadyAssignedToRacks = existingMaps
+          .filter(m => {
+            const loc = activeLocations.find(l => String(l.id) === String(m.locationId));
+            return loc && loc.type === 'SHELF';
+          })
+          .reduce((sum, m) => sum + m.quantity, 0);
+
+        let unassignedToPlace = Math.max(0, item.currentStock - alreadyAssignedToRacks);
 
         if (unassignedToPlace <= 0) continue;
 
@@ -774,29 +780,28 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   const handleDeleteLocation = (loc: InventoryLocation) => {
     if (!loc.id) return;
 
-    // Edge Case Guard: Block deletion if active stock exists in location or child racks
-    const childLocIds = new Set<number>([Number(loc.id)]);
+    const locIdStr = String(loc.id);
+    const childLocIds = new Set<string>([locIdStr]);
+
     if (loc.type === 'WAREHOUSE') {
-      activeLocations.filter(l => Number(l.parentId) === Number(loc.id)).forEach(z => {
-        childLocIds.add(Number(z.id));
-        activeLocations.filter(l => Number(l.parentId) === Number(z.id)).forEach(r => childLocIds.add(Number(r.id)));
+      activeLocations.filter(l => String(l.parentId) === locIdStr).forEach(z => {
+        childLocIds.add(String(z.id));
+        activeLocations.filter(l => String(l.parentId) === String(z.id)).forEach(r => childLocIds.add(String(r.id)));
       });
+      activeLocations.filter(l => l.type === 'SHELF' && String(l.parentId) === locIdStr).forEach(r => childLocIds.add(String(r.id)));
     } else if (loc.type === 'ZONE') {
-      activeLocations.filter(l => Number(l.parentId) === Number(loc.id)).forEach(r => childLocIds.add(Number(r.id)));
+      activeLocations.filter(l => String(l.parentId) === locIdStr).forEach(r => childLocIds.add(String(r.id)));
     }
 
     const assignedStock = itemLocations
-      .filter(il => childLocIds.has(Number(il.locationId)))
-      .reduce((sum, il) => sum + il.quantity, 0);
-
-    if (assignedStock > 0) {
-      showToast(`Cannot delete "${loc.name}". It currently has ${assignedStock} PCS assigned across linked racks. Please relocate or replenish stock first!`, 'error');
-      return;
-    }
+      .filter(il => childLocIds.has(String(il.locationId)))
+      .reduce((sum, il) => sum + (il.quantity || 0), 0);
 
     let message = `Are you sure you want to delete "${loc.name}" (${loc.code})?`;
     if (loc.type === 'WAREHOUSE') {
-      message = `Are you sure you want to delete Warehouse "${loc.name}"? This will also delete ALL zones and racks inside it!`;
+      message = assignedStock > 0
+        ? `Warehouse "${loc.name}" contains ${assignedStock} PCS linked product stock. Are you sure you want to delete this warehouse? Confirming will delete all zones/racks inside it and un-link location mappings.`
+        : `Are you sure you want to delete Warehouse "${loc.name}"? This will also delete ALL zones and racks inside it!`;
     } else if (loc.type === 'ZONE') {
       message = `Are you sure you want to delete Zone "${loc.name}"? This will also delete ALL racks inside it!`;
     }
@@ -808,39 +813,24 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       confirmText: 'Delete Location',
       onConfirm: async () => {
         try {
-          const idsToDelete: (string | number)[] = [loc.id!];
+          const idsToDelete: string[] = Array.from(childLocIds);
 
-          if (loc.type === 'WAREHOUSE') {
-            const childZones = activeLocations.filter(l => String(l.parentId) === String(loc.id));
-            childZones.forEach(z => {
-              if (z.id) idsToDelete.push(z.id);
-              const childRacks = activeLocations.filter(l => String(l.parentId) === String(z.id));
-              childRacks.forEach(r => {
-                if (r.id && !idsToDelete.includes(r.id)) idsToDelete.push(r.id);
-              });
-            });
-            const directRacks = activeLocations.filter(l => l.type === 'SHELF' && String(l.parentId) === String(loc.id));
-            directRacks.forEach(r => {
-              if (r.id && !idsToDelete.includes(r.id)) idsToDelete.push(r.id);
-            });
-          } else if (loc.type === 'ZONE') {
-            const childRacks = activeLocations.filter(l => String(l.parentId) === String(loc.id));
-            childRacks.forEach(r => {
-              if (r.id && !idsToDelete.includes(r.id)) idsToDelete.push(r.id);
-            });
+          // Purge all item location mappings linked to deleted location IDs
+          const mappingsToDelete = itemLocations.filter(il => idsToDelete.includes(String(il.locationId)));
+          for (const m of mappingsToDelete) {
+            if (m.id) await db.itemLocations.delete(m.id);
           }
 
-          // Delete from IndexedDB
-          await db.locations.bulkDelete(idsToDelete as any[]);
+          // Delete locations from IndexedDB
+          for (const idToDel of idsToDelete) {
+            await db.locations.delete(idToDel);
+            await deleteServerLocation(idToDel);
+            await ClientSyncManager.logMutation('LOCATION', idToDel, 'DELETE', { id: idToDel, tenantId: activeTenantId });
+          }
 
-          // Delete from Server
-          idsToDelete.forEach(id => {
-            deleteServerLocation(id).catch(() => { });
-          });
-
-          showToast(`Location "${loc.name}" deleted successfully!`, 'success');
+          showToast(`Location "${loc.name}" and linked sub-spaces deleted successfully!`, 'info');
         } catch (err: any) {
-          showToast(`Failed to delete location: ${err.message}`, 'error');
+          showToast(`Error deleting location: ${err.message}`, 'error');
         }
       }
     });

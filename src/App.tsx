@@ -375,10 +375,10 @@ export function App() {
     allLocations.forEach(loc => {
       if (loc.type === 'WAREHOUSE') {
         const locTenant = loc.tenantId || 'default-tenant';
-        const isOwner = locTenant === activeTenantId || locTenant === 'default-tenant' || activeTenantId === 'default-tenant';
+        const isOwner = locTenant === activeTenantId || (activeTenantId === 'default-tenant' && locTenant === 'default-tenant');
         const isLinked = loc.allowedTenantIds && Array.isArray(loc.allowedTenantIds) && loc.allowedTenantIds.includes(activeTenantId);
         const isShared = loc.isShared === true;
-        if (isOwner || isLinked || isShared || allLocations.length <= 15) {
+        if (isOwner || isLinked || isShared) {
           set.add(String(loc.id));
         }
       }
@@ -408,7 +408,7 @@ export function App() {
     return allLocations.filter(loc => {
       if (!loc) return false;
       const locTenant = loc.tenantId || 'default-tenant';
-      const isOwner = locTenant === activeTenantId || locTenant === 'default-tenant' || activeTenantId === 'default-tenant';
+      const isOwner = locTenant === activeTenantId || (activeTenantId === 'default-tenant' && locTenant === 'default-tenant');
       const isLocAccessible = accessibleLocationIds.has(String(loc.id));
       const isShared = loc.isShared === true;
       return isOwner || isLocAccessible || isShared;
