@@ -173,7 +173,8 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
       // Store Front Stock = explicit stock transferred/allocated to store front shelves or zones
       const storeMaps = validMappings.filter(m => {
         const loc = locMap.get(String(m.locationId));
-        return loc && (loc.isStoreFront || loc.code?.includes('SF') || loc.code?.includes('STORE') || loc.name?.toLowerCase().includes('store') || (loc as any).type === 'STORE' || (loc as any).type === 'STORE_FRONT');
+        if (!loc || loc.type === 'WAREHOUSE') return false;
+        return loc.isStoreFront || loc.code?.includes('SF') || (loc as any).type === 'STORE' || (loc as any).type === 'STORE_FRONT';
       });
       const storeStock = storeMaps.reduce((sum: number, m: ItemLocationMapping) => sum + m.quantity, 0);
 

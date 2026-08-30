@@ -79,7 +79,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
       });
       const storeIds = new Set<string | number>();
       tenantLocs
-        .filter(l => l.isStoreFront || l.code?.includes('SF') || l.code?.includes('STORE') || l.name?.toLowerCase().includes('store') || (l as any).type === 'STORE' || (l as any).type === 'STORE_FRONT')
+        .filter(l => l.type !== 'WAREHOUSE' && (l.isStoreFront || l.code?.includes('SF') || (l as any).type === 'STORE' || (l as any).type === 'STORE_FRONT'))
         .forEach(l => {
           if (l.id !== undefined && l.id !== null) {
             storeIds.add(l.id as any);

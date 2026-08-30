@@ -39,7 +39,7 @@ syncRouter.post('/reset', async (req: Request, res: Response) => {
     const bodyTenantId = req.body?.tenantId || req.query?.tenantId;
     const authTenantId = (req as AuthenticatedRequest).user?.tenantId;
     const tenantId = (bodyTenantId || authTenantId || 'default-tenant') as string;
-    const isResetAll = req.body?.resetAll === true || tenantId === 'ALL';
+    const isResetAll = req.body?.resetAll === true || tenantId === 'ALL' || req.body?.wipeAll === true;
 
     if (isResetAll) {
       cloudStore.clear();
@@ -48,67 +48,87 @@ syncRouter.post('/reset', async (req: Request, res: Response) => {
     }
 
     if (isDbConnected()) {
-      const whereClause = isResetAll ? {} : { where: { tenantId } };
-
-      // 1. Delete child line items associated with tenant's parent records
       try {
-        const invoiceIds = (await Invoice.findAll({ ...whereClause, attributes: ['id'] })).map(i => i.id);
-        if (invoiceIds.length > 0) {
-          await InvoiceItem.destroy({ where: { invoiceId: invoiceIds }, force: true }).catch(() => {});
-        }
+        if (isResetAll) {
+          await InvoiceItem.destroy({ where: {}, force: true }).catch(() => {});
+          await EstimateItem.destroy({ where: {}, force: true }).catch(() => {});
+          await PurchaseOrderItem.destroy({ where: {}, force: true }).catch(() => {});
+          await PurchaseBillItem.destroy({ where: {}, force: true }).catch(() => {});
+          await PurchaseReturnItem.destroy({ where: {}, force: true }).catch(() => {});
+          await SaleReturnItem.destroy({ where: {}, force: true }).catch(() => {});
 
-        const estimateIds = (await Estimate.findAll({ ...whereClause, attributes: ['id'] })).map(e => e.id);
-        if (estimateIds.length > 0) {
-          await EstimateItem.destroy({ where: { estimateId: estimateIds }, force: true }).catch(() => {});
-        }
+          await Invoice.destroy({ where: {}, force: true }).catch(() => {});
+          await Estimate.destroy({ where: {}, force: true }).catch(() => {});
+          await PaymentIn.destroy({ where: {}, force: true }).catch(() => {});
+          await PurchaseOrder.destroy({ where: {}, force: true }).catch(() => {});
+          await PurchaseBill.destroy({ where: {}, force: true }).catch(() => {});
+          await PaymentOut.destroy({ where: {}, force: true }).catch(() => {});
+          await Expense.destroy({ where: {}, force: true }).catch(() => {});
+          await PurchaseReturn.destroy({ where: {}, force: true }).catch(() => {});
+          await SaleReturn.destroy({ where: {}, force: true }).catch(() => {});
+          await CashTransaction.destroy({ where: {}, force: true }).catch(() => {});
+          await CashAccount.destroy({ where: {}, force: true }).catch(() => {});
+          await StockTransfer.destroy({ where: {}, force: true }).catch(() => {});
+          await ItemLocationMapping.destroy({ where: {}, force: true }).catch(() => {});
+          await InventoryLocation.destroy({ where: {}, force: true }).catch(() => {});
+          await Item.destroy({ where: {}, force: true }).catch(() => {});
+          await Party.destroy({ where: {}, force: true }).catch(() => {});
+        } else {
+          const whereClause = { where: { tenantId } };
 
-        const poIds = (await PurchaseOrder.findAll({ ...whereClause, attributes: ['id'] })).map(po => po.id);
-        if (poIds.length > 0) {
-          await PurchaseOrderItem.destroy({ where: { purchaseOrderId: poIds }, force: true }).catch(() => {});
-        }
+          const invoiceIds = (await Invoice.findAll({ ...whereClause, attributes: ['id'] })).map(i => i.id);
+          if (invoiceIds.length > 0) {
+            await InvoiceItem.destroy({ where: { invoiceId: invoiceIds }, force: true }).catch(() => {});
+          }
 
-        const pbIds = (await PurchaseBill.findAll({ ...whereClause, attributes: ['id'] })).map(pb => pb.id);
-        if (pbIds.length > 0) {
-          await PurchaseBillItem.destroy({ where: { purchaseBillId: pbIds }, force: true }).catch(() => {});
-        }
+          const estimateIds = (await Estimate.findAll({ ...whereClause, attributes: ['id'] })).map(e => e.id);
+          if (estimateIds.length > 0) {
+            await EstimateItem.destroy({ where: { estimateId: estimateIds }, force: true }).catch(() => {});
+          }
 
-        const prIds = (await PurchaseReturn.findAll({ ...whereClause, attributes: ['id'] })).map(pr => pr.id);
-        if (prIds.length > 0) {
-          await PurchaseReturnItem.destroy({ where: { purchaseReturnId: prIds }, force: true }).catch(() => {});
-        }
+          const poIds = (await PurchaseOrder.findAll({ ...whereClause, attributes: ['id'] })).map(po => po.id);
+          if (poIds.length > 0) {
+            await PurchaseOrderItem.destroy({ where: { purchaseOrderId: poIds }, force: true }).catch(() => {});
+          }
 
-        const srIds = (await SaleReturn.findAll({ ...whereClause, attributes: ['id'] })).map(sr => sr.id);
-        if (srIds.length > 0) {
-          await SaleReturnItem.destroy({ where: { saleReturnId: srIds }, force: true }).catch(() => {});
+          const pbIds = (await PurchaseBill.findAll({ ...whereClause, attributes: ['id'] })).map(pb => pb.id);
+          if (pbIds.length > 0) {
+            await PurchaseBillItem.destroy({ where: { purchaseBillId: pbIds }, force: true }).catch(() => {});
+          }
+
+          const prIds = (await PurchaseReturn.findAll({ ...whereClause, attributes: ['id'] })).map(pr => pr.id);
+          if (prIds.length > 0) {
+            await PurchaseReturnItem.destroy({ where: { purchaseReturnId: prIds }, force: true }).catch(() => {});
+          }
+
+          const srIds = (await SaleReturn.findAll({ ...whereClause, attributes: ['id'] })).map(sr => sr.id);
+          if (srIds.length > 0) {
+            await SaleReturnItem.destroy({ where: { saleReturnId: srIds }, force: true }).catch(() => {});
+          }
+
+          await Invoice.destroy({ ...whereClause, force: true }).catch(() => {});
+          await Estimate.destroy({ ...whereClause, force: true }).catch(() => {});
+          await PaymentIn.destroy({ ...whereClause, force: true }).catch(() => {});
+          await PurchaseOrder.destroy({ ...whereClause, force: true }).catch(() => {});
+          await PurchaseBill.destroy({ ...whereClause, force: true }).catch(() => {});
+          await PaymentOut.destroy({ ...whereClause, force: true }).catch(() => {});
+          await Expense.destroy({ ...whereClause, force: true }).catch(() => {});
+          await PurchaseReturn.destroy({ ...whereClause, force: true }).catch(() => {});
+          await SaleReturn.destroy({ ...whereClause, force: true }).catch(() => {});
+          await CashTransaction.destroy({ ...whereClause, force: true }).catch(() => {});
+          await CashAccount.destroy({ ...whereClause, force: true }).catch(() => {});
+          await StockTransfer.destroy({ ...whereClause, force: true }).catch(() => {});
+          await ItemLocationMapping.destroy({ ...whereClause, force: true }).catch(() => {});
+          await InventoryLocation.destroy({ ...whereClause, force: true }).catch(() => {});
+          await Item.destroy({ ...whereClause, force: true }).catch(() => {});
+          await Party.destroy({ ...whereClause, force: true }).catch(() => {});
         }
       } catch (childErr) {
-        console.warn('Child line items destroy fallback error:', childErr);
+        console.warn('Reset destroy error:', childErr);
       }
-
-      // 2. Delete main transactional & cash models for tenant
-      await Invoice.destroy({ ...whereClause, force: true }).catch(() => {});
-      await Estimate.destroy({ ...whereClause, force: true }).catch(() => {});
-      await PaymentIn.destroy({ ...whereClause, force: true }).catch(() => {});
-      await PurchaseOrder.destroy({ ...whereClause, force: true }).catch(() => {});
-      await PurchaseBill.destroy({ ...whereClause, force: true }).catch(() => {});
-      await PaymentOut.destroy({ ...whereClause, force: true }).catch(() => {});
-      await Expense.destroy({ ...whereClause, force: true }).catch(() => {});
-      await PurchaseReturn.destroy({ ...whereClause, force: true }).catch(() => {});
-      await SaleReturn.destroy({ ...whereClause, force: true }).catch(() => {});
-      await CashTransaction.destroy({ ...whereClause, force: true }).catch(() => {});
-      await CashAccount.destroy({ ...whereClause, force: true }).catch(() => {});
-
-      // 3. Delete inventory, locations, warehouses, stock transfers & mappings for tenant
-      await StockTransfer.destroy({ ...whereClause, force: true }).catch(() => {});
-      await ItemLocationMapping.destroy({ ...whereClause, force: true }).catch(() => {});
-      await InventoryLocation.destroy({ ...whereClause, force: true }).catch(() => {});
-
-      // 4. Delete core item catalog and party records for tenant
-      await Item.destroy({ ...whereClause, force: true }).catch(() => {});
-      await Party.destroy({ ...whereClause, force: true }).catch(() => {});
     }
 
-    console.log(`🧹 [RESET] Successfully wiped operational & inventory store data for tenant: ${tenantId}`);
+    console.log(`🧹 [RESET] Successfully wiped operational & inventory store data for tenant: ${tenantId} (ResetAll: ${isResetAll})`);
 
     return res.json({
       success: true,
@@ -253,8 +273,8 @@ syncRouter.get('/pull', async (req: Request, res: Response) => {
       const locTenant = loc.get('tenantId') as string;
       const isShared = loc.get('isShared') === true;
       const allowedTenantIds = (loc.get('allowedTenantIds') as string[]) || [];
-      const isOwner = locTenant === tenantId || locTenant === 'default-tenant' || tenantId === 'default-tenant';
-      if (isOwner || isShared || (Array.isArray(allowedTenantIds) && allowedTenantIds.includes(tenantId)) || rawLocations.length <= 50) {
+      const isOwner = locTenant === tenantId || (tenantId === 'default-tenant' && locTenant === 'default-tenant');
+      if (isOwner || isShared || (Array.isArray(allowedTenantIds) && allowedTenantIds.includes(tenantId))) {
         accessibleWhIds.add(String(loc.get('id')));
       }
     });

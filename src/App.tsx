@@ -213,7 +213,12 @@ export function App() {
 
         if (validActive && validActive.tenantId) {
           activeTenantId = validActive.tenantId;
-          setBusinessDetails(validActive);
+          setBusinessDetails(prev => {
+            if (prev && prev.tenantId === validActive.tenantId && prev.name === validActive.name && prev.phone === validActive.phone && prev.address === validActive.address && prev.gstin === validActive.gstin) {
+              return prev;
+            }
+            return validActive;
+          });
           if (activeTenantId !== currentTenantId) {
             setCurrentTenantId(activeTenantId);
             localStorage.setItem('vyapar_current_tenant', activeTenantId);
@@ -223,7 +228,12 @@ export function App() {
         const localSaved = getInitialBusiness();
         activeTenantId = userSession?.tenantId || localSaved.tenantId || activeTenantId || 'default-tenant';
         const defaultProfile: BusinessDetails = { ...localSaved, userId: userSession?.userId, tenantId: activeTenantId };
-        setBusinessDetails(defaultProfile);
+        setBusinessDetails(prev => {
+          if (prev && prev.tenantId === defaultProfile.tenantId && prev.name === defaultProfile.name && prev.phone === defaultProfile.phone && prev.address === defaultProfile.address && prev.gstin === defaultProfile.gstin) {
+            return prev;
+          }
+          return defaultProfile;
+        });
         setCompanies([defaultProfile]);
         if (activeTenantId !== currentTenantId) {
           setCurrentTenantId(activeTenantId);

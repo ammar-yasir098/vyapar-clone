@@ -101,9 +101,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       if (loc.type === 'WAREHOUSE') {
         const locTenant = loc.tenantId || 'default-tenant';
         const locIdStr = String(loc.id);
-        const isOwner = locTenant === activeTenantId || locTenant === 'default-tenant' || activeTenantId === 'default-tenant';
+        const isOwner = locTenant === activeTenantId || (activeTenantId === 'default-tenant' && locTenant === 'default-tenant');
         const isLinked = (loc.allowedTenantIds && Array.isArray(loc.allowedTenantIds) && loc.allowedTenantIds.includes(activeTenantId)) || accessWhSet.has(locIdStr) || loc.isShared === true;
-        if (isOwner || isLinked || rawLocs.length <= 15) {
+        if (isOwner || isLinked) {
           set.add(loc.id as any);
           set.add(locIdStr);
           if (typeof loc.id === 'number') set.add(loc.id);
@@ -137,12 +137,14 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     return rawLocs.filter(loc => {
       if (!loc) return false;
       const locTenant = loc.tenantId || 'default-tenant';
-      const isOwner = locTenant === activeTenantId || locTenant === 'default-tenant' || activeTenantId === 'default-tenant';
+      const isOwner = locTenant === activeTenantId || (activeTenantId === 'default-tenant' && locTenant === 'default-tenant');
       const isLocAccessible = accessibleLocationIds.has(loc.id as any) || accessibleLocationIds.has(String(loc.id));
       const isShared = loc.isShared === true;
       return isOwner || isLocAccessible || isShared;
     });
   }, [liveAllLocations, locations, activeTenantId, accessibleLocationIds]);
+
+  const tenantLocations = activeLocations;
 
   const allItemLocations = useMemo(() => {
     const rawMap = liveAllItemLocations && liveAllItemLocations.length > 0 ? liveAllItemLocations : itemLocations;
@@ -331,7 +333,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         for (const loc of postRacksLocs) {
           if (loc.type === 'SHELF' && loc.id && loc.parentId && whMap.has(loc.parentId)) {
             const locCode = (loc.code || '').toLowerCase();
-            if (zoneRackCodes.has(locCode) || locCode.length > 0) {
+            if (zoneRackCodes.has(locCode)) {
               directShelfIdsToDelete.push(loc.id);
             }
           }
@@ -359,7 +361,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       setStoreProfiles(list);
     }
     loadCompanyProfiles();
-  }, [activeTenantId, business]);
+  }, [activeTenantId, business?.tenantId, business?.name]);
 
   useEffect(() => {
     db.companyProfiles.toArray().then(profiles => {
@@ -691,17 +693,26 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   // Auto-allocate unassigned godown stock into available warehouse racks
   const handleAutoAllocateStock = async (targetItem?: Item) => {
     const itemsToAllocate = targetItem ? [targetItem] : activeTenantItems;
-    const ownWh = activeLocations.find(l => l.type === 'WAREHOUSE' && (l.tenantId || 'default-tenant') === activeTenantId) || activeLocations.find(l => l.type === 'WAREHOUSE');
+    let ownWh = activeLocations.find(l => l.type === 'WAREHOUSE' && l.code !== 'WH-MAIN' && (l.tenantId || 'default-tenant') === activeTenantId);
+    if (!ownWh) {
+      ownWh = activeLocations.find(l => l.type === 'WAREHOUSE' && (l.tenantId || 'default-tenant') === activeTenantId) || activeLocations.find(l => l.type === 'WAREHOUSE');
+    }
 
     if (!ownWh) {
       showToast('Please create a warehouse first before allocating stock to racks.', 'error');
       return;
     }
 
-    // Find all shelves/racks inside this warehouse
-    const childZones = activeLocations.filter(l => l.type === 'ZONE' && (String(l.parentId) === String(ownWh.id) || (ownWh.code && l.code.startsWith(ownWh.code + '-'))));
-    const zoneIds = new Set(childZones.map(z => String(z.id)));
-    const availableRacks = activeLocations.filter(l => l.type === 'SHELF' && l.id && (zoneIds.has(String(l.parentId)) || String(l.parentId) === String(ownWh.id) || (ownWh.code && l.code.startsWith(ownWh.code + '-'))));
+    // Find all shelves/racks inside this warehouse or across active locations
+    let availableRacks = activeLocations.filter(l => l.type === 'SHELF' && l.id);
+    if (ownWh) {
+      const childZones = activeLocations.filter(l => l.type === 'ZONE' && (String(l.parentId) === String(ownWh.id) || (ownWh.code && l.code.startsWith(ownWh.code + '-'))));
+      const zoneIds = new Set(childZones.map(z => String(z.id)));
+      const whRacks = availableRacks.filter(l => zoneIds.has(String(l.parentId)) || String(l.parentId) === String(ownWh.id) || (ownWh.code && l.code.startsWith(ownWh.code + '-')));
+      if (whRacks.length > 0) {
+        availableRacks = whRacks;
+      }
+    }
 
     if (availableRacks.length === 0) {
       showToast(`No racks defined in "${ownWh.name}". Use "+ Store Layout Generator" to create racks first.`, 'error');
@@ -1043,19 +1054,21 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     if (!loc.id) return { used: 0, max: 100, remaining: 100, isFull: false };
     const max = loc.capacity || 100;
 
-    // Collect all location IDs that belong to this location (itself + child zones/racks)
     const targetLocIds = new Set<string>();
     targetLocIds.add(String(loc.id));
 
     if (loc.type === 'WAREHOUSE') {
       locations.forEach(l => {
-        if (l.id && (String(l.parentId) === String(loc.id) || (loc.code && l.code.startsWith(loc.code + '-')))) {
+        if (l.id && String(l.parentId) === String(loc.id)) {
           targetLocIds.add(String(l.id));
+          locations.filter(r => String(r.parentId) === String(l.id)).forEach(r => {
+            if (r.id) targetLocIds.add(String(r.id));
+          });
         }
       });
     } else if (loc.type === 'ZONE') {
       locations.forEach(l => {
-        if (l.type === 'SHELF' && l.id && (String(l.parentId) === String(loc.id) || (loc.code && l.code.startsWith(loc.code + '-')))) {
+        if (l.type === 'SHELF' && l.id && String(l.parentId) === String(loc.id)) {
           targetLocIds.add(String(l.id));
         }
       });
@@ -1195,21 +1208,26 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   };
 
   // Top Metrics Calculation (Scoped to Store Profile & Warehouse Permissions)
-  const tenantLocations = useMemo(() => {
-    return activeLocations.filter(l => (l.tenantId || 'default-tenant') === activeTenantId || (l.allowedTenantIds && Array.isArray(l.allowedTenantIds) && l.allowedTenantIds.includes(activeTenantId)));
-  }, [activeLocations, activeTenantId]);
+  const displayWarehouses = useMemo(() => {
+    const whs = activeLocations.filter(l => l.type === 'WAREHOUSE');
+    const customWhs = whs.filter(w => w.code !== 'WH-MAIN');
+    if (customWhs.length > 0) {
+      return customWhs;
+    }
+    return whs;
+  }, [activeLocations]);
 
   const activeWarehouses = useMemo(() => {
-    return tenantLocations.filter(l => l.type === 'WAREHOUSE').length;
-  }, [tenantLocations]);
+    return displayWarehouses.length;
+  }, [displayWarehouses]);
 
   const definedShelves = useMemo(() => {
-    return tenantLocations.filter(l => l.type === 'SHELF' || l.type === 'ZONE').length;
-  }, [tenantLocations]);
+    return activeLocations.filter(l => l.type === 'SHELF' || l.type === 'ZONE').length;
+  }, [activeLocations]);
 
   const activeTenantItems = useMemo(() => {
     const accessibleWhIds = new Set<string | number>();
-    tenantLocations.filter(l => l.type === 'WAREHOUSE').forEach(l => {
+    activeLocations.filter(l => l.type === 'WAREHOUSE').forEach(l => {
       if (l.id !== undefined && l.id !== null) {
         accessibleWhIds.add(l.id as any);
         accessibleWhIds.add(String(l.id));
@@ -1238,12 +1256,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       const isStoredInAccessibleLoc = itemMaps.some(il => accessibleLocIds.has(il.locationId as any) || accessibleLocIds.has(String(il.locationId)));
       return isOwner || isStoredInAccessibleLoc;
     });
-  }, [allItems, activeTenantId, tenantLocations, activeLocations, allItemLocations]);
+  }, [allItems, activeTenantId, activeLocations, allItemLocations]);
 
   const itemLocationMapByItemId = useMemo(() => {
     const map = new Map<string | number, ItemLocationMapping[]>();
     const tenantLocIds = new Set<string | number>();
-    tenantLocations.forEach(l => {
+    activeLocations.forEach(l => {
       if (l.id !== undefined && l.id !== null) {
         tenantLocIds.add(l.id as any);
         tenantLocIds.add(String(l.id));
@@ -1368,7 +1386,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
     uniqueItems.forEach(item => {
       if (!item.id) return;
-      const rawMappings = itemLocationMapByItemId.get(Number(item.id)) || [];
+      const rawMappings = itemLocationMapByItemId.get(item.id) || itemLocationMapByItemId.get(String(item.id)) || (item.id ? itemLocationMapByItemId.get(Number(item.id)) : []) || [];
 
       // Deduplicate mappings by locationId for this item
       const uniqueMappingMap = new Map<string | number, ItemLocationMapping>();
@@ -1383,9 +1401,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
       const validMappings = Array.from(uniqueMappingMap.values()).filter(m => {
         if (m.quantity <= 0) return false;
-        const locIdNum = Number(m.locationId);
-        if (locationMap.has(locIdNum)) return true;
-        return activeLocations.some(l => Number(l.id) === locIdNum);
+        const locIdStr = String(m.locationId);
+        if (locationMap.has(m.locationId) || locationMap.has(locIdStr)) return true;
+        return activeLocations.some(l => String(l.id) === locIdStr);
       });
 
       const allocatedMappings: Array<{
@@ -2345,7 +2363,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         {activeViewTab === 'hierarchy-master' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {tenantLocations.filter(l => l.type === 'WAREHOUSE').map(wh => {
+              {displayWarehouses.map(wh => {
                 const zones = locations.filter(l =>
                   l.type === 'ZONE' &&
                   (String(l.parentId) === String(wh.id) || (wh.code && l.code.startsWith(wh.code + '-')))
@@ -2423,7 +2441,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pl-1">
                                   {shelves.length === 0 && (() => {
-                                    const directMaps = itemLocations.filter(il => Number(il.locationId) === Number(zone.id) && il.quantity > 0);
+                                    const directMaps = itemLocations.filter(il => String(il.locationId) === String(zone.id) && il.quantity > 0);
                                     return directMaps.length === 0;
                                   })() ? (
                                     <div className="text-[10.5px] text-slate-400 italic py-0.5 col-span-2">No racks in this zone yet.</div>
@@ -2439,12 +2457,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                         const ilTenant = il.tenantId || 'default-tenant';
                                         return allowedTenants.has(ilTenant);
                                       });
-                                      const rackMappings = mapsToUse.filter(il => Number(il.locationId) === Number(sh.id) && il.quantity > 0);
+                                      const rackMappings = mapsToUse.filter(il => String(il.locationId) === String(sh.id) && il.quantity > 0);
                                       const uniqueMappedProductsMap = new Map<string, { item?: Item; quantity: number; isOtherStore: boolean; mapping: ItemLocationMapping }>();
 
                                       rackMappings.forEach(il => {
                                         const ilTenant = il.tenantId || 'default-tenant';
-                                        let matchedItem = allItems.find(i => Number(i.id) === Number(il.itemId) || ((i as any).cloudId && Number((i as any).cloudId) === Number(il.itemId)));
+                                        let matchedItem = allItems.find(i => String(i.id) === String(il.itemId) || ((i as any).cloudId && String((i as any).cloudId) === String(il.itemId)));
                                         if (!matchedItem && (il as any).skuCode) {
                                           const skuLower = String((il as any).skuCode).toLowerCase();
                                           matchedItem = allItems.find(i => i.skuCode && i.skuCode.toLowerCase() === skuLower);

@@ -271,17 +271,21 @@ export async function allocateStockToMainWarehouse(
  * Wipes operational and inventory store data specifically for a user/tenant from IndexedDB and cloud PostgreSQL.
  * (EXCEPT user accounts and company profiles).
  */
-export async function clearAllDatabaseData(tenantId?: string) {
-  const targetTenantId = tenantId || (typeof localStorage !== 'undefined' ? localStorage.getItem('vyapar_current_tenant') : null) || 'default-tenant';
+export async function clearAllDatabaseData(tenantId?: string, wipeAll: boolean = true) {
+  const targetTenantId = wipeAll ? 'ALL' : (tenantId || (typeof localStorage !== 'undefined' ? localStorage.getItem('vyapar_current_tenant') : null) || 'default-tenant');
 
-  // Helper to delete records for target tenant from a Dexie table
+  // Helper to delete records for target tenant or ALL from a Dexie table
   const clearTenantRecords = async (table: Table<any, any>) => {
     try {
-      const keysToDelete = await table
-        .filter(item => targetTenantId === 'ALL' || item.tenantId === targetTenantId || (!item.tenantId && targetTenantId === 'default-tenant'))
-        .primaryKeys();
-      if (keysToDelete.length > 0) {
-        await table.bulkDelete(keysToDelete as any[]);
+      if (wipeAll || targetTenantId === 'ALL') {
+        await table.clear();
+      } else {
+        const keysToDelete = await table
+          .filter(item => item.tenantId === targetTenantId || (!item.tenantId && targetTenantId === 'default-tenant'))
+          .primaryKeys();
+        if (keysToDelete.length > 0) {
+          await table.bulkDelete(keysToDelete as any[]);
+        }
       }
     } catch (err) {
       console.warn('Failed clearing tenant records for table:', err);
@@ -306,6 +310,7 @@ export async function clearAllDatabaseData(tenantId?: string) {
   await clearTenantRecords(db.locations);
   await clearTenantRecords(db.itemLocations);
   await clearTenantRecords(db.stockTransfers);
+  await clearTenantRecords(db.storeWarehouseAccess);
 
   // EXPLICITLY PRESERVED: db.companyProfiles and user sessions remain intact!
 
@@ -315,14 +320,15 @@ export async function clearAllDatabaseData(tenantId?: string) {
     await fetchWithTimeout(`${API_BASE_URL}/sync/reset`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenantId: targetTenantId, resetAll: targetTenantId === 'ALL' })
+      body: JSON.stringify({ tenantId: targetTenantId, resetAll: true, wipeAll: true })
     });
   } catch (err) {
     console.warn('Server reset notification warning:', err);
   }
 
   // Re-seed essential defaults for the reset tenant
-  await seedDatabaseIfEmpty(targetTenantId);
+  const activeTenantToSeed = (typeof localStorage !== 'undefined' ? localStorage.getItem('vyapar_current_tenant') : null) || 'default-tenant';
+  await seedDatabaseIfEmpty(activeTenantToSeed);
 
   if (typeof window !== 'undefined') {
     window.location.reload();
