@@ -122,7 +122,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     rawLocs.forEach(loc => {
       if (loc && loc.id !== undefined && loc.id !== null) {
         const locTenant = loc.tenantId || 'default-tenant';
-        if (locTenant === activeTenantId || loc.isStoreFront || loc.code === 'STORE-FRONT') {
+        if (locTenant === activeTenantId || (activeTenantId === 'default-tenant' && locTenant === 'default-tenant')) {
           locIds.add(loc.id as any);
           locIds.add(String(loc.id));
         }
@@ -1052,18 +1052,11 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   }, [activeLocations]);
 
   const getTrueWarehouseName = (locId?: string | number): string => {
-    // 1. Strictly find warehouse CREATED by the active store profile
-    const ownWhLoc = activeLocations.find(l => l.type === 'WAREHOUSE' && (l.tenantId || 'default-tenant') === activeTenantId);
-
-    // 2. If locId is provided, resolve its true parent warehouse
+    // 1. If locId is provided, resolve its true parent warehouse
     if (locId !== undefined && locId !== null && locationMap.has(locId)) {
       let curr = locationMap.get(locId)!;
       while (curr) {
         if (curr.type === 'WAREHOUSE') {
-          // If active store profile has its own warehouse (e.g. Sapphire-LHR) and location parent belongs to legacy tenant (GAMEGEEKS), override with own store warehouse!
-          if (ownWhLoc && (curr.tenantId || 'default-tenant') !== activeTenantId) {
-            return ownWhLoc.name;
-          }
           return curr.name;
         }
         if (curr.parentId !== undefined && curr.parentId !== null && locationMap.has(curr.parentId)) {
@@ -1074,8 +1067,16 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       }
     }
 
-    // 3. Fallback for unallocated store stock: return store's own warehouse if created, or N/A
-    return ownWhLoc ? ownWhLoc.name : 'N/A (No Linked Warehouse)';
+    // 2. Primary warehouse: First check displayWarehouses (e.g. Sapphire Warehouse)
+    if (displayWarehouses && displayWarehouses.length > 0) {
+      return displayWarehouses[0].name;
+    }
+
+    // 3. Fallback to any accessible warehouse
+    const anyWh = activeLocations.find(l => l.type === 'WAREHOUSE');
+    if (anyWh) return anyWh.name;
+
+    return 'N/A (No Linked Warehouse)';
   };
 
   const getLocationFullPath = (locId?: string | number): { warehouse: string; shelf: string; fullPath: string } => {
@@ -1401,25 +1402,52 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   }, [activeTenantItems, itemLocationMapByItemId, locationMap]);
 
   const capacityUtilization = useMemo(() => {
+    // Physical warehouse racks in active/accessible warehouses (excluding store front counters)
+    const whRacks = activeLocations.filter(l => 
+      l.type === 'SHELF' && 
+      !l.isStoreFront && 
+      l.code !== 'STORE-FRONT' && 
+      !l.code?.includes('SF') && 
+      !l.name?.toLowerCase().includes('store front') &&
+      (l as any).type !== 'STORE_FRONT' &&
+      (l as any).type !== 'STORE'
+    );
+
+    const whRackIds = new Set<string | number>();
     let totalCap = 0;
-    tenantLocations.forEach(l => { totalCap += (l.capacity || 0); });
-    let usedCap = 0;
-    const tenantLocIds = new Set<string | number>();
-    tenantLocations.forEach(l => {
-      if (l.id !== undefined && l.id !== null) {
-        tenantLocIds.add(l.id as any);
-        tenantLocIds.add(String(l.id));
+    whRacks.forEach(r => {
+      totalCap += (r.capacity || 50);
+      if (r.id !== undefined && r.id !== null) {
+        whRackIds.add(r.id as any);
+        whRackIds.add(String(r.id));
       }
     });
-    allItemLocations.filter(il => tenantLocIds.has(il.locationId as any) || tenantLocIds.has(String(il.locationId))).forEach(il => { usedCap += il.quantity; });
+
+    let usedCap = 0;
+    allItemLocations
+      .filter(il => whRackIds.has(il.locationId as any) || whRackIds.has(String(il.locationId)))
+      .forEach(il => {
+        usedCap += (il.quantity || 0);
+      });
+
+    // Fallback if no individual racks exist, check warehouse-level capacity
+    if (totalCap === 0) {
+      const whs = displayWarehouses.length > 0 ? displayWarehouses : activeLocations.filter(l => l.type === 'WAREHOUSE');
+      whs.forEach(w => { totalCap += (w.capacity || 500); });
+      allItemLocations.forEach(il => { usedCap += (il.quantity || 0); });
+    }
+
     if (totalCap === 0) return 0;
     return Math.min(100, Math.round((usedCap / totalCap) * 100));
-  }, [tenantLocations, allItemLocations]);
+  }, [activeLocations, allItemLocations, displayWarehouses]);
 
   const defaultWarehouseName = useMemo(() => {
+    if (displayWarehouses.length > 0) {
+      return displayWarehouses[0].name;
+    }
     const mainWh = tenantLocations.find(l => l.type === 'WAREHOUSE');
     return mainWh ? mainWh.name : (business?.name || 'Main Warehouse');
-  }, [tenantLocations, business]);
+  }, [displayWarehouses, tenantLocations, business]);
 
   // Grouped Rows for Stock by Location Table (1 Row per Product)
   const groupedStockRows = useMemo(() => {
@@ -1535,14 +1563,17 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         };
       });
 
-      // All store front allocations across all stores for this item (to accurately compute remaining warehouse reserve)
-      const allStoreFrontsQty = validMappings
-        .filter(m => {
-          const locObj = locationMap.get(m.locationId) || locationMap.get(String(m.locationId)) || activeLocations.find(l => String(l.id) === String(m.locationId));
-          if (!locObj) return false;
-          return Boolean(locObj.isStoreFront) || locObj.code === 'STORE-FRONT' || locObj.name?.toLowerCase().includes('store front') || (locObj as any).type === 'STORE_FRONT';
+      // All store front allocations across ALL stores globally for this item (to accurately compute remaining warehouse reserve)
+      const allLocs = liveAllLocations && liveAllLocations.length > 0 ? liveAllLocations : locations;
+      const allMaps = liveAllItemLocations && liveAllItemLocations.length > 0 ? liveAllItemLocations : allItemLocations;
+      const allStoreFrontsQty = allMaps
+        .filter(il => {
+          if (String(il.itemId) !== String(item.id) && Number(il.itemId) !== Number(item.id) && (!item.skuCode || (il as any).skuCode !== item.skuCode)) return false;
+          const loc = allLocs.find(l => String(l.id) === String(il.locationId));
+          if (!loc || loc.type === 'WAREHOUSE') return false;
+          return Boolean(loc.isStoreFront) || loc.code === 'STORE-FRONT' || loc.code?.includes('SF') || loc.name?.toLowerCase().includes('store front') || (loc as any).type === 'STORE' || (loc as any).type === 'STORE_FRONT';
         })
-        .reduce((sum, m) => sum + m.quantity, 0);
+        .reduce((sum, il) => sum + (il.quantity || 0), 0);
 
       // Warehouse bulk reserve stock = Total stock minus all stock transferred to all retail sales floors
       const whTotalStock = Math.max(0, item.currentStock - allStoreFrontsQty);
@@ -1584,7 +1615,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     });
 
     return rows;
-  }, [items, itemLocationMapByItemId, locationMap, defaultWarehouseName, activeLocations]);
+  }, [items, itemLocationMapByItemId, locationMap, defaultWarehouseName, activeLocations, liveAllLocations, liveAllItemLocations, allItemLocations]);
 
   // Store Front live items and on-shelf stock for active store
   const storeFrontData = useMemo(() => {

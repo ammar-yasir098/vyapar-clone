@@ -524,8 +524,9 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                             })
                             .reduce((sum, m) => sum + m.quantity, 0);
 
-                          // Remaining warehouse reserve stock
-                          const whStock = Math.max(0, stock - allStoreFrontsQty);
+                          // Remaining warehouse reserve stock (only if store has connected warehouses)
+                          const hasAccessibleWh = whLocationIds.size > 0;
+                          const whStock = hasAccessibleWh ? Math.max(0, stock - allStoreFrontsQty) : 0;
                           const activeStoreTotalStock = whStock + storeStock;
 
                           return (

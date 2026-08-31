@@ -450,7 +450,8 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                             })
                             .reduce((sum: number, il: any) => sum + il.quantity, 0);
 
-                          const whStock = Math.max(0, item.currentStock - allStoreFrontsQty);
+                          const hasAccessibleWh = whLocationIds.size > 0;
+                          const whStock = hasAccessibleWh ? Math.max(0, item.currentStock - allStoreFrontsQty) : 0;
 
                           return (
                             <div className="text-[9.5px] font-mono mt-0.5 flex items-center justify-end gap-1">

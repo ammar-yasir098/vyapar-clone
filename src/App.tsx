@@ -404,7 +404,7 @@ export function App() {
     allLocations.forEach(loc => {
       if (loc && loc.id) {
         const locTenant = loc.tenantId || 'default-tenant';
-        if (locTenant === activeTenantId || loc.isStoreFront || loc.code === 'STORE-FRONT') {
+        if (locTenant === activeTenantId || (activeTenantId === 'default-tenant' && locTenant === 'default-tenant')) {
           locIds.add(String(loc.id));
         }
       }
@@ -440,7 +440,7 @@ export function App() {
     return allItemLocations.filter(il => {
       if (!il) return false;
       const ilTenant = il.tenantId || 'default-tenant';
-      const isOwner = ilTenant === activeTenantId || ilTenant === 'default-tenant' || activeTenantId === 'default-tenant';
+      const isOwner = ilTenant === activeTenantId || (activeTenantId === 'default-tenant' && ilTenant === 'default-tenant');
       const isLocAccessible = accessibleLocationIds.has(String(il.locationId));
       return isOwner || isLocAccessible;
     });
@@ -450,11 +450,14 @@ export function App() {
     return allItems.filter(item => {
       if (!item) return false;
       const itemTenant = item.tenantId || 'default-tenant';
-      const isOwner = itemTenant === activeTenantId || itemTenant === 'default-tenant' || activeTenantId === 'default-tenant';
-      const isStoredInAccessibleLoc = itemLocations.some((il: any) => String(il.itemId) === String(item.id) && accessibleLocationIds.has(String(il.locationId)));
+      const isOwner = itemTenant === activeTenantId || (activeTenantId === 'default-tenant' && itemTenant === 'default-tenant');
+      const isStoredInAccessibleLoc = allItemLocations.some((il: any) => 
+        (String(il.itemId) === String(item.id) || (item.skuCode && (il as any).skuCode === item.skuCode)) && 
+        accessibleLocationIds.has(String(il.locationId))
+      );
       return isOwner || isStoredInAccessibleLoc;
     });
-  }, [allItems, activeTenantId, itemLocations, accessibleLocationIds]);
+  }, [allItems, activeTenantId, allItemLocations, accessibleLocationIds]);
 
   const parties = useMemo(() => allParties.filter(party => party && (party.tenantId || 'default-tenant') === activeTenantId), [allParties, activeTenantId]);
   const invoices = useMemo(() => allInvoices.filter(inv => inv && (inv.tenantId || 'default-tenant') === activeTenantId), [allInvoices, activeTenantId]);

@@ -200,8 +200,9 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
 
       const storeStock = storeMaps.reduce((sum: number, m: ItemLocationMapping) => sum + m.quantity, 0);
 
-      // Warehouse Reserve Stock = Total item stock minus all stock transferred to all store floors
-      const whStock = Math.max(0, item.currentStock - allStoreFrontsQty);
+      // Warehouse Reserve Stock = Total item stock minus all stock transferred to all store floors (only if store has linked warehouse)
+      const hasAccessibleWh = warehouseLocations.length > 0;
+      const whStock = hasAccessibleWh ? Math.max(0, item.currentStock - allStoreFrontsQty) : 0;
       const activeStoreTotalStock = whStock + storeStock;
 
       const alertMin = item.minStockAlert || 5;
@@ -223,7 +224,7 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
         whMaps: validMappings.filter(m => !storeMaps.includes(m))
       };
     });
-  }, [items, getItemLocationMappings, activeLocations]);
+  }, [items, getItemLocationMappings, activeLocations, warehouseLocations]);
 
   // Filtered rows for display
   const filteredRows = useMemo(() => {
@@ -265,9 +266,17 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
 
     const validMappings = getItemLocationMappings(replenishItem);
 
-    if (validMappings.length > 0) {
-      return validMappings.map((m: ItemLocationMapping) => {
-        const loc = locations.find(l => String(l.id) === String(m.locationId));
+    // Filter to ONLY actual warehouse racks/zones (EXCLUDE all Store Front locations and root warehouses if racks exist)
+    const whRacks = validMappings.filter(m => {
+      const loc = locations.find(l => String(l.id) === String(m.locationId)) || activeLocations.find(l => String(l.id) === String(m.locationId));
+      if (!loc) return false;
+      const isStoreFront = Boolean(loc.isStoreFront) || loc.code === 'STORE-FRONT' || loc.code?.includes('SF') || loc.name?.toLowerCase().includes('store front') || (loc as any).type === 'STORE_FRONT' || (loc as any).type === 'STORE';
+      return !isStoreFront && loc.type !== 'WAREHOUSE' && m.quantity > 0;
+    });
+
+    if (whRacks.length > 0) {
+      return whRacks.map((m: ItemLocationMapping) => {
+        const loc = locations.find(l => String(l.id) === String(m.locationId)) || activeLocations.find(l => String(l.id) === String(m.locationId));
         const locCode = loc ? loc.code : `LOC-${m.locationId}`;
         const locName = loc ? loc.name : `Rack ${m.locationId}`;
         return {
@@ -280,15 +289,19 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
       });
     }
 
-    // Fallback: If product has unassigned stock or no specific rack mapping yet
+    // Fallback: If product has unassigned warehouse stock or no specific rack mapping yet
+    const matchedRow = storeStockRows.find(r => String(r.item.id) === String(replenishItem.id));
+    const whReserve = matchedRow ? matchedRow.whStock : replenishItem.currentStock;
+    const defaultWh = warehouseLocations[0] || locations.find(l => l.type === 'WAREHOUSE') || locations[0];
+
     return [{
       mapping: null,
-      locationId: locations[0]?.id || 1,
-      code: 'GENERAL-STOCK',
-      name: 'Unassigned (General Warehouse Reserve)',
-      availableQty: replenishItem.currentStock
+      locationId: defaultWh?.id || 1,
+      code: defaultWh?.code || 'GENERAL-STOCK',
+      name: `${defaultWh?.name || 'Central Warehouse'} (Unassigned Reserve)`,
+      availableQty: whReserve
     }];
-  }, [replenishItem, itemLocations, locations, items, getItemLocationMappings]);
+  }, [replenishItem, itemLocations, locations, items, getItemLocationMappings, storeStockRows, warehouseLocations, activeLocations]);
 
   const getOrCreateStoreFrontLocationId = async (): Promise<string | number> => {
     let storeLoc = locations.find(l => 
@@ -325,13 +338,25 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
 
   // Open Replenish Modal for an Item
   const handleOpenReplenishModal = async (item: Item) => {
+    if (warehouseLocations.length === 0) {
+      showToast('This store branch has no linked warehouse. Please connect a warehouse in Warehouse Manager to replenish stock.', 'error');
+      return;
+    }
     setReplenishItem(item);
 
     const validMappings = getItemLocationMappings(item);
-    if (validMappings.length > 0) {
-      setSourceLocId(String(validMappings[0].locationId));
+    const whRacks = validMappings.filter(m => {
+      const loc = locations.find(l => String(l.id) === String(m.locationId)) || activeLocations.find(l => String(l.id) === String(m.locationId));
+      if (!loc) return false;
+      const isStoreFront = Boolean(loc.isStoreFront) || loc.code === 'STORE-FRONT' || loc.code?.includes('SF') || loc.name?.toLowerCase().includes('store front') || (loc as any).type === 'STORE_FRONT' || (loc as any).type === 'STORE';
+      return !isStoreFront && loc.type !== 'WAREHOUSE' && m.quantity > 0;
+    });
+
+    if (whRacks.length > 0) {
+      setSourceLocId(String(whRacks[0].locationId));
     } else {
-      setSourceLocId(String(locations[0]?.id || ''));
+      const defaultWh = warehouseLocations[0] || locations.find(l => l.type === 'WAREHOUSE') || locations[0];
+      setSourceLocId(String(defaultWh?.id || ''));
     }
 
     const sfId = await getOrCreateStoreFrontLocationId();
@@ -687,7 +712,15 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
                   <div className="font-mono text-slate-400 text-[11px]">SKU: {replenishItem.skuCode}</div>
                 </div>
                 <div className="text-right">
-                  <div className="font-mono font-extrabold text-slate-900">Total Stock: {replenishItem.currentStock} {replenishItem.unitType}</div>
+                  {(() => {
+                    const matchedRow = storeStockRows.find(r => String(r.item.id) === String(replenishItem.id));
+                    const whAvailable = matchedRow ? matchedRow.whStock : replenishItem.currentStock;
+                    return (
+                      <div className="font-mono font-extrabold text-blue-700">
+                        Warehouse Available: <span className="font-black text-slate-900">{whAvailable} {replenishItem.unitType || 'PCS'}</span>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
