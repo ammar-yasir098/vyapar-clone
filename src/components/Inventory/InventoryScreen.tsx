@@ -82,10 +82,12 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
 
     const storeIds = new Set<string | number>();
     tenantLocs
-      .filter(l => 
-        l.type !== 'WAREHOUSE' && 
-        (Boolean(l.isStoreFront) || l.code === 'STORE-FRONT' || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE' || (l as any).type === 'STORE_FRONT')
-      )
+      .filter(l => {
+        if (l.type === 'WAREHOUSE') return false;
+        const locTenant = l.tenantId || 'default-tenant';
+        if (locTenant !== activeTenantId) return false;
+        return Boolean(l.isStoreFront) || l.code === 'STORE-FRONT' || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE' || (l as any).type === 'STORE_FRONT';
+      })
       .forEach(l => {
         if (l.id !== undefined && l.id !== null) {
           storeIds.add(l.id as any);
@@ -482,19 +484,19 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                           const targetItemId = String(item.id);
                           const stock = Number(item?.currentStock || 0);
 
-                          const itemMaps = itemLocs.filter(il => {
+                          // Global mappings for this product across all locations & stores
+                          const allProductMappings = liveItemLocations.filter(il => {
+                            if (il.quantity <= 0) return false;
                             if (String(il.itemId) === targetItemId) return true;
                             if ((item as any).cloudId && String(il.itemId) === String((item as any).cloudId)) return true;
-
                             const mapSku = (il as any).skuCode;
                             if (mapSku && item.skuCode && String(mapSku).toLowerCase() === item.skuCode.toLowerCase()) return true;
-
                             return false;
                           });
 
                           // Deduplicate mappings by locationId
                           const uniqueMap = new Map<string | number, ItemLocationMapping>();
-                          itemMaps.forEach(m => {
+                          allProductMappings.forEach(m => {
                             if (!uniqueMap.has(m.locationId)) {
                               uniqueMap.set(m.locationId, { ...m });
                             } else {
@@ -504,9 +506,27 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                           });
 
                           const validMappings = Array.from(uniqueMap.values()).filter(m => m.quantity > 0);
-                          const storeMaps = validMappings.filter(m => storeFrontLocationIds.has(m.locationId as any) || storeFrontLocationIds.has(String(m.locationId)));
+
+                          // Active Store Front stock for current store
+                          const storeMaps = validMappings.filter(m => {
+                            const mapTenant = m.tenantId || 'default-tenant';
+                            if (mapTenant !== activeTenantId) return false;
+                            return storeFrontLocationIds.has(m.locationId as any) || storeFrontLocationIds.has(String(m.locationId));
+                          });
                           const storeStock = storeMaps.reduce((sum, m) => sum + m.quantity, 0);
-                          const whStock = Math.max(0, stock - storeStock);
+
+                          // Total stock transferred to ANY store front floor
+                          const allStoreFrontsQty = validMappings
+                            .filter(m => {
+                              const loc = liveLocations.find(l => String(l.id) === String(m.locationId));
+                              if (!loc || loc.type === 'WAREHOUSE') return false;
+                              return Boolean(loc.isStoreFront) || loc.code === 'STORE-FRONT' || loc.code?.includes('SF') || (loc as any).type === 'STORE' || (loc as any).type === 'STORE_FRONT';
+                            })
+                            .reduce((sum, m) => sum + m.quantity, 0);
+
+                          // Remaining warehouse reserve stock
+                          const whStock = Math.max(0, stock - allStoreFrontsQty);
+                          const activeStoreTotalStock = whStock + storeStock;
 
                           return (
                             <div className="flex flex-col gap-1 py-0.5 min-w-[175px]">
@@ -521,7 +541,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
                                 </span>
                               </div>
                               <div className="flex items-center gap-1.5 text-[10.5px] font-mono font-extrabold text-slate-400">
-                                <span>Total: <strong className="text-slate-700 font-black">{stock} {item.unitType || 'PCS'}</strong></span>
+                                <span>Total: <strong className="text-slate-700 font-black">{activeStoreTotalStock} {item.unitType || 'PCS'}</strong></span>
                                 {isLowStock && (
                                   <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 text-[9.5px] font-black tracking-wider uppercase border border-amber-200">
                                     LOW

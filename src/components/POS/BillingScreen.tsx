@@ -74,10 +74,12 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
 
     const storeIds = new Set<string | number>();
     tenantLocs
-      .filter(l => 
-        l.type !== 'WAREHOUSE' && 
-        (Boolean(l.isStoreFront) || l.code === 'STORE-FRONT' || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE' || (l as any).type === 'STORE_FRONT')
-      )
+      .filter(l => {
+        if (l.type === 'WAREHOUSE') return false;
+        const locTenant = l.tenantId || 'default-tenant';
+        if (locTenant !== activeTenantId) return false;
+        return Boolean(l.isStoreFront) || l.code === 'STORE-FRONT' || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE' || (l as any).type === 'STORE_FRONT';
+      })
       .forEach(l => {
         if (l.id !== undefined && l.id !== null) {
           storeIds.add(l.id as any);
@@ -421,10 +423,34 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                       <div className="text-right">
                         <div className="font-extrabold text-xs text-emerald-600 font-mono">Rs {Number(item.salesPrice || 0).toFixed(2)}</div>
                         {(() => {
-                          const itemMaps = itemLocs.filter(il => (String(il.itemId) === String(item.id) || Number(il.itemId) === Number(item.id)) && il.quantity > 0);
-                          const storeMaps = itemMaps.filter(il => storeFrontLocationIds.has(il.locationId as any) || storeFrontLocationIds.has(String(il.locationId)));
+                          const targetItemId = String(item.id);
+                          const allProductMappings = liveItemLocations.filter(il => {
+                            if (il.quantity <= 0) return false;
+                            if (String(il.itemId) === targetItemId || Number(il.itemId) === Number(item.id)) return true;
+                            if ((item as any).cloudId && String(il.itemId) === String((item as any).cloudId)) return true;
+                            const mapSku = (il as any).skuCode;
+                            if (mapSku && item.skuCode && String(mapSku).toLowerCase() === item.skuCode.toLowerCase()) return true;
+                            return false;
+                          });
+
+                          // Active store front stock
+                          const storeMaps = allProductMappings.filter(il => {
+                            const mapTenant = il.tenantId || 'default-tenant';
+                            if (mapTenant !== activeTenantId) return false;
+                            return storeFrontLocationIds.has(il.locationId as any) || storeFrontLocationIds.has(String(il.locationId));
+                          });
                           const storeStock = storeMaps.reduce((sum: number, il: any) => sum + il.quantity, 0);
-                          const whStock = Math.max(0, item.currentStock - storeStock);
+
+                          // Total stock in any store front
+                          const allStoreFrontsQty = allProductMappings
+                            .filter(il => {
+                              const loc = liveLocations.find(l => String(l.id) === String(il.locationId));
+                              if (!loc || loc.type === 'WAREHOUSE') return false;
+                              return Boolean(loc.isStoreFront) || loc.code === 'STORE-FRONT' || loc.code?.includes('SF') || (loc as any).type === 'STORE' || (loc as any).type === 'STORE_FRONT';
+                            })
+                            .reduce((sum: number, il: any) => sum + il.quantity, 0);
+
+                          const whStock = Math.max(0, item.currentStock - allStoreFrontsQty);
 
                           return (
                             <div className="text-[9.5px] font-mono mt-0.5 flex items-center justify-end gap-1">

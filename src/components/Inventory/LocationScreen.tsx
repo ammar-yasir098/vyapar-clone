@@ -1427,6 +1427,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       item: Item;
       primaryWarehouseName: string;
       totalStock: number;
+      whAssignedQty: number;
+      whRackCount: number;
+      storeFrontQty: number;
       totalAssignedQty: number;
       unassignedQty: number;
       allocatedMappings: Array<{
@@ -1478,6 +1481,25 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         return locObj.type !== 'WAREHOUSE';
       });
 
+      const whMappings = validMappings.filter(m => {
+        const locObj = locationMap.get(m.locationId) || locationMap.get(String(m.locationId)) || activeLocations.find(l => String(l.id) === String(m.locationId));
+        if (!locObj) return false;
+        return !(Boolean(locObj.isStoreFront) || locObj.code === 'STORE-FRONT' || locObj.name?.toLowerCase().includes('store front') || (locObj as any).type === 'STORE_FRONT');
+      });
+
+      const storeMappings = validMappings.filter(m => {
+        const locObj = locationMap.get(m.locationId) || locationMap.get(String(m.locationId)) || activeLocations.find(l => String(l.id) === String(m.locationId));
+        if (!locObj) return false;
+        const isStoreFront = Boolean(locObj.isStoreFront) || locObj.code === 'STORE-FRONT' || locObj.name?.toLowerCase().includes('store front') || (locObj as any).type === 'STORE_FRONT';
+        if (!isStoreFront) return false;
+        const locTenant = locObj.tenantId || 'default-tenant';
+        const mapTenant = m.tenantId || 'default-tenant';
+        return locTenant === activeTenantId && mapTenant === activeTenantId;
+      });
+
+      const whAssignedQty = whMappings.reduce((sum, m) => sum + m.quantity, 0);
+      const storeFrontQty = storeMappings.reduce((sum, m) => sum + m.quantity, 0);
+
       const allocatedMappings: Array<{
         mapping?: ItemLocationMapping;
         warehouseName: string;
@@ -1487,7 +1509,17 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         capacityLimit: number;
         isUnassigned: boolean;
         isStoreFront?: boolean;
-      }> = validMappings.map(m => {
+      }> = validMappings.filter(m => {
+        const locObj = locationMap.get(m.locationId) || locationMap.get(String(m.locationId)) || activeLocations.find(l => String(l.id) === String(m.locationId));
+        if (!locObj) return false;
+        const isStoreFront = Boolean(locObj.isStoreFront) || locObj.code === 'STORE-FRONT' || locObj.name?.toLowerCase().includes('store front') || (locObj as any).type === 'STORE_FRONT';
+        if (isStoreFront) {
+          const locTenant = locObj.tenantId || 'default-tenant';
+          const mapTenant = m.tenantId || 'default-tenant';
+          return locTenant === activeTenantId && mapTenant === activeTenantId;
+        }
+        return true;
+      }).map(m => {
         const locObj = locationMap.get(m.locationId) || locationMap.get(String(m.locationId)) || activeLocations.find(l => String(l.id) === String(m.locationId));
         const isStoreFront = locObj ? (Boolean(locObj.isStoreFront) || locObj.code === 'STORE-FRONT' || locObj.name?.toLowerCase().includes('store front') || (locObj as any).type === 'STORE_FRONT') : false;
         const locInfo = getLocationFullPath(m.locationId);
@@ -1503,8 +1535,20 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         };
       });
 
-      const totalAssignedQty = validMappings.reduce((sum, m) => sum + m.quantity, 0);
-      const unassignedQty = Math.max(0, item.currentStock - totalAssignedQty);
+      // All store front allocations across all stores for this item (to accurately compute remaining warehouse reserve)
+      const allStoreFrontsQty = validMappings
+        .filter(m => {
+          const locObj = locationMap.get(m.locationId) || locationMap.get(String(m.locationId)) || activeLocations.find(l => String(l.id) === String(m.locationId));
+          if (!locObj) return false;
+          return Boolean(locObj.isStoreFront) || locObj.code === 'STORE-FRONT' || locObj.name?.toLowerCase().includes('store front') || (locObj as any).type === 'STORE_FRONT';
+        })
+        .reduce((sum, m) => sum + m.quantity, 0);
+
+      // Warehouse bulk reserve stock = Total stock minus all stock transferred to all retail sales floors
+      const whTotalStock = Math.max(0, item.currentStock - allStoreFrontsQty);
+
+      // True Unallocated Warehouse Stock = Warehouse bulk stock minus stock assigned to specific warehouse racks
+      const unassignedQty = Math.max(0, whTotalStock - whAssignedQty);
 
       if (unassignedQty > 0) {
         allocatedMappings.push({
@@ -1518,13 +1562,20 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         });
       }
 
+      // Total Available Stock for the active store = Warehouse Reserve Stock + Active Store Front Stock
+      const activeStoreAvailableStock = whTotalStock + storeFrontQty;
+      const totalAssignedQty = whAssignedQty + storeFrontQty;
+
       // Determine primary warehouse name (e.g. Sapphire-LHR)
-      const primaryWh = getTrueWarehouseName(validMappings[0]?.locationId);
+      const primaryWh = getTrueWarehouseName(whMappings[0]?.locationId || validMappings[0]?.locationId);
 
       rows.push({
         item,
         primaryWarehouseName: primaryWh,
-        totalStock: item.currentStock,
+        totalStock: activeStoreAvailableStock,
+        whAssignedQty,
+        whRackCount: whMappings.length,
+        storeFrontQty,
         totalAssignedQty,
         unassignedQty,
         allocatedMappings,
@@ -1533,7 +1584,44 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     });
 
     return rows;
-  }, [items, itemLocationMapByItemId, locationMap, defaultWarehouseName]);
+  }, [items, itemLocationMapByItemId, locationMap, defaultWarehouseName, activeLocations]);
+
+  // Store Front live items and on-shelf stock for active store
+  const storeFrontData = useMemo(() => {
+    const sfLoc = activeLocations.find(l => 
+      (l.tenantId || 'default-tenant') === activeTenantId && 
+      (Boolean(l.isStoreFront) || l.code === 'STORE-FRONT' || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE_FRONT')
+    );
+    const sfLocId = sfLoc ? String(sfLoc.id) : null;
+
+    const itemsOnFloor: Array<{ item: Item; quantity: number }> = [];
+    let totalPcs = 0;
+
+    activeTenantItems.forEach(item => {
+      if (!item.id) return;
+      const rawMappings = itemLocationMapByItemId.get(item.id) || itemLocationMapByItemId.get(String(item.id)) || [];
+      const storeMaps = rawMappings.filter(m => {
+        if (m.quantity <= 0) return false;
+        const mapTenant = m.tenantId || 'default-tenant';
+        if (mapTenant !== activeTenantId) return false;
+        if (sfLocId && String(m.locationId) === sfLocId) return true;
+        const locObj = locationMap.get(m.locationId) || locationMap.get(String(m.locationId));
+        return locObj ? ((locObj.tenantId || 'default-tenant') === activeTenantId && (Boolean(locObj.isStoreFront) || locObj.code === 'STORE-FRONT' || locObj.name?.toLowerCase().includes('store front'))) : false;
+      });
+      const qty = storeMaps.reduce((sum, m) => sum + m.quantity, 0);
+      if (qty > 0) {
+        itemsOnFloor.push({ item, quantity: qty });
+        totalPcs += qty;
+      }
+    });
+
+    return {
+      sfLocation: sfLoc,
+      itemsOnFloor,
+      totalPcs,
+      totalCatalogItems: activeTenantItems.length
+    };
+  }, [activeLocations, activeTenantItems, itemLocationMapByItemId, locationMap, activeTenantId]);
 
   // Filtered Grouped Stock Rows
   const filteredGroupedStockRows = useMemo(() => {
@@ -2280,29 +2368,33 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                               )}
                             </td>
 
-                            {/* Shelf & Rack Allocation Summary Badge */}
+                            {/* Shelf & Rack Allocation Summary Badges */}
                             <td>
-                              {validAllocations.length > 0 && group.unassignedQty <= 0 ? (
-                                <span className="badge badge-purple cursor-pointer" onClick={() => toggleRowExpanded(group.item.id!)}>
-                                  <MapPin className="w-3 h-3 text-purple-600" />
-                                  {validAllocations.length} Racks Allocated ({group.totalAssignedQty} {group.item.unitType})
-                                </span>
-                              ) : validAllocations.length > 0 && group.unassignedQty > 0 ? (
-                                <span className="badge badge-amber cursor-pointer" onClick={() => toggleRowExpanded(group.item.id!)}>
-                                  <MapPin className="w-3 h-3 text-amber-600" />
-                                  {validAllocations.length} Racks ({group.totalAssignedQty} {group.item.unitType}) + 📦 {group.unassignedQty} Unallocated
-                                </span>
-                              ) : group.totalStock > 0 ? (
-                                <span className="px-2.5 py-1 rounded-full bg-amber-50/90 text-amber-800 font-extrabold text-[10.5px] border border-amber-200 inline-flex items-center gap-1 cursor-pointer hover:bg-amber-100 transition" onClick={() => handleAutoAllocateStock(group.item)} title="Click to auto-allocate into available warehouse racks">
-                                  <Package className="w-3 h-3 text-amber-600" />
-                                  <span>Unallocated Warehouse Stock ({group.totalStock} {group.item.unitType})</span>
-                                </span>
-                              ) : (
-                                <span className="px-2.5 py-1 rounded-full bg-slate-100/90 text-slate-500 font-extrabold text-[10.5px] border border-slate-200 inline-flex items-center gap-1">
-                                  <Package className="w-3 h-3 text-slate-400" />
-                                  <span>Out of Stock (0 {group.item.unitType})</span>
-                                </span>
-                              )}
+                              <div className="flex flex-wrap items-center gap-1.5 cursor-pointer" onClick={() => toggleRowExpanded(group.item.id!)}>
+                                {group.whRackCount > 0 && (
+                                  <span className="badge badge-purple font-mono" title={`${group.whAssignedQty} PCS allocated in warehouse racks`}>
+                                    <MapPin className="w-3 h-3 text-purple-600" />
+                                    <span>{group.whRackCount} Racks ({group.whAssignedQty} {group.item.unitType})</span>
+                                  </span>
+                                )}
+                                {group.storeFrontQty > 0 && (
+                                  <span className="badge badge-green font-mono" title={`${group.storeFrontQty} PCS transferred to store front for POS billing`}>
+                                    <Store className="w-3 h-3 text-emerald-600" />
+                                    <span>Store: {group.storeFrontQty} {group.item.unitType}</span>
+                                  </span>
+                                )}
+                                {group.unassignedQty > 0 && (
+                                  <span className="badge badge-amber font-mono" title={`${group.unassignedQty} PCS remaining unallocated in warehouse`}>
+                                    <span>📦 {group.unassignedQty} Unallocated</span>
+                                  </span>
+                                )}
+                                {group.whRackCount === 0 && group.storeFrontQty === 0 && group.unassignedQty === 0 && (
+                                  <span className="px-2.5 py-1 rounded-full bg-slate-100/90 text-slate-500 font-extrabold text-[10.5px] border border-slate-200 inline-flex items-center gap-1">
+                                    <Package className="w-3 h-3 text-slate-400" />
+                                    <span>Out of Stock (0 {group.item.unitType})</span>
+                                  </span>
+                                )}
+                              </div>
                             </td>
 
                             {/* Total Available Qty */}
@@ -2365,8 +2457,11 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                                       <FolderTree className="w-4 h-4 text-purple-600" />
                                       Storage Allocation Breakdown for "{group.item.name}"
                                     </span>
-                                    <span className="text-[11px] text-slate-500 font-mono">
-                                      {group.totalAssignedQty} PCS Allocated across {validAllocations.length} Racks
+                                    <span className="text-[11px] text-slate-500 font-mono flex items-center gap-2">
+                                      <span>🏢 <strong>{group.whAssignedQty} PCS</strong> in {group.whRackCount} Warehouse Racks</span>
+                                      {group.storeFrontQty > 0 && (
+                                        <span className="text-emerald-700 font-bold">🏪 <strong>{group.storeFrontQty} PCS</strong> on Store Front</span>
+                                      )}
                                     </span>
                                   </div>
 
@@ -2466,6 +2561,84 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         {activeViewTab === 'hierarchy-master' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* 🏪 Built-In Store Front / Retail Sales Floor Card */}
+              <div className="card bg-gradient-to-br from-emerald-50/70 via-white to-emerald-50/30 border border-emerald-200/90 rounded-2xl p-5 space-y-4 shadow-sm hover:shadow-md transition">
+                <div className="flex items-center justify-between border-b border-emerald-100 pb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center font-bold shadow-md shadow-emerald-200">
+                      <Store className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                        <span>{business?.name || 'Active Store'} — Store Front</span>
+                        <span className="badge badge-green font-mono text-[10px] font-extrabold">🟢 POS READY</span>
+                      </h3>
+                      <span className="text-[11px] font-mono text-emerald-700 font-bold">STORE-FRONT • Retail Sales Floor & Counter</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setActiveViewTab('replenishment')}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold transition cursor-pointer flex items-center gap-1.5 shadow-sm shadow-emerald-200"
+                      title="Transfer stock from warehouse to store front"
+                    >
+                      <ArrowLeftRight className="w-3.5 h-3.5" />
+                      <span>⇄ Replenish Store</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-emerald-100 shadow-2xs">
+                  <div className="text-xs">
+                    <div className="text-slate-400 font-bold uppercase text-[10px] tracking-wider">Live On-Shelf Stock</div>
+                    <div className="font-black text-slate-900 text-lg font-mono flex items-center gap-1.5 mt-0.5">
+                      <span className="text-emerald-600">{storeFrontData.totalPcs}</span>
+                      <span className="text-xs text-slate-400 font-normal">PCS Ready for Billing</span>
+                    </div>
+                  </div>
+                  <div className="text-right text-xs">
+                    <div className="text-slate-400 font-bold uppercase text-[10px] tracking-wider">Stocked Products</div>
+                    <div className="font-mono font-extrabold text-slate-700 mt-0.5">
+                      {storeFrontData.itemsOnFloor.length} / {storeFrontData.totalCatalogItems} SKUs on Floor
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
+                    <span>Store Front Product Inventory</span>
+                    <span className="text-emerald-700 font-mono font-bold">Live Counter Display</span>
+                  </div>
+
+                  {storeFrontData.itemsOnFloor.length === 0 ? (
+                    <div className="bg-white/80 p-4 rounded-xl border border-dashed border-emerald-200 text-center space-y-2">
+                      <Package className="w-6 h-6 text-slate-300 mx-auto" />
+                      <div className="text-xs text-slate-500 font-medium">No items currently stocked on the store front sales floor.</div>
+                      <button
+                        onClick={() => setActiveViewTab('replenishment')}
+                        className="px-3 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-bold transition cursor-pointer"
+                      >
+                        ⚡ Replenish Stock from Warehouse
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-1">
+                      {storeFrontData.itemsOnFloor.map(({ item, quantity }) => (
+                        <div key={item.id} className="bg-white p-2.5 rounded-xl border border-emerald-100 flex items-center justify-between shadow-2xs">
+                          <div>
+                            <div className="font-bold text-xs text-slate-900">{item.name}</div>
+                            <div className="text-[10.5px] font-mono text-slate-400">{item.skuCode}</div>
+                          </div>
+                          <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono font-black text-xs">
+                            {quantity} {item.unitType || 'PCS'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {displayWarehouses.map(wh => {
                 const zones = locations.filter(l =>
                   l.type === 'ZONE' &&

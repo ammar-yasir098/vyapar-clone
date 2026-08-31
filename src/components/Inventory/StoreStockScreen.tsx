@@ -178,16 +178,31 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
     return items.map(item => {
       const validMappings = getItemLocationMappings(item);
 
-      // Store Front Stock = explicit stock transferred/allocated to store front shelves or zones
+      // Store Front Stock = explicit stock transferred/allocated to active store front shelves
       const storeMaps = validMappings.filter(m => {
         const loc = locMap.get(String(m.locationId)) || activeLocations.find(l => String(l.id) === String(m.locationId));
         if (!loc || loc.type === 'WAREHOUSE') return false;
-        return Boolean(loc.isStoreFront) || loc.code === 'STORE-FRONT' || loc.code?.includes('SF') || (loc as any).type === 'STORE' || (loc as any).type === 'STORE_FRONT';
+        const isStoreLoc = Boolean(loc.isStoreFront) || loc.code === 'STORE-FRONT' || loc.code?.includes('SF') || (loc as any).type === 'STORE' || (loc as any).type === 'STORE_FRONT';
+        if (!isStoreLoc) return false;
+
+        const locTenant = loc.tenantId || 'default-tenant';
+        const mapTenant = m.tenantId || 'default-tenant';
+        return locTenant === tenantId && mapTenant === tenantId;
       });
+      // All store front allocations across all stores for this item
+      const allStoreFrontsQty = validMappings
+        .filter(m => {
+          const loc = locMap.get(String(m.locationId)) || activeLocations.find(l => String(l.id) === String(m.locationId));
+          if (!loc || loc.type === 'WAREHOUSE') return false;
+          return Boolean(loc.isStoreFront) || loc.code === 'STORE-FRONT' || loc.code?.includes('SF') || (loc as any).type === 'STORE' || (loc as any).type === 'STORE_FRONT';
+        })
+        .reduce((sum: number, m: ItemLocationMapping) => sum + m.quantity, 0);
+
       const storeStock = storeMaps.reduce((sum: number, m: ItemLocationMapping) => sum + m.quantity, 0);
 
-      // Warehouse Reserve Stock = Total item stock minus stock transferred to store floor
-      const whStock = Math.max(0, item.currentStock - storeStock);
+      // Warehouse Reserve Stock = Total item stock minus all stock transferred to all store floors
+      const whStock = Math.max(0, item.currentStock - allStoreFrontsQty);
+      const activeStoreTotalStock = whStock + storeStock;
 
       const alertMin = item.minStockAlert || 5;
       let status: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' = 'IN_STOCK';
@@ -202,7 +217,7 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
         storeStock,
         whStock,
         unassignedStock: whStock,
-        totalStock: item.currentStock,
+        totalStock: activeStoreTotalStock,
         status,
         storeMaps,
         whMaps: validMappings.filter(m => !storeMaps.includes(m))
