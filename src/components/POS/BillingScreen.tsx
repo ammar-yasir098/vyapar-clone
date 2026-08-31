@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import {
   Search,
   Plus,
@@ -52,27 +53,50 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   const [newPartyPhone, setNewPartyPhone] = useState('');
   const [checkoutInvoice, setCheckoutInvoice] = useState<Invoice | null>(null);
 
-  // Store vs Warehouse Stock Location State
-  const [itemLocs, setItemLocs] = useState<ItemLocationMapping[]>([]);
-  const [whLocationIds, setWhLocationIds] = useState<Set<number>>(new Set());
-  const [storeFrontLocationIds, setStoreFrontLocationIds] = useState<Set<number>>(new Set());
+  // Reactive Store vs Warehouse Stock Live Queries
+  const liveLocations = useLiveQuery(() => db.locations.toArray(), []) || [];
+  const liveItemLocations = useLiveQuery(() => db.itemLocations.toArray(), []) || [];
+  const activeTenantId = getActiveTenantId(business);
 
-  useEffect(() => {
-    async function loadLocationData() {
-      const locs = await db.locations.toArray();
-      const whIds = new Set(locs.filter(l => l.type === 'WAREHOUSE').map(l => Number(l.id)));
-      const storeIds = new Set(
-        locs
-          .filter(l => l.isStoreFront || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE_FRONT')
-          .map(l => Number(l.id))
-      );
-      setWhLocationIds(whIds);
-      setStoreFrontLocationIds(storeIds);
-      const mappings = await db.itemLocations.toArray();
-      setItemLocs(mappings);
-    }
-    loadLocationData();
-  }, [cartItems]);
+  const { whLocationIds, storeFrontLocationIds, itemLocs } = useMemo(() => {
+    const tenantLocs = liveLocations.filter(l => 
+      (l.tenantId || 'default-tenant') === activeTenantId || 
+      (l.allowedTenantIds && l.allowedTenantIds.includes(activeTenantId))
+    );
+
+    const whIds = new Set<string | number>();
+    tenantLocs.filter(l => l.type === 'WAREHOUSE').forEach(l => {
+      if (l.id !== undefined && l.id !== null) {
+        whIds.add(l.id as any);
+        whIds.add(String(l.id));
+      }
+    });
+
+    const storeIds = new Set<string | number>();
+    tenantLocs
+      .filter(l => 
+        l.type !== 'WAREHOUSE' && 
+        (Boolean(l.isStoreFront) || l.code === 'STORE-FRONT' || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE' || (l as any).type === 'STORE_FRONT')
+      )
+      .forEach(l => {
+        if (l.id !== undefined && l.id !== null) {
+          storeIds.add(l.id as any);
+          storeIds.add(String(l.id));
+        }
+      });
+
+    const tenantLocIds = new Set(tenantLocs.map(l => String(l.id)));
+    const tenantMappings = liveItemLocations.filter(il => 
+      (il.tenantId || 'default-tenant') === activeTenantId || 
+      tenantLocIds.has(String(il.locationId))
+    );
+
+    return {
+      whLocationIds: whIds,
+      storeFrontLocationIds: storeIds,
+      itemLocs: tenantMappings
+    };
+  }, [liveLocations, liveItemLocations, activeTenantId]);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
@@ -397,8 +421,8 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                       <div className="text-right">
                         <div className="font-extrabold text-xs text-emerald-600 font-mono">Rs {Number(item.salesPrice || 0).toFixed(2)}</div>
                         {(() => {
-                          const itemMaps = itemLocs.filter(il => Number(il.itemId) === Number(item.id) && il.quantity > 0);
-                          const storeMaps = itemMaps.filter(il => storeFrontLocationIds.has(Number(il.locationId)));
+                          const itemMaps = itemLocs.filter(il => (String(il.itemId) === String(item.id) || Number(il.itemId) === Number(item.id)) && il.quantity > 0);
+                          const storeMaps = itemMaps.filter(il => storeFrontLocationIds.has(il.locationId as any) || storeFrontLocationIds.has(String(il.locationId)));
                           const storeStock = storeMaps.reduce((sum: number, il: any) => sum + il.quantity, 0);
                           const whStock = Math.max(0, item.currentStock - storeStock);
 

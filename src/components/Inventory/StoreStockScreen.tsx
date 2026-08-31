@@ -52,14 +52,19 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
 
   const tenantId = getActiveTenantId(business);
 
+  const liveLocations = useLiveQuery(() => db.locations.toArray(), []) || [];
+  const liveItemLocations = useLiveQuery(() => db.itemLocations.toArray(), []) || [];
+  const activeLocations = liveLocations.length > 0 ? liveLocations : locations;
+  const activeItemLocations = liveItemLocations.length > 0 ? liveItemLocations : itemLocations;
+
   // Auto-purge orphaned or invalid item location mappings from IndexedDB & Cloud Server
   React.useEffect(() => {
-    if (locations.length === 0 || itemLocations.length === 0) return;
+    if (activeLocations.length === 0 || activeItemLocations.length === 0) return;
 
-    const validLocIds = new Set(locations.map(l => String(l.id)));
+    const validLocIds = new Set(activeLocations.map(l => String(l.id)));
 
     // Purge records that point to non-existent location IDs
-    const invalidMappings = itemLocations.filter(il => 
+    const invalidMappings = activeItemLocations.filter(il => 
       il.id && !validLocIds.has(String(il.locationId))
     );
 
@@ -81,7 +86,7 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
         }
       }).catch(err => console.error('Error purging invalid mappings:', err));
     }
-  }, [locations.length, itemLocations.length, tenantId]);
+  }, [activeLocations.length, activeItemLocations.length, tenantId]);
 
   // Helper to match item location mapping to product (handles local ID, cloud ID, and SKU)
   const isItemMatch = (il: ItemLocationMapping, item: Item) => {
@@ -104,7 +109,7 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
       });
     }
 
-    const whLocs = locations.filter(l => {
+    const whLocs = activeLocations.filter(l => {
       if (l.type !== 'WAREHOUSE') return false;
       if (l.tenantId === tenantId) return true;
       if (l.allowedTenantIds && l.allowedTenantIds.includes(tenantId)) return true;
@@ -116,25 +121,28 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
       whIds.add(l.id as any);
       whIds.add(String(l.id));
     });
-    const storeLocs = locations.filter(l => l.type === 'SHELF' || l.type === 'ZONE' || l.isStoreFront || l.code?.includes('SF') || (l as any).type === 'STORE');
+    const storeLocs = activeLocations.filter(l => 
+      (l.tenantId === tenantId || !l.tenantId) &&
+      (l.isStoreFront || l.code === 'STORE-FRONT' || (l as any).type === 'STORE_FRONT' || (l as any).type === 'STORE')
+    );
     return {
       whLocationIds: whIds,
       storeLocations: storeLocs,
       warehouseLocations: whLocs
     };
-  }, [locations, tenantId, liveStoreAccess]);
+  }, [activeLocations, tenantId, liveStoreAccess]);
 
   // Main Store Front Location (default for POS retail floor)
   const storeFrontLocation = useMemo(() => {
-    return storeLocations[0] || locations.find(l => l.type === 'SHELF' || l.type === 'ZONE') || locations[0];
-  }, [storeLocations, locations]);
+    return storeLocations.find(l => (l.tenantId || 'default-tenant') === tenantId) || storeLocations[0] || activeLocations.find(l => l.isStoreFront || l.code === 'STORE-FRONT');
+  }, [storeLocations, activeLocations, tenantId]);
 
   // Helper to resolve specific item location mappings (filtering out non-existent/deleted location IDs)
   const getItemLocationMappings = useCallback((item: Item) => {
     if (!item.id) return [];
-    const validLocationIds = new Set(locations.map(l => String(l.id)));
+    const validLocationIds = new Set(activeLocations.map(l => String(l.id)));
 
-    const matches = itemLocations.filter(il => {
+    const matches = activeItemLocations.filter(il => {
       if (!validLocationIds.has(String(il.locationId))) return false;
 
       if (String(il.itemId) === String(item.id)) return true;
@@ -160,21 +168,21 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
     return Array.from(uniqueMap.values()).filter(
       m => m.quantity > 0 && validLocationIds.has(String(m.locationId))
     );
-  }, [items, itemLocations, locations]);
+  }, [activeItemLocations, activeLocations]);
 
   // Aggregate items with Store Front Stock vs Warehouse Stock
   const storeStockRows = useMemo(() => {
     const locMap = new Map<string, InventoryLocation>();
-    locations.forEach(l => { if (l.id) locMap.set(String(l.id), l); });
+    activeLocations.forEach(l => { if (l.id) locMap.set(String(l.id), l); });
 
     return items.map(item => {
       const validMappings = getItemLocationMappings(item);
 
       // Store Front Stock = explicit stock transferred/allocated to store front shelves or zones
       const storeMaps = validMappings.filter(m => {
-        const loc = locMap.get(String(m.locationId));
+        const loc = locMap.get(String(m.locationId)) || activeLocations.find(l => String(l.id) === String(m.locationId));
         if (!loc || loc.type === 'WAREHOUSE') return false;
-        return loc.isStoreFront || loc.code?.includes('SF') || (loc as any).type === 'STORE' || (loc as any).type === 'STORE_FRONT';
+        return Boolean(loc.isStoreFront) || loc.code === 'STORE-FRONT' || loc.code?.includes('SF') || (loc as any).type === 'STORE' || (loc as any).type === 'STORE_FRONT';
       });
       const storeStock = storeMaps.reduce((sum: number, m: ItemLocationMapping) => sum + m.quantity, 0);
 
@@ -200,7 +208,7 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
         whMaps: validMappings.filter(m => !storeMaps.includes(m))
       };
     });
-  }, [items, getItemLocationMappings, locations]);
+  }, [items, getItemLocationMappings, activeLocations]);
 
   // Filtered rows for display
   const filteredRows = useMemo(() => {
@@ -270,7 +278,7 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
   const getOrCreateStoreFrontLocationId = async (): Promise<string | number> => {
     let storeLoc = locations.find(l => 
       (l.tenantId || 'default-tenant') === tenantId && 
-      (l.isStoreFront || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE_FRONT')
+      (l.isStoreFront || l.code === 'STORE-FRONT' || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE_FRONT')
     );
 
     if (storeLoc?.id) return storeLoc.id;
@@ -278,16 +286,16 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
     const allTenantLocs = await db.locations.toArray();
     storeLoc = allTenantLocs.find(l => 
       (l.tenantId || 'default-tenant') === tenantId && 
-      (l.isStoreFront || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE_FRONT')
+      (l.isStoreFront || l.code === 'STORE-FRONT' || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE_FRONT')
     );
 
     if (storeLoc?.id) return storeLoc.id;
 
-    const newLocId = `sf-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    const newLocId = `sf-${tenantId}-${Date.now()}`;
     const newLocPayload = {
       id: newLocId,
       tenantId,
-      name: 'Store Front Floor / Display Counter',
+      name: `${business?.name || 'Store'} - Store Front / Sales Counter`,
       code: 'STORE-FRONT',
       type: 'SHELF' as const,
       isStoreFront: true,
@@ -391,8 +399,8 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
       // 4. Record Stock Transfer Log
       const trfId = `trf-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
       const transferNo = `TRF-STORE-${Date.now().toString().slice(-6)}`;
-      const srcLocObj = locations.find(l => String(l.id) === String(sourceLocId));
-      const destLocObj = locations.find(l => String(l.id) === String(targetDestLocId));
+      const srcLocObj = activeLocations.find(l => String(l.id) === String(sourceLocId));
+      const destLocObj = activeLocations.find(l => String(l.id) === String(targetDestLocId));
 
       const srcLocName = srcLocObj ? `${srcLocObj.name} (${srcLocObj.code})` : 'Warehouse Reserve';
       const destLocName = destLocObj ? destLocObj.name : 'Store Front Floor / Display Counter';
@@ -701,30 +709,19 @@ export const StoreStockScreen: React.FC<StoreStockScreenProps> = ({
                 </select>
               </div>
 
-              {/* Destination (Store Front Retail Floor / Specific Rack) */}
+              {/* Destination (Store Front Retail Floor / Display Counter) */}
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
-                  <span>Destination (Store Front Shelf / Retail Floor)</span>
+                  <span>Destination (Store Front Sales Counter)</span>
                   <span className="text-[10px] text-emerald-600 font-bold">POS Ready Store</span>
                 </label>
-                <select
-                  value={destLocId}
-                  onChange={e => setDestLocId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-emerald-50/70 border border-emerald-200/80 rounded-xl text-xs font-bold text-emerald-900 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
-                  required
-                >
-                  {storeLocations.length > 0 ? (
-                    storeLocations.map(loc => (
-                      <option key={loc.id} value={loc.id}>
-                        🛒 {loc.name} ({loc.code}) — {loc.type === 'ZONE' ? 'Retail Zone Floor' : 'Store Shelf'}
-                      </option>
-                    ))
-                  ) : (
-                    <option value={storeFrontLocation?.id || 1}>
-                      🛒 Store Front / Active Retail Floor ({storeFrontLocation?.name || 'Main Retail Store'})
-                    </option>
-                  )}
-                </select>
+                <div className="w-full px-3.5 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-extrabold text-emerald-900 flex items-center justify-between shadow-2xs">
+                  <div className="flex items-center gap-2">
+                    <Store className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>🏪 Store Front Floor / Display Counter ({business?.name || 'Active Store'})</span>
+                  </div>
+                  <span className="badge badge-green font-mono font-bold text-[10px]">POS Ready</span>
+                </div>
               </div>
 
               {/* Quantity to Transfer */}

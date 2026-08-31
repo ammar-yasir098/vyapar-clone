@@ -399,6 +399,17 @@ export function App() {
   // Compute all child location IDs (Zones, Racks, Shelves, Store Front) belonging to accessible warehouses or active tenant
   const accessibleLocationIds = useMemo(() => {
     const locIds = new Set<string>(accessibleWhIds);
+
+    // Include store-owned locations (like Store Front floor / sales counter)
+    allLocations.forEach(loc => {
+      if (loc && loc.id) {
+        const locTenant = loc.tenantId || 'default-tenant';
+        if (locTenant === activeTenantId || loc.isStoreFront || loc.code === 'STORE-FRONT') {
+          locIds.add(String(loc.id));
+        }
+      }
+    });
+
     let addedChild = true;
     while (addedChild) {
       addedChild = false;
@@ -412,7 +423,7 @@ export function App() {
       }
     }
     return locIds;
-  }, [allLocations, accessibleWhIds]);
+  }, [allLocations, accessibleWhIds, activeTenantId]);
 
   const locations = useMemo(() => {
     return allLocations.filter(loc => {

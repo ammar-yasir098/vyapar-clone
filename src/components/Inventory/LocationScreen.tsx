@@ -117,6 +117,18 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   const accessibleLocationIds = useMemo(() => {
     const locIds = new Set<string | number>(accessibleWhIds);
     const rawLocs = liveAllLocations && liveAllLocations.length > 0 ? liveAllLocations : locations;
+
+    // Include store-owned locations (like Store Front floor / sales counter)
+    rawLocs.forEach(loc => {
+      if (loc && loc.id !== undefined && loc.id !== null) {
+        const locTenant = loc.tenantId || 'default-tenant';
+        if (locTenant === activeTenantId || loc.isStoreFront || loc.code === 'STORE-FRONT') {
+          locIds.add(loc.id as any);
+          locIds.add(String(loc.id));
+        }
+      }
+    });
+
     let addedChild = true;
     while (addedChild) {
       addedChild = false;
@@ -131,7 +143,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       }
     }
     return locIds;
-  }, [liveAllLocations, locations, accessibleWhIds]);
+  }, [liveAllLocations, locations, accessibleWhIds, activeTenantId]);
 
   const activeLocations = useMemo(() => {
     const rawLocs = liveAllLocations && liveAllLocations.length > 0 ? liveAllLocations : locations;
@@ -350,18 +362,45 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
     async function loadCompanyProfiles() {
       await deduplicateLocalLocations();
-      const profiles = await db.companyProfiles.toArray();
-      const list = profiles.map(p => ({
-        tenantId: p.tenantId || 'default-tenant',
-        name: p.name || (p as any).companyName || p.tenantId
-      }));
-      if (!list.some(p => p.tenantId === activeTenantId)) {
+      let userSessionId: string | null = business?.userId || null;
+      if (!userSessionId) {
+        try {
+          const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('vyapar_user_session') : null;
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            userSessionId = parsed.userId || null;
+          }
+        } catch { }
+      }
+
+      const allProfiles = await db.companyProfiles.toArray();
+      const filteredProfiles = userSessionId
+        ? allProfiles.filter(p => p.userId === userSessionId || p.tenantId === activeTenantId)
+        : allProfiles.filter(p => p.tenantId !== 'default-tenant' || p.tenantId === activeTenantId);
+
+      const list: Array<{ tenantId: string; name: string }> = [];
+      const seenTenants = new Set<string>();
+
+      filteredProfiles.forEach(p => {
+        const tId = p.tenantId || 'default-tenant';
+        if (tId === 'default-tenant' && activeTenantId !== 'default-tenant') return;
+        if (!seenTenants.has(tId)) {
+          seenTenants.add(tId);
+          list.push({
+            tenantId: tId,
+            name: p.name || (p as any).companyName || tId
+          });
+        }
+      });
+
+      if (activeTenantId && !seenTenants.has(activeTenantId)) {
         list.push({ tenantId: activeTenantId, name: business?.name || 'Active Store' });
       }
+
       setStoreProfiles(list);
     }
     loadCompanyProfiles();
-  }, [activeTenantId, business?.tenantId, business?.name]);
+  }, [activeTenantId, business?.tenantId, business?.name, business?.userId]);
 
   useEffect(() => {
     db.companyProfiles.toArray().then(profiles => {
@@ -999,138 +1038,6 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     }
   };
 
-  // Open Relocate Modal for specific row
-  const handleOpenRelocateModal = (item: Item, mapping?: ItemLocationMapping) => {
-    setRelocateItem({ item, currentMapping: mapping });
-    setRelocateQty(String(mapping ? mapping.quantity : item.currentStock));
-    setRelocateMaxCap(String(mapping ? mapping.maxCapacity : 100));
-
-    if (mapping && mapping.locationId) {
-      const locId = mapping.locationId;
-      setRelocateDestLocId(String(locId));
-      const curr = locationMap.get(locId);
-
-      if (curr) {
-        if (curr.type === 'WAREHOUSE') {
-          setRelocateWhId(String(curr.id));
-          setRelocateZoneId('');
-          setRelocateRackId('');
-        } else if (curr.type === 'ZONE') {
-          const parentWh = locations.find(l => l.type === 'WAREHOUSE' && (String(l.id) === String(curr.parentId) || (l.code && curr.code.startsWith(l.code + '-'))));
-          setRelocateWhId(parentWh ? String(parentWh.id) : String(curr.parentId || ''));
-          setRelocateZoneId(String(curr.id));
-          setRelocateRackId('');
-        } else if (curr.type === 'SHELF') {
-          const parentZone = locations.find(l => l.type === 'ZONE' && (String(l.id) === String(curr.parentId) || (l.code && curr.code.startsWith(l.code + '-'))));
-          if (parentZone) {
-            const parentWh = locations.find(l => l.type === 'WAREHOUSE' && (String(l.id) === String(parentZone.parentId) || (l.code && parentZone.code.startsWith(l.code + '-'))));
-            setRelocateWhId(parentWh ? String(parentWh.id) : String(parentZone.parentId || ''));
-            setRelocateZoneId(String(parentZone.id));
-            setRelocateRackId(String(curr.id));
-          } else {
-            const parentWh = locations.find(l => l.type === 'WAREHOUSE' && (String(l.id) === String(curr.parentId) || (l.code && curr.code.startsWith(l.code + '-'))));
-            setRelocateWhId(parentWh ? String(parentWh.id) : String(curr.parentId || ''));
-            setRelocateZoneId('');
-            setRelocateRackId(String(curr.id));
-          }
-        }
-      } else {
-        setRelocateWhId('');
-        setRelocateZoneId('');
-        setRelocateRackId('');
-      }
-    } else {
-      setRelocateDestLocId('');
-      setRelocateWhId('');
-      setRelocateZoneId('');
-      setRelocateRackId('');
-      setRelocateQty('1');
-      setRelocateMaxCap('100');
-    }
-  };
-
-  // Helper to dynamically calculate capacity utilization & remaining space for a location (including child shelves/racks for zones & warehouses)
-  const getLocCapacityInfo = (loc: InventoryLocation) => {
-    if (!loc.id) return { used: 0, max: 100, remaining: 100, isFull: false };
-    const max = loc.capacity || 100;
-
-    const targetLocIds = new Set<string>();
-    targetLocIds.add(String(loc.id));
-
-    if (loc.type === 'WAREHOUSE') {
-      locations.forEach(l => {
-        if (l.id && String(l.parentId) === String(loc.id)) {
-          targetLocIds.add(String(l.id));
-          locations.filter(r => String(r.parentId) === String(l.id)).forEach(r => {
-            if (r.id) targetLocIds.add(String(r.id));
-          });
-        }
-      });
-    } else if (loc.type === 'ZONE') {
-      locations.forEach(l => {
-        if (l.type === 'SHELF' && l.id && String(l.parentId) === String(loc.id)) {
-          targetLocIds.add(String(l.id));
-        }
-      });
-    }
-
-    let rootWh = loc;
-    if (loc.type !== 'WAREHOUSE' && loc.parentId) {
-      const parent = locations.find(l => String(l.id) === String(loc.parentId));
-      if (parent) {
-        rootWh = parent.type === 'WAREHOUSE' ? parent : (locations.find(l => String(l.id) === String(parent.parentId)) || parent);
-      }
-    }
-
-    const isSharedWh = !!rootWh.isShared;
-    const allowedTenants = new Set<string>([rootWh.tenantId || 'default-tenant']);
-    if (rootWh.allowedTenantIds && Array.isArray(rootWh.allowedTenantIds)) {
-      rootWh.allowedTenantIds.forEach(id => allowedTenants.add(id));
-    }
-
-    const mapsToUse = allItemLocations.filter(il => {
-      if (isSharedWh) return true;
-      const ilTenant = il.tenantId || 'default-tenant';
-      return allowedTenants.has(ilTenant);
-    });
-
-    const totalAssignedAtLoc = mapsToUse
-      .filter(il => targetLocIds.has(String(il.locationId)))
-      .reduce((sum, il) => sum + (il.quantity || 0), 0);
-
-    let currentMappingQty = 0;
-    if (relocateItem && relocateItem.currentMapping && targetLocIds.has(String(relocateItem.currentMapping.locationId))) {
-      currentMappingQty = relocateItem.currentMapping.quantity || 0;
-    }
-
-    const effectiveUsed = Math.max(0, totalAssignedAtLoc - currentMappingQty);
-    const remaining = Math.max(0, max - effectiveUsed);
-    const isFull = remaining <= 0;
-
-    return { used: effectiveUsed, max, remaining, isFull };
-  };
-
-  // Helper to dynamically update Available Capacity & Quantity when picking a target location
-  const updateCapacityDefaults = (targetLocId: string) => {
-    if (!targetLocId) return;
-    const targetLoc = locationMap.get(targetLocId) || locationMap.get(String(targetLocId)) || locations.find(l => String(l.id) === String(targetLocId));
-    if (targetLoc) {
-      const capInfo = getLocCapacityInfo(targetLoc);
-      setRelocateMaxCap(String(capInfo.remaining));
-
-      if (relocateItem) {
-        if (relocateItem.currentMapping && String(relocateItem.currentMapping.locationId) === String(targetLoc.id)) {
-          setRelocateQty(String(relocateItem.currentMapping.quantity));
-        } else {
-          const itemObj = relocateItem.item;
-          const assignedQty = (itemLocationMapByItemId.get(itemObj.id!) || []).reduce((sum, m) => sum + m.quantity, 0);
-          const unassignedStock = Math.max(0, itemObj.currentStock - assignedQty);
-          const defaultQty = Math.min(unassignedStock > 0 ? unassignedStock : itemObj.currentStock, capInfo.remaining);
-          setRelocateQty(String(Math.max(1, defaultQty)));
-        }
-      }
-    }
-  };
 
   // Helper maps for location names & paths
   const locationMap = useMemo(() => {
@@ -1312,6 +1219,170 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     return map;
   }, [allItemLocations, activeTenantItems, tenantLocations, activeLocations]);
 
+  // Helper to accurately compute unallocated remaining stock for an item
+  const getItemUnallocatedStock = (item?: Item | null, excludeMappingId?: string | number) => {
+    if (!item || !item.id) return 0;
+    const rawMappings = itemLocationMapByItemId.get(item.id) || itemLocationMapByItemId.get(String(item.id)) || (item.id ? itemLocationMapByItemId.get(Number(item.id)) : []) || [];
+
+    // Deduplicate mappings by locationId for this item
+    const uniqueMappingMap = new Map<string | number, ItemLocationMapping>();
+    rawMappings.forEach(m => {
+      if (excludeMappingId && (String(m.id) === String(excludeMappingId) || m.id === excludeMappingId)) {
+        return;
+      }
+      if (!uniqueMappingMap.has(m.locationId)) {
+        uniqueMappingMap.set(m.locationId, m);
+      } else {
+        const existing = uniqueMappingMap.get(m.locationId)!;
+        existing.quantity = Math.max(existing.quantity, m.quantity);
+      }
+    });
+
+    const validAllocations = Array.from(uniqueMappingMap.values()).filter(m => {
+      if (m.quantity <= 0) return false;
+      const locIdStr = String(m.locationId);
+      const locObj = locationMap.get(m.locationId) || locationMap.get(locIdStr) || activeLocations.find(l => String(l.id) === locIdStr);
+      if (!locObj) return false;
+      return locObj.type !== 'WAREHOUSE';
+    });
+
+    const totalAssigned = validAllocations.reduce((sum, m) => sum + m.quantity, 0);
+    return Math.max(0, (item.currentStock || 0) - totalAssigned);
+  };
+
+  // Helper to dynamically calculate capacity utilization & remaining space for a location (including child shelves/racks for zones & warehouses)
+  const getLocCapacityInfo = (loc: InventoryLocation) => {
+    if (!loc.id) return { used: 0, max: 100, remaining: 100, isFull: false };
+    const max = loc.capacity || 100;
+
+    const targetLocIds = new Set<string>();
+    targetLocIds.add(String(loc.id));
+
+    if (loc.type === 'WAREHOUSE') {
+      locations.forEach(l => {
+        if (l.id && String(l.parentId) === String(loc.id)) {
+          targetLocIds.add(String(l.id));
+          locations.filter(r => String(r.parentId) === String(l.id)).forEach(r => {
+            if (r.id) targetLocIds.add(String(r.id));
+          });
+        }
+      });
+    } else if (loc.type === 'ZONE') {
+      locations.forEach(l => {
+        if (l.type === 'SHELF' && l.id && String(l.parentId) === String(loc.id)) {
+          targetLocIds.add(String(l.id));
+        }
+      });
+    }
+
+    let rootWh = loc;
+    if (loc.type !== 'WAREHOUSE' && loc.parentId) {
+      const parent = locations.find(l => String(l.id) === String(loc.parentId));
+      if (parent) {
+        rootWh = parent.type === 'WAREHOUSE' ? parent : (locations.find(l => String(l.id) === String(parent.parentId)) || parent);
+      }
+    }
+
+    const isSharedWh = !!rootWh.isShared;
+    const allowedTenants = new Set<string>([rootWh.tenantId || 'default-tenant']);
+    if (rootWh.allowedTenantIds && Array.isArray(rootWh.allowedTenantIds)) {
+      rootWh.allowedTenantIds.forEach(id => allowedTenants.add(id));
+    }
+
+    const mapsToUse = allItemLocations.filter(il => {
+      if (isSharedWh) return true;
+      const ilTenant = il.tenantId || 'default-tenant';
+      return allowedTenants.has(ilTenant);
+    });
+
+    const totalAssignedAtLoc = mapsToUse
+      .filter(il => targetLocIds.has(String(il.locationId)))
+      .reduce((sum, il) => sum + (il.quantity || 0), 0);
+
+    let currentMappingQty = 0;
+    if (relocateItem && relocateItem.currentMapping && targetLocIds.has(String(relocateItem.currentMapping.locationId))) {
+      currentMappingQty = relocateItem.currentMapping.quantity || 0;
+    }
+
+    const effectiveUsed = Math.max(0, totalAssignedAtLoc - currentMappingQty);
+    const remaining = Math.max(0, max - effectiveUsed);
+    const isFull = remaining <= 0;
+
+    return { used: effectiveUsed, max, remaining, isFull };
+  };
+
+  // Helper to dynamically update Available Capacity & Quantity when picking a target location
+  const updateCapacityDefaults = (targetLocId: string) => {
+    if (!targetLocId) return;
+    const targetLoc = locationMap.get(targetLocId) || locationMap.get(String(targetLocId)) || locations.find(l => String(l.id) === String(targetLocId));
+    if (targetLoc) {
+      const capInfo = getLocCapacityInfo(targetLoc);
+      setRelocateMaxCap(String(capInfo.remaining));
+
+      if (relocateItem) {
+        if (relocateItem.currentMapping && String(relocateItem.currentMapping.locationId) === String(targetLoc.id)) {
+          setRelocateQty(String(relocateItem.currentMapping.quantity));
+        } else {
+          const unallocatedStock = getItemUnallocatedStock(relocateItem.item, relocateItem.currentMapping?.id);
+          const defaultQty = Math.min(unallocatedStock, capInfo.remaining);
+          setRelocateQty(String(defaultQty));
+        }
+      }
+    }
+  };
+
+  // Open Relocate Modal for specific row
+  const handleOpenRelocateModal = (item: Item, mapping?: ItemLocationMapping) => {
+    setRelocateItem({ item, currentMapping: mapping });
+    const unallocatedStock = getItemUnallocatedStock(item, mapping?.id);
+    const initialQty = mapping ? mapping.quantity : unallocatedStock;
+    setRelocateQty(String(initialQty));
+    setRelocateMaxCap(String(mapping ? mapping.maxCapacity : 100));
+
+    if (mapping && mapping.locationId) {
+      const locId = mapping.locationId;
+      setRelocateDestLocId(String(locId));
+      const curr = locationMap.get(locId);
+
+      if (curr) {
+        if (curr.type === 'WAREHOUSE') {
+          setRelocateWhId(String(curr.id));
+          setRelocateZoneId('');
+          setRelocateRackId('');
+        } else if (curr.type === 'ZONE') {
+          const parentWh = locations.find(l => l.type === 'WAREHOUSE' && (String(l.id) === String(curr.parentId) || (l.code && curr.code.startsWith(l.code + '-'))));
+          setRelocateWhId(parentWh ? String(parentWh.id) : String(curr.parentId || ''));
+          setRelocateZoneId(String(curr.id));
+          setRelocateRackId('');
+        } else if (curr.type === 'SHELF') {
+          const parentZone = locations.find(l => l.type === 'ZONE' && (String(l.id) === String(curr.parentId) || (l.code && curr.code.startsWith(l.code + '-'))));
+          if (parentZone) {
+            const parentWh = locations.find(l => l.type === 'WAREHOUSE' && (String(l.id) === String(parentZone.parentId) || (l.code && parentZone.code.startsWith(l.code + '-'))));
+            setRelocateWhId(parentWh ? String(parentWh.id) : String(parentZone.parentId || ''));
+            setRelocateZoneId(String(parentZone.id));
+            setRelocateRackId(String(curr.id));
+          } else {
+            const parentWh = locations.find(l => l.type === 'WAREHOUSE' && (String(l.id) === String(curr.parentId) || (l.code && curr.code.startsWith(l.code + '-'))));
+            setRelocateWhId(parentWh ? String(parentWh.id) : String(curr.parentId || ''));
+            setRelocateZoneId('');
+            setRelocateRackId(String(curr.id));
+          }
+        }
+        const capInfo = getLocCapacityInfo(curr);
+        setRelocateMaxCap(String(capInfo.remaining));
+      } else {
+        setRelocateWhId('');
+        setRelocateZoneId('');
+        setRelocateRackId('');
+      }
+    } else {
+      setRelocateDestLocId('');
+      setRelocateWhId('');
+      setRelocateZoneId('');
+      setRelocateRackId('');
+    }
+  };
+
   const { assignedCount, unassignedCount } = useMemo(() => {
     let assigned = 0;
     let unassigned = 0;
@@ -1417,16 +1488,18 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         isUnassigned: boolean;
         isStoreFront?: boolean;
       }> = validMappings.map(m => {
+        const locObj = locationMap.get(m.locationId) || locationMap.get(String(m.locationId)) || activeLocations.find(l => String(l.id) === String(m.locationId));
+        const isStoreFront = locObj ? (Boolean(locObj.isStoreFront) || locObj.code === 'STORE-FRONT' || locObj.name?.toLowerCase().includes('store front') || (locObj as any).type === 'STORE_FRONT') : false;
         const locInfo = getLocationFullPath(m.locationId);
         return {
           mapping: m,
-          warehouseName: locInfo.warehouse,
-          shelfCode: locInfo.shelf,
-          fullPath: locInfo.fullPath,
+          warehouseName: isStoreFront ? (business?.name || 'Active Store') : locInfo.warehouse,
+          shelfCode: isStoreFront ? '🏪 Store Front Sales Floor' : locInfo.shelf,
+          fullPath: isStoreFront ? `Store Front / POS Sales Floor (${business?.name || 'Active Store'})` : locInfo.fullPath,
           availableQty: m.quantity,
-          capacityLimit: m.maxCapacity || locationMap.get(m.locationId)?.capacity || 100,
+          capacityLimit: isStoreFront ? 0 : (m.maxCapacity || locObj?.capacity || 100),
           isUnassigned: false,
-          isStoreFront: false
+          isStoreFront
         };
       });
 
@@ -1732,6 +1805,16 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
         );
         return;
       }
+    }
+
+    const availableUnallocatedStock = getItemUnallocatedStock(item, relocateItem.currentMapping?.id);
+    const maxAllowedStock = relocateItem.currentMapping ? (relocateItem.currentMapping.quantity + availableUnallocatedStock) : availableUnallocatedStock;
+    if (qty > maxAllowedStock) {
+      showToast(
+        `⛔ Cannot assign ${qty} PCS! Only ${maxAllowedStock} PCS available unallocated stock for "${item.name}".`,
+        'error'
+      );
+      return;
     }
 
     try {
@@ -3403,11 +3486,21 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
             </div>
 
             <form onSubmit={handleSaveRelocation} className="space-y-4">
-              <div className="bg-purple-50 p-3.5 rounded-xl border border-purple-100">
-                <div className="font-extrabold text-sm text-purple-900">{relocateItem.item.name}</div>
-                <div className="text-xs text-purple-700 font-mono mt-0.5">
-                  SKU: {relocateItem.item.skuCode} | Stock: {relocateItem.item.currentStock} {relocateItem.item.unitType}
+              <div className="bg-purple-50 p-3.5 rounded-xl border border-purple-100 flex items-center justify-between">
+                <div>
+                  <div className="font-extrabold text-sm text-purple-900">{relocateItem.item.name}</div>
+                  <div className="text-xs text-purple-700 font-mono mt-0.5">
+                    SKU: {relocateItem.item.skuCode} | Total Stock: {relocateItem.item.currentStock} {relocateItem.item.unitType}
+                  </div>
                 </div>
+                {(() => {
+                  const unallocated = getItemUnallocatedStock(relocateItem.item, relocateItem.currentMapping?.id);
+                  return (
+                    <span className="badge badge-amber font-extrabold shrink-0">
+                      📦 {unallocated} {relocateItem.item.unitType} Unallocated
+                    </span>
+                  );
+                })()}
               </div>
 
               {(() => {
@@ -3539,37 +3632,55 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                       );
                     })()}
 
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Quantity at Shelf *</label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={relocateQty}
-                          onChange={e => setRelocateQty(e.target.value)}
-                          placeholder="20"
-                          className={`w-full px-3 py-2.5 rounded-xl border font-bold text-xs outline-none focus:ring-2 ${isCapacityExceeded ? 'border-red-500 text-red-700 bg-red-50 focus:ring-red-500' : 'border-slate-300 focus:ring-purple-500'
-                            }`}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Available Capacity</label>
-                        <input
-                          type="number"
-                          value={relocateMaxCap}
-                          onChange={e => setRelocateMaxCap(e.target.value)}
-                          placeholder="10"
-                          className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none"
-                        />
-                      </div>
+                    {(() => {
+                      const unallocated = getItemUnallocatedStock(relocateItem.item, relocateItem.currentMapping?.id);
+                      const maxAllowedStock = relocateItem.currentMapping ? (relocateItem.currentMapping.quantity + unallocated) : unallocated;
+                      const isStockExceeded = Number(relocateQty) > maxAllowedStock;
 
-                      {isCapacityExceeded && (
-                        <div className="col-span-2 bg-red-50 p-2.5 rounded-xl border border-red-200 text-xs font-bold text-red-700 flex items-center gap-2">
-                          <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-                          <span>Quantity ({relocateQty} PCS) exceeds Available Capacity ({relocateMaxCap} PCS)!</span>
+                      return (
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                              Quantity at Shelf * {unallocated > 0 && <span className="text-amber-600 lowercase font-extrabold">({unallocated} unallocated)</span>}
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={relocateQty}
+                              onChange={e => setRelocateQty(e.target.value)}
+                              placeholder={String(unallocated || '1')}
+                              className={`w-full px-3 py-2.5 rounded-xl border font-bold text-xs outline-none focus:ring-2 ${
+                                isCapacityExceeded || isStockExceeded ? 'border-red-500 text-red-700 bg-red-50 focus:ring-red-500' : 'border-slate-300 focus:ring-purple-500'
+                              }`}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Available Capacity</label>
+                            <input
+                              type="number"
+                              value={relocateMaxCap}
+                              onChange={e => setRelocateMaxCap(e.target.value)}
+                              placeholder="10"
+                              className="w-full px-3 py-2.5 rounded-xl border border-slate-300 font-bold text-xs focus:ring-2 focus:ring-purple-500 outline-none"
+                            />
+                          </div>
+
+                          {isCapacityExceeded && (
+                            <div className="col-span-2 bg-red-50 p-2.5 rounded-xl border border-red-200 text-xs font-bold text-red-700 flex items-center gap-2">
+                              <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                              <span>Quantity ({relocateQty} PCS) exceeds Available Capacity ({relocateMaxCap} PCS)!</span>
+                            </div>
+                          )}
+
+                          {isStockExceeded && (
+                            <div className="col-span-2 bg-red-50 p-2.5 rounded-xl border border-red-200 text-xs font-bold text-red-700 flex items-center gap-2">
+                              <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                              <span>Quantity ({relocateQty} PCS) exceeds remaining unallocated stock ({maxAllowedStock} PCS)!</span>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
+                      );
+                    })()}
                   </>
                 );
               })()}
@@ -3945,24 +4056,24 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
               </div>
 
               {/* Actions */}
-              <div className="flex items-center gap-3 pt-1">
+              <div className="flex items-center gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => setIsTemplateModalOpen(false)}
-                  className="flex-1 py-3 rounded-xl border border-slate-300 font-bold text-xs text-slate-600 hover:bg-slate-100 cursor-pointer"
+                  className="px-6 py-3 rounded-xl border border-slate-300 font-bold text-xs text-slate-600 hover:bg-slate-100 hover:text-slate-800 transition flex-none cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isZoneCapExceeded || isRackCapExceeded}
-                  className={`flex-1 py-3 rounded-xl font-extrabold text-xs text-white shadow-md transition flex items-center justify-center gap-2 ${isZoneCapExceeded || isRackCapExceeded
-                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
-                      : 'bg-amber-600 hover:bg-amber-700 shadow-amber-200 cursor-pointer'
+                  className={`flex-1 py-3 px-5 rounded-xl font-bold text-xs text-white shadow-md transition flex items-center justify-center gap-2 ${isZoneCapExceeded || isRackCapExceeded
+                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
+                      : 'bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 shadow-amber-500/20 active:scale-[0.99] cursor-pointer'
                     }`}
                 >
-                  <Wand2 className="w-4 h-4" />
-                  <span>Generate Entire Store Layout ({totalLocationsToGenerate} Locations)</span>
+                  <Wand2 className="w-4 h-4 shrink-0" />
+                  <span className="whitespace-nowrap">Generate Entire Store Layout ({totalLocationsToGenerate} Locations)</span>
                 </button>
               </div>
             </form>

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { 
   Package, 
   Plus, 
@@ -59,43 +60,51 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({
   // Edit Item State
   const [editItem, setEditItem] = useState<Item | null>(null);
 
-  // Multi-Location Inventory Breakdown State (Phase 5)
-  const [itemLocs, setItemLocs] = useState<ItemLocationMapping[]>([]);
-  const [whLocationIds, setWhLocationIds] = useState<Set<string | number>>(new Set());
-  const [storeFrontLocationIds, setStoreFrontLocationIds] = useState<Set<string | number>>(new Set());
-
   const activeTenantId = getActiveTenantId(business);
 
-  React.useEffect(() => {
-    async function loadLocationData() {
-      const locs = await db.locations.toArray();
-      const tenantLocs = locs.filter(l => (l.tenantId || 'default-tenant') === activeTenantId || (l.allowedTenantIds && l.allowedTenantIds.includes(activeTenantId)));
-      const whIds = new Set<string | number>();
-      tenantLocs.filter(l => l.type === 'WAREHOUSE').forEach(l => {
+  // Multi-Location Reactive Live Queries
+  const liveLocations = useLiveQuery(() => db.locations.toArray(), []) || [];
+  const liveItemLocations = useLiveQuery(() => db.itemLocations.toArray(), []) || [];
+
+  const { whLocationIds, storeFrontLocationIds, itemLocs } = useMemo(() => {
+    const tenantLocs = liveLocations.filter(l => 
+      (l.tenantId || 'default-tenant') === activeTenantId || 
+      (l.allowedTenantIds && l.allowedTenantIds.includes(activeTenantId))
+    );
+
+    const whIds = new Set<string | number>();
+    tenantLocs.filter(l => l.type === 'WAREHOUSE').forEach(l => {
+      if (l.id !== undefined && l.id !== null) {
+        whIds.add(l.id as any);
+        whIds.add(String(l.id));
+      }
+    });
+
+    const storeIds = new Set<string | number>();
+    tenantLocs
+      .filter(l => 
+        l.type !== 'WAREHOUSE' && 
+        (Boolean(l.isStoreFront) || l.code === 'STORE-FRONT' || l.code?.includes('SF') || l.name?.toLowerCase().includes('store front') || (l as any).type === 'STORE' || (l as any).type === 'STORE_FRONT')
+      )
+      .forEach(l => {
         if (l.id !== undefined && l.id !== null) {
-          whIds.add(l.id as any);
-          whIds.add(String(l.id));
+          storeIds.add(l.id as any);
+          storeIds.add(String(l.id));
         }
       });
-      const storeIds = new Set<string | number>();
-      tenantLocs
-        .filter(l => l.type !== 'WAREHOUSE' && (l.isStoreFront || l.code?.includes('SF') || (l as any).type === 'STORE' || (l as any).type === 'STORE_FRONT'))
-        .forEach(l => {
-          if (l.id !== undefined && l.id !== null) {
-            storeIds.add(l.id as any);
-            storeIds.add(String(l.id));
-          }
-        });
-      setWhLocationIds(whIds);
-      setStoreFrontLocationIds(storeIds);
 
-      const mappings = await db.itemLocations.toArray();
-      const tenantLocIds = new Set(tenantLocs.map(l => String(l.id)));
-      const tenantMappings = mappings.filter(il => (il.tenantId || 'default-tenant') === activeTenantId || tenantLocIds.has(String(il.locationId)));
-      setItemLocs(tenantMappings);
-    }
-    loadLocationData();
-  }, [items, activeTenantId]);
+    const tenantLocIds = new Set(tenantLocs.map(l => String(l.id)));
+    const tenantMappings = liveItemLocations.filter(il => 
+      (il.tenantId || 'default-tenant') === activeTenantId || 
+      tenantLocIds.has(String(il.locationId))
+    );
+
+    return {
+      whLocationIds: whIds,
+      storeFrontLocationIds: storeIds,
+      itemLocs: tenantMappings
+    };
+  }, [liveLocations, liveItemLocations, activeTenantId]);
 
   // Item Activity & History Modal State
   const [selectedItemForHistory, setSelectedItemForHistory] = useState<Item | null>(null);
