@@ -118,9 +118,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
     const locIds = new Set<string | number>(accessibleWhIds);
     const rawLocs = liveAllLocations && liveAllLocations.length > 0 ? liveAllLocations : locations;
 
-    // Include store-owned locations (like Store Front floor / sales counter)
+    // Include store-owned standalone locations (like Store Front floor / sales counter)
     rawLocs.forEach(loc => {
-      if (loc && loc.id !== undefined && loc.id !== null) {
+      if (loc && loc.id !== undefined && loc.id !== null && !loc.parentId) {
         const locTenant = loc.tenantId || 'default-tenant';
         if (locTenant === activeTenantId || (activeTenantId === 'default-tenant' && locTenant === 'default-tenant')) {
           locIds.add(loc.id as any);
@@ -408,12 +408,12 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
       if (activeComp && activeComp.primaryWarehouseId) {
         setPrimaryWarehouseId(activeComp.primaryWarehouseId);
       } else {
-        const firstWh = locations.find(l => l.type === 'WAREHOUSE');
+        const firstWh = activeLocations.find(l => l.type === 'WAREHOUSE');
         if (firstWh?.id) setPrimaryWarehouseId(firstWh.id);
         else setPrimaryWarehouseId(null);
       }
     });
-  }, [locations, activeTenantId]);
+  }, [activeLocations, activeTenantId]);
 
   const handleSetPrimaryWarehouse = async (whId: number) => {
     setPrimaryWarehouseId(whId);
@@ -437,8 +437,8 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
   // Helper to Batch Restock All Low Store Items from Central Warehouse
   const handleBatchRestockAllLowItems = async () => {
-    const whLocs = locations.filter(l => l.type === 'WAREHOUSE');
-    const storeLocs = locations.filter(l => l.type !== 'WAREHOUSE');
+    const whLocs = activeLocations.filter(l => l.type === 'WAREHOUSE');
+    const storeLocs = activeLocations.filter(l => l.type !== 'WAREHOUSE');
 
     const lowStockItems = items.map(item => {
       const itemMaps = itemLocations.filter(il => Number(il.itemId) === Number(item.id));
@@ -887,13 +887,16 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   };
 
   // Toggle Global Shared Warehouse Status (Case 2: 1 Central Warehouse for All Stores)
+  // Toggle Global Shared Warehouse Status (Case 2: 1 Central Warehouse for All Stores)
   const handleToggleGlobalShared = async (whId: string | number, currentSharedState: boolean) => {
     try {
       const newSharedState = !currentSharedState;
       await db.locations.update(whId, { isShared: newSharedState });
-      const targetWh = locations.find(l => String(l.id) === String(whId));
+      const rawLocs = liveAllLocations && liveAllLocations.length > 0 ? liveAllLocations : locations;
+      const targetWh = rawLocs.find(l => String(l.id) === String(whId));
       if (targetWh) {
         saveServerLocation({ ...targetWh, isShared: newSharedState }).catch(() => { });
+        ClientSyncManager.logMutation('LOCATION', String(whId), 'UPDATE', { ...targetWh, isShared: newSharedState });
       }
       showToast(`Warehouse updated! Global Shared status set to ${newSharedState ? 'ENABLED (All Stores Linked)' : 'DISABLED (Dedicated Linkage)'}`, 'success');
     } catch (e: any) {
@@ -904,12 +907,14 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
   // Toggle Specific Store Linkage (Case 3: Regional Hubs)
   const handleToggleStoreLink = async (whId: string | number, storeTenantId: string) => {
     try {
-      const targetWh = locations.find(l => String(l.id) === String(whId));
+      const rawLocs = liveAllLocations && liveAllLocations.length > 0 ? liveAllLocations : locations;
+      const targetWh = rawLocs.find(l => String(l.id) === String(whId));
       if (!targetWh) return;
 
       const currentLinks = targetWh.allowedTenantIds || [];
       let updatedLinks: string[];
-      if (currentLinks.includes(storeTenantId)) {
+      const isRevoking = currentLinks.includes(storeTenantId);
+      if (isRevoking) {
         updatedLinks = currentLinks.filter(id => id !== storeTenantId);
       } else {
         updatedLinks = [...currentLinks, storeTenantId];
@@ -917,6 +922,28 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
       await db.locations.update(whId, { allowedTenantIds: updatedLinks });
       saveServerLocation({ ...targetWh, allowedTenantIds: updatedLinks }).catch(() => { });
+      ClientSyncManager.logMutation('LOCATION', String(whId), 'UPDATE', { ...targetWh, allowedTenantIds: updatedLinks });
+
+      const accessId = `access-${storeTenantId}-${whId}`;
+      if (isRevoking) {
+        // Delete local store warehouse access record
+        const matches = await db.storeWarehouseAccess.filter(a => a.storeId === storeTenantId && String(a.warehouseId) === String(whId)).toArray();
+        for (const m of matches) {
+          if (m.id) await db.storeWarehouseAccess.delete(m.id);
+        }
+        ClientSyncManager.logMutation('STORE_WAREHOUSE_ACCESS', accessId, 'DELETE', { id: accessId, storeId: storeTenantId, warehouseId: String(whId) });
+      } else {
+        const accessPayload = {
+          id: accessId,
+          tenantId: targetWh.tenantId || activeTenantId,
+          storeId: storeTenantId,
+          warehouseId: String(whId),
+          createdAt: new Date().toISOString()
+        };
+        await db.storeWarehouseAccess.put(accessPayload);
+        ClientSyncManager.logMutation('STORE_WAREHOUSE_ACCESS', accessId, 'INSERT', accessPayload);
+      }
+
       showToast('Store & Warehouse linkage updated successfully!', 'success');
     } catch (e: any) {
       showToast(`Failed to update store link: ${e.message}`, 'error');
@@ -2594,61 +2621,72 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               {/* 🏢 Left Column (Main Warehouse Cards) */}
               <div className="lg:col-span-7 xl:col-span-8 space-y-6">
-              {displayWarehouses.map(wh => {
-                const zones = locations.filter(l =>
-                  l.type === 'ZONE' &&
-                  (String(l.parentId) === String(wh.id) || (wh.code && l.code.startsWith(wh.code + '-')))
-                );
+              {displayWarehouses.length === 0 ? (
+                <div className="card bg-white border border-dashed border-slate-200 rounded-2xl p-8 text-center space-y-3 shadow-sm">
+                  <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center mx-auto">
+                    <Warehouse className="w-6 h-6" />
+                  </div>
+                  <h3 className="font-extrabold text-sm text-slate-800">No Linked Warehouse Hub</h3>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto font-medium">
+                    This store branch does not currently own or have access to any warehouse. You can generate a store layout using &ldquo;+ Store Layout Generator&rdquo; or request access in &ldquo;Store &amp; Warehouse Connections&rdquo;.
+                  </p>
+                </div>
+              ) : (
+                displayWarehouses.map(wh => {
+                  const zones = activeLocations.filter(l =>
+                    l.type === 'ZONE' &&
+                    (String(l.parentId) === String(wh.id) || (wh.code && l.code.startsWith(wh.code + '-')))
+                  );
 
-                const directShelves = locations.filter(l =>
-                  l.type === 'SHELF' &&
-                  (String(l.parentId) === String(wh.id) || (wh.code && l.code.startsWith(wh.code + '-') && !zones.some(z => z.code && l.code.startsWith(z.code + '-'))))
-                );
+                  const directShelves = activeLocations.filter(l =>
+                    l.type === 'SHELF' &&
+                    (String(l.parentId) === String(wh.id) || (wh.code && l.code.startsWith(wh.code + '-') && !zones.some(z => z.code && l.code.startsWith(z.code + '-'))))
+                  );
 
-                const hasChildren = zones.length > 0 || directShelves.length > 0;
+                  const hasChildren = zones.length > 0 || directShelves.length > 0;
 
-                return (
-                  <div key={wh.id} className="card bg-white border border-slate-200 rounded-2xl p-5 space-y-4 shadow-sm hover:shadow-md transition">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-                          <Warehouse className="w-5 h-5" />
+                  return (
+                    <div key={wh.id} className="card bg-white border border-slate-200 rounded-2xl p-5 space-y-4 shadow-sm hover:shadow-md transition">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                            <Warehouse className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h3 className="font-extrabold text-sm text-slate-800">{wh.name}</h3>
+                            <span className="text-[11px] font-mono text-slate-400">{wh.code}</span>
+                          </div>
                         </div>
-                        <div>
-                          <h3 className="font-extrabold text-sm text-slate-800">{wh.name}</h3>
-                          <span className="text-[11px] font-mono text-slate-400">{wh.code}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="badge badge-blue">Warehouse ({wh.capacity || 0} Cap)</span>
+                          <button
+                            onClick={() => handleDeleteLocation(wh)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                            title="Delete Warehouse"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="badge badge-blue">Warehouse ({wh.capacity || 0} Cap)</span>
-                        <button
-                          onClick={() => handleDeleteLocation(wh)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
-                          title="Delete Warehouse"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
 
-                    <p className="text-xs text-slate-500">{wh.description || 'Main warehouse facility'}</p>
+                      <p className="text-xs text-slate-500">{wh.description || 'Main warehouse facility'}</p>
 
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
-                          Zones & Racks Hierarchy ({zones.length} Zones)
-                        </span>
-                      </div>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                            Zones & Racks Hierarchy ({zones.length} Zones)
+                          </span>
+                        </div>
 
-                      {!hasChildren ? (
-                        <div className="text-xs text-slate-400 italic py-2">No zones or shelves created in this warehouse yet.</div>
-                      ) : (
-                        <div className="space-y-3">
-                          {zones.map(zone => {
-                            const shelves = locations.filter(l =>
-                              l.type === 'SHELF' &&
-                              (String(l.parentId) === String(zone.id) || (zone.code && l.code.startsWith(zone.code + '-')))
-                            );
+                        {!hasChildren ? (
+                          <div className="text-xs text-slate-400 italic py-2">No zones or shelves created in this warehouse yet.</div>
+                        ) : (
+                          <div className="space-y-3">
+                            {zones.map(zone => {
+                              const shelves = activeLocations.filter(l =>
+                                l.type === 'SHELF' &&
+                                (String(l.parentId) === String(zone.id) || (zone.code && l.code.startsWith(zone.code + '-')))
+                              );
 
                             return (
                               <div key={zone.id} className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/80 space-y-2.5">
@@ -2796,8 +2834,9 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
                     </div>
                   </div>
                 );
-              })}
-              </div>
+              })
+            )}
+            </div>
 
               {/* 🏪 Right Column (Compact Dedicated Store Front Card) */}
               <div className="lg:col-span-5 xl:col-span-4 sticky top-6 self-start space-y-4">
@@ -3017,7 +3056,7 @@ export const LocationScreen: React.FC<LocationScreenProps> = ({
 
         {/* ── View 4: Store Replenishment Manager ─────────────────────── */}
         {activeViewTab === 'replenishment' && (() => {
-          const whLocs = locations.filter(l => l.type === 'WAREHOUSE');
+          const whLocs = activeLocations.filter(l => l.type === 'WAREHOUSE');
 
           const replenishmentRows = items.map(item => {
             const itemMaps = itemLocations.filter(il => (il.tenantId || 'default-tenant') === tenantId && Number(il.itemId) === Number(item.id));

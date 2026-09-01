@@ -400,9 +400,9 @@ export function App() {
   const accessibleLocationIds = useMemo(() => {
     const locIds = new Set<string>(accessibleWhIds);
 
-    // Include store-owned locations (like Store Front floor / sales counter)
+    // Include store-owned standalone locations (like Store Front floor / sales counter that has no parent warehouse)
     allLocations.forEach(loc => {
-      if (loc && loc.id) {
+      if (loc && loc.id && !loc.parentId) {
         const locTenant = loc.tenantId || 'default-tenant';
         if (locTenant === activeTenantId || (activeTenantId === 'default-tenant' && locTenant === 'default-tenant')) {
           locIds.add(String(loc.id));
@@ -428,13 +428,12 @@ export function App() {
   const locations = useMemo(() => {
     return allLocations.filter(loc => {
       if (!loc) return false;
-      const locTenant = loc.tenantId || 'default-tenant';
-      const isOwner = locTenant === activeTenantId || (activeTenantId === 'default-tenant' && locTenant === 'default-tenant');
-      const isLocAccessible = accessibleLocationIds.has(String(loc.id));
-      const isShared = loc.isShared === true;
-      return isOwner || isLocAccessible || isShared;
+      if (loc.type === 'WAREHOUSE') {
+        return accessibleWhIds.has(String(loc.id));
+      }
+      return accessibleLocationIds.has(String(loc.id));
     });
-  }, [allLocations, activeTenantId, accessibleLocationIds]);
+  }, [allLocations, accessibleWhIds, accessibleLocationIds]);
 
   const itemLocations = useMemo(() => {
     return allItemLocations.filter(il => {
