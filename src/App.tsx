@@ -689,6 +689,7 @@ export function App() {
             <DashboardScreen
               invoices={invoices}
               parties={parties}
+              items={items}
               onNavigateTab={setActiveTab}
             />
           )}

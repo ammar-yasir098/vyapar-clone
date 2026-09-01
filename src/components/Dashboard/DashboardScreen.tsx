@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -10,14 +10,20 @@ import {
   BarChart3,
   TrendingUp,
   Zap,
-  Globe,
-  Sparkles
+  Sparkles,
+  Package,
+  CheckCircle2,
+  AlertTriangle,
+  Receipt,
+  ShoppingCart,
+  ArrowRight
 } from 'lucide-react';
-import { Invoice, Party } from '../../types';
+import { Invoice, Party, Item } from '../../types';
 
 interface DashboardScreenProps {
   invoices: Invoice[];
   parties: Party[];
+  items?: Item[];
   onNavigateTab: (tab: string) => void;
 }
 
@@ -56,11 +62,17 @@ const KpiCard: React.FC<{
   </div>
 );
 
-export const DashboardScreen: React.FC<DashboardScreenProps> = ({ invoices = [], parties = [], onNavigateTab }) => {
+export const DashboardScreen: React.FC<DashboardScreenProps> = ({
+  invoices = [],
+  parties = [],
+  items = [],
+  onNavigateTab
+}) => {
   const [period, setPeriod] = useState<'month' | 'week' | 'year'>('month');
 
   const safeParties = Array.isArray(parties) ? parties : [];
   const safeInvoices = Array.isArray(invoices) ? invoices : [];
+  const safeItems = Array.isArray(items) ? items : [];
 
   const safeNum = (val: any): number => {
     if (val === null || val === undefined) return 0;
@@ -79,37 +91,127 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ invoices = [],
     .filter(p => p.type === 'SUPPLIER' || p.type === 'BOTH')
     .reduce((sum, p) => { const b = getPartyEffectiveBalance(p); return sum + (b > 0 ? b : 0); }, 0);
 
-  const totalSales = safeInvoices.reduce((sum, inv) => sum + safeNum(inv?.grandTotal), 0);
-  const receivablePartiesCount = safeParties.filter(p => getPartyEffectiveBalance(p) > 0 && (p?.type === 'CUSTOMER' || p?.type === 'BOTH')).length;
+  const receivablePartiesCount = safeParties.filter(
+    p => getPartyEffectiveBalance(p) > 0 && (p?.type === 'CUSTOMER' || p?.type === 'BOTH')
+  ).length;
 
   const fmt = (n: number) => n > 0
     ? `Rs ${n.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
     : 'Rs 0.00';
 
-  // Dynamic Sales Curve
-  const getSalesPlotData = () => {
-    const buckets = Array(31).fill(0);
-    safeInvoices.forEach(inv => {
-      if (!inv?.invoiceDate) return;
-      const parts = inv.invoiceDate.split('-');
-      if (parts.length === 3) {
-        const day = parseInt(parts[2], 10);
-        if (day >= 1 && day <= 31) buckets[day - 1] += safeNum(inv.grandTotal);
+  // Dynamic Period-aware Sales Plotting & Computation
+  const { currentPeriodSales, points, pathD, areaD, peakPoint, xLabels, periodInvoicesCount } = useMemo(() => {
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const curMonth = now.getMonth(); // 0-11
+
+    let buckets: number[] = [];
+    let xLabels: string[] = [];
+    let periodInvoices: Invoice[] = [];
+
+    if (period === 'month') {
+      // 31 days of current month
+      buckets = Array(31).fill(0);
+      xLabels = ['1st', '5th', '10th', '15th', '20th', '25th', '30th'];
+      periodInvoices = safeInvoices.filter(inv => {
+        if (!inv?.invoiceDate) return false;
+        const parts = inv.invoiceDate.split('-');
+        if (parts.length >= 3) {
+          const y = parseInt(parts[0], 10);
+          const m = parseInt(parts[1], 10) - 1;
+          return y === curYear && m === curMonth;
+        }
+        return true;
+      });
+      periodInvoices.forEach(inv => {
+        const parts = (inv.invoiceDate || '').split('-');
+        if (parts.length >= 3) {
+          const day = parseInt(parts[2], 10);
+          if (day >= 1 && day <= 31) buckets[day - 1] += safeNum(inv.grandTotal);
+        }
+      });
+    } else if (period === 'week') {
+      // Past 7 days
+      buckets = Array(7).fill(0);
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      xLabels = [];
+      const dayDates: string[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - i);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        dayDates.push(`${yyyy}-${mm}-${dd}`);
+        xLabels.push(`${days[d.getDay()]} ${d.getDate()}`);
       }
-    });
+      periodInvoices = safeInvoices.filter(inv => inv?.invoiceDate && dayDates.includes(inv.invoiceDate));
+      periodInvoices.forEach(inv => {
+        const idx = dayDates.indexOf(inv.invoiceDate);
+        if (idx !== -1) buckets[idx] += safeNum(inv.grandTotal);
+      });
+    } else {
+      // 12 months of current year
+      buckets = Array(12).fill(0);
+      xLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      periodInvoices = safeInvoices.filter(inv => {
+        if (!inv?.invoiceDate) return false;
+        const parts = inv.invoiceDate.split('-');
+        return parts.length >= 1 && parseInt(parts[0], 10) === curYear;
+      });
+      periodInvoices.forEach(inv => {
+        const parts = (inv.invoiceDate || '').split('-');
+        if (parts.length >= 2) {
+          const m = parseInt(parts[1], 10) - 1;
+          if (m >= 0 && m < 12) buckets[m] += safeNum(inv.grandTotal);
+        }
+      });
+    }
+
+    const currentPeriodSales = periodInvoices.reduce((sum, inv) => sum + safeNum(inv?.grandTotal), 0);
+    const numPoints = buckets.length;
     const maxVal = Math.max(...buckets, 100);
     const points = buckets.map((val, idx) => ({
-      x: 20 + (idx / 30) * 460,
+      x: 20 + (idx / (numPoints - 1 || 1)) * 460,
       y: 120 - (val / maxVal) * 95,
-      val, day: idx + 1
+      val,
+      idx
     }));
     const pathD = points.reduce((acc, p, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`, '');
     const areaD = `${pathD} L 480 120 L 20 120 Z`;
     const peakPoint = points.reduce((prev, cur) => cur.val > prev.val ? cur : prev, points[0]);
-    return { points, pathD, areaD, peakPoint };
-  };
 
-  const { pathD, areaD, peakPoint } = getSalesPlotData();
+    return {
+      currentPeriodSales,
+      points,
+      pathD,
+      areaD,
+      peakPoint,
+      xLabels,
+      periodInvoicesCount: periodInvoices.length
+    };
+  }, [safeInvoices, period]);
+
+  // Inventory Health Metrics
+  const { lowStockCount, outOfStockCount } = useMemo(() => {
+    let low = 0;
+    let out = 0;
+    safeItems.forEach(item => {
+      const stock = safeNum(item.currentStock);
+      const minAlert = safeNum(item.minStockAlert || 5);
+      if (stock <= 0) {
+        out++;
+      } else if (stock <= minAlert) {
+        low++;
+      }
+    });
+    return { lowStockCount: low, outOfStockCount: out };
+  }, [safeItems]);
+
+  // Recent 4 Invoices
+  const recentInvoices = useMemo(() => {
+    return [...safeInvoices].slice(0, 4);
+  }, [safeInvoices]);
 
   const quickReports = [
     { label: 'Sale Report',       icon: TrendingUp, tab: 'reports',  color: '#3b82f6', bg: '#eff6ff' },
@@ -160,13 +262,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ invoices = [],
               <div>
                 <div className="text-[11px] font-extrabold uppercase tracking-widest text-slate-500 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>Total Sales Performance ({safeInvoices.length} Invoices)</span>
+                  <span>Sales Performance ({periodInvoicesCount} Invoices — {period === 'month' ? 'This Month' : period === 'week' ? 'This Week' : 'Financial Year'})</span>
                 </div>
                 <div className="text-3xl font-black text-slate-900 font-mono tracking-tight mt-1 leading-none">
-                  {fmt(totalSales)}
+                  {fmt(currentPeriodSales)}
                 </div>
               </div>
-              <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/80 self-start sm:self-auto">
+              <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/80 self-start sm:self-auto shadow-2xs">
                 {(['month', 'week', 'year'] as const).map(p => (
                   <button
                     key={p}
@@ -206,8 +308,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ invoices = [],
                 )}
               </svg>
               <div className="flex justify-between text-[10px] text-slate-400 font-mono font-bold mt-2 px-1">
-                {['1st','4th','7th','10th','13th','16th','19th','22nd','25th','28th','31st'].map(d => (
-                  <span key={d}>{d}</span>
+                {xLabels.map(label => (
+                  <span key={label}>{label}</span>
                 ))}
               </div>
             </div>
@@ -246,31 +348,54 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ invoices = [],
         </div>
 
         {/* ── Right Column ─────────────────────────────────── */}
-        <div className="w-full lg:w-76 space-y-4">
+        <div className="w-full lg:w-80 space-y-4">
 
-          {/* Google Profile Card */}
-          <div className="card card-glass p-5 space-y-3.5 animate-slide-up stagger-1">
-            <div className="flex items-center gap-3">
-              <div
-                className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm text-white shadow-xs"
-                style={{ background: 'linear-gradient(135deg, #4285F4, #34A853)' }}
-              >
-                G
+          {/* Real Inventory Health & Low Stock Alert Card (Replaced Google Profile placeholder) */}
+          <div className="card card-glass p-5 space-y-3.5 animate-slide-up stagger-1 border-t-3 border-amber-500">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-amber-600 bg-amber-100 shadow-2xs">
+                  <Package className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-xs font-extrabold text-slate-900">Inventory Health</div>
+                  <div className="text-[10px] text-slate-500 font-semibold">{safeItems.length} Products Monitored</div>
+                </div>
               </div>
-              <div>
-                <div className="text-xs font-extrabold text-slate-900">Google Profile Manager</div>
-                <div className="text-[10px] text-slate-400 font-semibold">Business visibility tool</div>
+              {lowStockCount > 0 || outOfStockCount > 0 ? (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-700 border border-rose-200 flex items-center gap-1 animate-pulse">
+                  <AlertTriangle className="w-3 h-3 text-rose-600" />
+                  <span>{lowStockCount + outOfStockCount} Alert</span>
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  <span>Healthy</span>
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-0.5">
+              <div className="bg-slate-50/90 rounded-xl p-2.5 border border-slate-200/70">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Out of Stock</div>
+                <div className={`text-base font-black font-mono mt-0.5 ${outOfStockCount > 0 ? 'text-rose-600 font-extrabold' : 'text-slate-700'}`}>
+                  {outOfStockCount}
+                </div>
+              </div>
+              <div className="bg-slate-50/90 rounded-xl p-2.5 border border-slate-200/70">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Low Stock</div>
+                <div className={`text-base font-black font-mono mt-0.5 ${lowStockCount > 0 ? 'text-amber-600 font-extrabold' : 'text-slate-700'}`}>
+                  {lowStockCount}
+                </div>
               </div>
             </div>
-            <p className="text-xs text-slate-600 font-semibold leading-relaxed">
-              Businesses with 4+ star ratings get <strong className="text-slate-900 font-extrabold">28% more</strong> customer calls on Google Maps.
-            </p>
+
             <button
-              onClick={() => alert('Connected Google Business Profile!')}
-              className="w-full py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs"
+              onClick={() => onNavigateTab('inventory')}
+              className="w-full py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/80 shadow-2xs group"
             >
-              <Globe className="w-3.5 h-3.5" />
-              <span>Connect Profile</span>
+              <span>Manage Inventory & Stock</span>
+              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
             </button>
           </div>
 
@@ -294,20 +419,73 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ invoices = [],
                 >
                   <item.icon className="w-3.5 h-3.5 stroke-[2.5]" style={{ color: item.color }} />
                 </div>
-                <span className="text-slate-800">{item.label}</span>
+                <span className="text-slate-800 font-semibold">{item.label}</span>
               </button>
             ))}
           </div>
 
-          {/* Custom Widget Placeholder */}
-          <div
-            onClick={() => onNavigateTab('pos')}
-            className="rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all duration-200 border-2 border-dashed border-slate-300 hover:border-indigo-500 hover:bg-indigo-50/50 p-6 text-slate-400 hover:text-indigo-600 group"
-          >
-            <div className="w-9 h-9 rounded-xl bg-slate-100 group-hover:bg-indigo-100 flex items-center justify-center transition-colors">
-              <Plus className="w-5 h-5 stroke-[2.5]" />
+          {/* Real Recent Sales Activity Card (Replaced dummy 'Add Custom Widget' placeholder) */}
+          <div className="card card-glass p-5 space-y-3 animate-slide-up stagger-3">
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] font-extrabold uppercase tracking-widest text-slate-500 flex items-center gap-1.5">
+                <Receipt className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Recent Invoices</span>
+              </div>
+              <button
+                onClick={() => onNavigateTab('invoices')}
+                className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 transition cursor-pointer flex items-center gap-0.5"
+              >
+                <span>All Bills</span>
+                <ChevronRight className="w-3 h-3" />
+              </button>
             </div>
-            <span className="text-xs font-bold">Add Custom Widget</span>
+
+            {recentInvoices.length === 0 ? (
+              <div className="text-center py-6 px-3 bg-slate-50/70 rounded-2xl border border-dashed border-slate-200">
+                <ShoppingCart className="w-7 h-7 text-slate-300 mx-auto mb-2" />
+                <p className="text-xs font-bold text-slate-600">No sales recorded yet</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Start billing to see recent transactions</p>
+                <button
+                  onClick={() => onNavigateTab('pos')}
+                  className="mt-3 px-3.5 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs transition cursor-pointer"
+                >
+                  + Add New Sale
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {recentInvoices.map((inv) => (
+                  <div
+                    key={inv.id || inv.invoiceNumber}
+                    onClick={() => onNavigateTab('invoices')}
+                    className="p-2.5 rounded-xl bg-slate-50/80 hover:bg-white border border-slate-200/70 hover:border-indigo-200 transition-all cursor-pointer flex items-center justify-between group shadow-2xs hover:shadow-xs"
+                  >
+                    <div className="min-w-0 pr-2">
+                      <div className="text-xs font-bold text-slate-800 group-hover:text-indigo-700 truncate">
+                        {inv.partyName || 'Walk-in Customer'}
+                      </div>
+                      <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+                        <span>{inv.invoiceNumber}</span>
+                        <span>•</span>
+                        <span>{inv.invoiceDate || 'Today'}</span>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-xs font-black text-slate-900 font-mono">
+                        Rs {Number(inv.grandTotal || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </div>
+                      <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-extrabold mt-0.5 ${
+                        inv.paymentStatus === 'PAID'
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-amber-100 text-amber-700'
+                      }`}>
+                        {inv.paymentStatus || 'PAID'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
