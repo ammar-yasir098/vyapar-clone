@@ -125,7 +125,7 @@ export function App() {
       message: 'Are you sure you want to sign out? Your offline store data remains safely saved on this device.',
       type: 'danger',
       confirmText: 'Sign Out',
-      onConfirm: () => {
+      onConfirm: async () => {
         localStorage.removeItem('vyapar_user_session');
         localStorage.removeItem('vyapar_auth_token');
         localStorage.removeItem('vyapar_current_tenant');
@@ -133,6 +133,30 @@ export function App() {
         setCompanies([]);
         setCurrentTenantId('');
         setUserSession(null);
+
+        // Purge local Dexie tables to guarantee zero cross-user cache contamination
+        try {
+          await db.companyProfiles.clear();
+          await db.items.clear();
+          await db.parties.clear();
+          await db.invoices.clear();
+          await db.estimates.clear();
+          await db.paymentIn.clear();
+          await db.paymentOut.clear();
+          await db.expenses.clear();
+          await db.purchaseOrders.clear();
+          await db.purchaseBills.clear();
+          await db.purchaseReturns.clear();
+          await db.saleReturns.clear();
+          await db.locations.clear();
+          await db.itemLocations.clear();
+          await db.stockTransfers.clear();
+          await db.storeWarehouseAccess.clear();
+          await db.cashAccounts.clear();
+          await db.cashTransactions.clear();
+          await db.syncJournal.clear();
+        } catch { }
+
         showToast('Signed out successfully.', 'info');
       }
     });
@@ -514,23 +538,9 @@ export function App() {
   };
 
   const handleCreateCompany = async (newCompanyData: Partial<BusinessDetails>) => {
-    // Auto-increment sequential tenant ID (tenant-1, tenant-2, tenant-3...)
-    let maxNum = 0;
-    for (const c of companies) {
-      if (c.tenantId) {
-        const match = c.tenantId.match(/^tenant-(\d+)$/i);
-        if (match) {
-          const num = parseInt(match[1], 10);
-          if (!isNaN(num) && num > maxNum) {
-            maxNum = num;
-          }
-        }
-      }
-    }
-    const newTenantId = newCompanyData.tenantId || `tenant-${maxNum + 1}`;
     const fullCompanyData = {
       userId: userSession?.userId,
-      tenantId: newTenantId,
+      tenantId: newCompanyData.tenantId || undefined, // Allow backend to assign authoritative unique tenantId globally
       name: newCompanyData.name || 'New Branch',
       phone: newCompanyData.phone || '+92 300 xxxxxxx',
       email: newCompanyData.email || '',
@@ -540,16 +550,18 @@ export function App() {
       businessCategory: newCompanyData.businessCategory || 'Supermarket & FMCG'
     };
 
-    await saveServerCompanyProfile(fullCompanyData);
+    const res = await saveServerCompanyProfile(fullCompanyData);
+    const assignedTenantId = res?.data?.tenantId || (res as any)?.tenantId || newCompanyData.tenantId || `tenant-${Date.now()}`;
 
     const newCompObj: BusinessDetails = {
       ...fullCompanyData,
+      tenantId: assignedTenantId,
       state: 'Punjab, Pakistan',
       tagline: 'Quality Products at Everyday Low Prices'
     };
 
     try {
-      const existing = await db.companyProfiles.where('tenantId').equals(newTenantId).first();
+      const existing = await db.companyProfiles.where('tenantId').equals(assignedTenantId).first();
       if (existing && existing.id) {
         await db.companyProfiles.update(existing.id, newCompObj as any);
       } else {
@@ -557,8 +569,8 @@ export function App() {
       }
     } catch { }
 
-    setCompanies(prev => [...prev, newCompObj]);
-    handleSelectCompany(newTenantId);
+    setCompanies(prev => [...prev.filter(c => c.tenantId !== assignedTenantId), newCompObj]);
+    handleSelectCompany(assignedTenantId);
   };
 
   const handleDeleteCompany = (tenantIdToDelete: string, storeName: string) => {
@@ -587,35 +599,44 @@ export function App() {
           await db.estimates.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
           await db.cashAccounts.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
           await db.cashTransactions.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.itemRestocks.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.locations.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.itemLocations.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.stockTransfers.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.storeWarehouseAccess.where('storeId').equals(tenantIdToDelete).delete().catch(() => { });
+          await db.storeWarehouseAccess.where('tenantId').equals(tenantIdToDelete).delete().catch(() => { });
 
           // 3. Update React state
           const remainingCompanies = companies.filter(c => c.tenantId !== tenantIdToDelete);
           setCompanies(remainingCompanies);
 
-          if (remainingCompanies.length > 0) {
-            const nextActive = remainingCompanies[0];
-            const nextTenantId = nextActive.tenantId || '';
-            setCurrentTenantId(nextTenantId);
-            setBusinessDetails(nextActive);
-            localStorage.setItem('vyapar_current_tenant', nextTenantId);
-            localStorage.setItem('vyapar_business_details', JSON.stringify(nextActive));
-          } else {
-            setCompanies([]);
-            setBusinessDetails({
-              tenantId: '',
-              name: '',
-              phone: '',
-              email: '',
-              address: '',
-              gstin: '',
-              state: 'Punjab, Pakistan',
-              tagline: 'Quality Products at Everyday Low Prices',
-              businessType: 'Retail',
-              businessCategory: 'Supermarket & FMCG'
-            });
-            setCurrentTenantId('');
-            localStorage.removeItem('vyapar_current_tenant');
-            localStorage.removeItem('vyapar_business_details');
+          // If the deleted store was the currently active store, switch to another available store
+          if (currentTenantId === tenantIdToDelete) {
+            if (remainingCompanies.length > 0) {
+              const nextActive = remainingCompanies[0];
+              const nextTenantId = nextActive.tenantId || '';
+              setCurrentTenantId(nextTenantId);
+              setBusinessDetails(nextActive);
+              localStorage.setItem('vyapar_current_tenant', nextTenantId);
+              localStorage.setItem('vyapar_business_details', JSON.stringify(nextActive));
+            } else {
+              setCompanies([]);
+              setBusinessDetails({
+                tenantId: '',
+                name: '',
+                phone: '',
+                email: '',
+                address: '',
+                gstin: '',
+                state: 'Punjab, Pakistan',
+                tagline: 'Quality Products at Everyday Low Prices',
+                businessType: 'Retail',
+                businessCategory: 'Supermarket & FMCG'
+              });
+              setCurrentTenantId('');
+              localStorage.removeItem('vyapar_current_tenant');
+              localStorage.removeItem('vyapar_business_details');
+            }
           }
 
           showToast(`Store profile "${storeName}" deleted successfully from local and cloud databases.`, 'success');

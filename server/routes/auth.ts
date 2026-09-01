@@ -35,31 +35,54 @@ function authRateLimiter(req: Request, res: Response, next: any) {
   next();
 }
 
-// Helper to find existing company or provision a default company
-async function ensureDefaultCompany(tenantId: string, userId: string = '', name: string = 'Company', phone: string = '', email: string = '') {
-  if (!isDbConnected()) return;
+// Helper to find existing company or provision a default company if user has zero stores
+async function ensureDefaultCompany(tenantId: string, userId: string = '', name: string = 'My Store', phone: string = '', email: string = '') {
+  if (!isDbConnected() || !userId) return;
   try {
-    const existing = await CompanyProfile.findOne({ where: { tenantId } });
-    if (!existing) {
-      console.log(`🏢 Auto-provisioning default company profile '${name}' for tenant '${tenantId}'...`);
-      await CompanyProfile.create({
-        userId,
-        tenantId,
-        name: name || 'Company',
-        phone: phone || '+92 300 xxxxxxx',
-        email: email || '',
-        address: 'Shop #12, Commercial Market, Main Boulevard, Gulberg, Lahore',
-        gstin: 'NTN: 7654321-0',
-        businessType: 'Retail',
-        businessCategory: 'Supermarket & FMCG'
-      });
-    } else if (userId && !existing.userId) {
-      await existing.update({ userId });
+    // If the user already has at least one active store, NEVER auto-provision another
+    const userStoreCount = await CompanyProfile.count({ where: { userId } });
+    if (userStoreCount > 0) return;
+
+    let effectiveTenantId = tenantId;
+    const existingTenant = await CompanyProfile.findOne({ where: { tenantId: effectiveTenantId } });
+    if (existingTenant) {
+      if (!existingTenant.get('userId')) {
+        await existingTenant.update({ userId });
+        return;
+      }
+      // If tenantId belongs to someone else, generate a brand new globally unique tenantId
+      let maxNum = 0;
+      const allProfiles = await CompanyProfile.findAll();
+      for (const p of allProfiles) {
+        const tid = p.get('tenantId') as string;
+        if (tid) {
+          const match = tid.match(/(?:tenant-)?(\d+)$/i);
+          if (match) {
+            const num = parseInt(match[1], 10);
+            if (!isNaN(num) && num > maxNum) maxNum = num;
+          }
+        }
+      }
+      effectiveTenantId = `tenant-${maxNum + 1}`;
     }
+
+    console.log(`🏢 Auto-provisioning primary store '${name}' for user '${userId}' on '${effectiveTenantId}'...`);
+    await CompanyProfile.create({
+      userId,
+      tenantId: effectiveTenantId,
+      name: name || 'My Store',
+      phone: phone || '+92 300 xxxxxxx',
+      email: email || '',
+      address: 'Shop #12, Commercial Market, Main Boulevard, Gulberg, Lahore',
+      gstin: 'NTN: 1234567-8',
+      businessType: 'Retail',
+      businessCategory: 'Supermarket & FMCG'
+    });
   } catch (err) {
     console.error('Error provisioning company profile:', err);
   }
 }
+
 
 // Backfill any unclaimed (user_id = NULL) company profiles to the given user
 async function backfillUnclaimedProfiles(userId: string) {
@@ -99,8 +122,13 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
       return res.status(401).json({ success: false, error: 'Invalid email or password' });
     }
 
-    // Ensure company profile exists for tenant
-    await ensureDefaultCompany(user.tenantId, user.userId, 'Company', user.phone, user.email);
+    // Ensure company profile exists ONLY if the user currently has zero stores
+    if (isDbConnected()) {
+      const userStoreCount = await CompanyProfile.count({ where: { userId: user.userId } });
+      if (userStoreCount === 0) {
+        await ensureDefaultCompany(user.tenantId, user.userId, user.fullName ? `${user.fullName}'s Store` : 'My Store', user.phone, user.email);
+      }
+    }
     // Claim any unclaimed (pre-existing) company profiles that have no userId yet
     await backfillUnclaimedProfiles(user.userId);
 

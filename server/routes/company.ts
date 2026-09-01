@@ -100,36 +100,50 @@ companyRouter.post('/', async (req: Request, res: Response) => {
       booksBeginDate
     } = req.body;
 
+    const authenticatedUserId = (req as any).user?.userId || userId;
     let effectiveTenantId = tenantId;
-    if (isDbConnected() && !effectiveTenantId) {
-      let maxNum = 0;
-      const allProfiles = await CompanyProfile.findAll();
-      for (const p of allProfiles) {
-        const tid = p.get('tenantId') as string;
-        if (tid) {
-          const match = tid.match(/(?:tenant-)?(\d+)$/i);
-          if (match) {
-            const num = parseInt(match[1], 10);
-            if (!isNaN(num) && num > maxNum) maxNum = num;
-          }
-        }
-      }
-      effectiveTenantId = `tenant-${maxNum + 1}`;
-    }
-
-    if (!effectiveTenantId) {
-      effectiveTenantId = 'tenant-1';
-    }
-
-    const savedLogoUrl = saveBase64Image(logoUrl, 'logos', 'logo', effectiveTenantId);
-    const savedSignatureUrl = saveBase64Image(signatureUrl, 'signatures', 'sig', effectiveTenantId);
+    let savedLogoUrl: string | null = null;
+    let savedSignatureUrl: string | null = null;
 
     if (isDbConnected()) {
+      // If a tenantId was supplied, check if it already exists for a DIFFERENT user
+      if (effectiveTenantId) {
+        const existing = await CompanyProfile.findOne({ where: { tenantId: effectiveTenantId } });
+        if (existing && existing.get('userId') && existing.get('userId') !== authenticatedUserId) {
+          console.warn(`⚠️ [SECURITY] Prevented user '${authenticatedUserId}' from overwriting store '${effectiveTenantId}' owned by user '${existing.get('userId')}'. Generating fresh unique tenantId.`);
+          effectiveTenantId = null; // Force new unique tenant allocation
+        }
+      }
+
+      // Generate globally unique sequential tenant ID across the entire PostgreSQL database
+      if (!effectiveTenantId) {
+        let maxNum = 0;
+        const allProfiles = await CompanyProfile.findAll();
+        for (const p of allProfiles) {
+          const tid = p.get('tenantId') as string;
+          if (tid) {
+            const match = tid.match(/(?:tenant-)?(\d+)$/i);
+            if (match) {
+              const num = parseInt(match[1], 10);
+              if (!isNaN(num) && num > maxNum) maxNum = num;
+            }
+          }
+        }
+        effectiveTenantId = `tenant-${maxNum + 1}`;
+        while (await CompanyProfile.findOne({ where: { tenantId: effectiveTenantId } })) {
+          maxNum++;
+          effectiveTenantId = `tenant-${maxNum + 1}`;
+        }
+      }
+
+      savedLogoUrl = saveBase64Image(logoUrl, 'logos', 'logo', effectiveTenantId);
+      savedSignatureUrl = saveBase64Image(signatureUrl, 'signatures', 'sig', effectiveTenantId);
+
       let profile = await CompanyProfile.findOne({ where: { tenantId: effectiveTenantId } });
 
       if (profile) {
         await profile.update({
-          userId: userId || profile.get('userId'),
+          userId: authenticatedUserId || profile.get('userId'),
           name: name || profile.get('name'),
           phone: phone || profile.get('phone'),
           email: email || profile.get('email'),
@@ -144,19 +158,19 @@ companyRouter.post('/', async (req: Request, res: Response) => {
         });
       } else {
         profile = await CompanyProfile.create({
-          userId,
-          tenantId,
-          name,
-          phone,
-          email,
-          address,
-          gstin,
-          businessType,
-          businessCategory,
-          pincode,
+          userId: authenticatedUserId,
+          tenantId: effectiveTenantId,
+          name: name || 'New Branch',
+          phone: phone || '+92 300 xxxxxxx',
+          email: email || '',
+          address: address || 'Shop #12, Commercial Market, Main Boulevard, Gulberg, Lahore',
+          gstin: gstin || 'NTN: 1234567-8',
+          businessType: businessType || 'Retail',
+          businessCategory: businessCategory || 'Supermarket & FMCG',
+          pincode: pincode || '54000',
           logoUrl: savedLogoUrl,
           signatureUrl: savedSignatureUrl,
-          booksBeginDate
+          booksBeginDate: booksBeginDate || new Date().toISOString().split('T')[0]
         });
       }
 
@@ -214,7 +228,8 @@ companyRouter.delete('/', async (req: Request, res: Response) => {
         CashTransaction,
         InventoryLocation,
         ItemLocationMapping,
-        StockTransfer
+        StockTransfer,
+        StoreWarehouseAccess
       } = await import('../db/sequelize.js');
 
       await Item.destroy({ where: { tenantId: tId } }).catch(() => {});
@@ -233,6 +248,8 @@ companyRouter.delete('/', async (req: Request, res: Response) => {
       await InventoryLocation.destroy({ where: { tenantId: tId } }).catch(() => {});
       await ItemLocationMapping.destroy({ where: { tenantId: tId } }).catch(() => {});
       await StockTransfer.destroy({ where: { tenantId: tId } }).catch(() => {});
+      await StoreWarehouseAccess.destroy({ where: { storeId: tId } }).catch(() => {});
+      await StoreWarehouseAccess.destroy({ where: { tenantId: tId } }).catch(() => {});
     }
 
     console.log(`🗑️ [DELETE COMPANY] Successfully deleted company profile and associated store records for tenantId: ${tId}`);
