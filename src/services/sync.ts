@@ -951,10 +951,11 @@ export async function deduplicateLocalDatabase() {
     if (dupMappingIds.length > 0) await db.itemLocations.bulkDelete(dupMappingIds);
 
     // 6. Purge Orphaned Item Location Mappings (referencing non-existent locations)
-    const validLocations = new Set((await db.locations.toArray()).map(l => Number(l.id)));
+    const allLocs = await db.locations.toArray();
+    const validLocations = new Set(allLocs.map(l => String(l.id)));
     const orphanMappingIds = mappings
-      .filter(m => m.id && !validLocations.has(Number(m.locationId)))
-      .map(m => Number(m.id));
+      .filter(m => m.id && !validLocations.has(String(m.locationId)))
+      .map(m => m.id as any);
     if (orphanMappingIds.length > 0) {
       await db.itemLocations.bulkDelete(orphanMappingIds);
     }

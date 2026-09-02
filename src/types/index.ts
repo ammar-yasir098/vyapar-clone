@@ -245,7 +245,7 @@ export interface PurchaseOrder {
   taxTotal: number;
   grandTotal: number;
   status: POStatus;
-  receivingLocationId?: number;
+  receivingLocationId?: number | string;
   notes?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -285,7 +285,7 @@ export interface PurchaseBill {
   dueAmount?: number;
   paymentStatus?: 'PAID' | 'UNPAID' | 'PARTIAL';
   paymentMethod?: string;
-  receivingLocationId?: number;
+  receivingLocationId?: number | string;
   notes?: string;
   createdAt?: string;
   updatedAt?: string;

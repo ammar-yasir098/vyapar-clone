@@ -795,6 +795,7 @@ export function App() {
             <CreateSaleReturnScreen
               items={items}
               parties={parties}
+              invoices={invoices}
               business={businessDetails}
               onReturnCreated={() => setActiveTab('sale-returns')}
               onCancel={() => setActiveTab('sale-returns')}

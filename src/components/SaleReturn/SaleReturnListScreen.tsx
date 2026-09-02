@@ -43,7 +43,10 @@ export const SaleReturnListScreen: React.FC<SaleReturnListScreenProps> = ({
   );
 
   const totalReturnValue = saleReturns.reduce((acc, r) => acc + (r.grandTotal || 0), 0);
-  const totalItemsCount = saleReturns.reduce((acc, r) => acc + (r.items?.length || 0), 0);
+  const totalItemsCount = saleReturns.reduce(
+    (acc, r) => acc + (r.items?.reduce((sum, item) => sum + (Number(item.returnQuantity) || 0), 0) || 0),
+    0
+  );
 
   const handleDeleteReturn = async (ret: SaleReturn) => {
     if (!ret.id && !ret.returnId) return;

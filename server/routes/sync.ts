@@ -454,10 +454,17 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
             }
           }
         } else if (entityType === 'PARTY') {
-          if (mutationType === 'DELETE' && payload.name) {
-            await Party.destroy({ where: { tenantId, name: payload.name.trim() }, transaction: dbTx });
-          } else if (payload.name) {
-            let existing = await Party.findOne({ where: { tenantId, name: payload.name.trim() }, transaction: dbTx });
+          if (mutationType === 'DELETE' && (payload.name || payload.id)) {
+            if (payload.id) {
+              await Party.destroy({ where: { tenantId, id: String(payload.id) }, transaction: dbTx });
+            } else {
+              await Party.destroy({ where: { tenantId, name: payload.name.trim() }, transaction: dbTx });
+            }
+          } else if (payload.name || payload.id) {
+            let existing = payload.id ? await Party.findByPk(String(payload.id), { transaction: dbTx }) : null;
+            if (!existing && payload.name) {
+              existing = await Party.findOne({ where: { tenantId, name: payload.name.trim() }, transaction: dbTx });
+            }
 
             const partyData = {
               tenantId,
@@ -487,14 +494,14 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
             });
 
             // Resilient partyId foreign key resolution
-            let validPartyId: number | null = null;
-            if (payload.partyId && typeof payload.partyId === 'number') {
-              const partyExists = await Party.findByPk(payload.partyId, { transaction: dbTx });
-              if (partyExists) validPartyId = partyExists.id;
+            let validPartyId: string | null = null;
+            if (payload.partyId) {
+              const partyExists = await Party.findByPk(String(payload.partyId), { transaction: dbTx });
+              if (partyExists) validPartyId = String(partyExists.id);
             }
             if (!validPartyId && payload.partyName) {
               const partyByName = await Party.findOne({ where: { tenantId, name: payload.partyName.trim() }, transaction: dbTx });
-              if (partyByName) validPartyId = partyByName.id;
+              if (partyByName) validPartyId = String(partyByName.id);
             }
 
             let targetInvoice: any;
@@ -512,7 +519,7 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
                 paymentMethod: payload.paymentMethod || 'CASH'
               }, { transaction: dbTx });
               targetInvoice = existingInvoice;
-              await InvoiceItem.destroy({ where: { invoiceId: existingInvoice.get('id') as number }, transaction: dbTx });
+              await InvoiceItem.destroy({ where: { invoiceId: String(existingInvoice.get('id')) }, transaction: dbTx });
             } else {
               targetInvoice = await Invoice.create({
                 invoiceId: payload.invoiceId || `INV-${Date.now()}`,
@@ -538,22 +545,22 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
             if (payload.items && Array.isArray(payload.items)) {
               for (const item of payload.items) {
                 const rawItemId = item.itemId || item.id;
-                let validItemId: number | null = null;
-                if (rawItemId && typeof rawItemId === 'number') {
-                  const itemExists = await Item.findByPk(rawItemId, { transaction: dbTx });
-                  if (itemExists) validItemId = rawItemId;
+                let validItemId: string | null = null;
+                if (rawItemId) {
+                  const itemExists = await Item.findByPk(String(rawItemId), { transaction: dbTx });
+                  if (itemExists) validItemId = String(itemExists.id);
                 }
                 if (!validItemId && item.skuCode) {
                   const itemBySku = await Item.findOne({ where: { tenantId, skuCode: String(item.skuCode).trim() }, transaction: dbTx });
-                  if (itemBySku) validItemId = itemBySku.id;
+                  if (itemBySku) validItemId = String(itemBySku.id);
                 }
                 if (!validItemId && (item.itemName || item.name)) {
                   const itemByName = await Item.findOne({ where: { tenantId, name: (item.itemName || item.name).trim() }, transaction: dbTx });
-                  if (itemByName) validItemId = itemByName.id;
+                  if (itemByName) validItemId = String(itemByName.id);
                 }
 
                 await InvoiceItem.create({
-                  invoiceId: targetInvoice.id,
+                  invoiceId: String(targetInvoice.id),
                   itemId: validItemId,
                   itemName: item.itemName || item.name || '',
                   hsnSacCode: item.hsnSacCode || '',

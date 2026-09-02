@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   RotateCcw, 
   ArrowLeft, 
@@ -6,12 +6,16 @@ import {
   Trash2, 
   Save, 
   User, 
-  PackagePlus,
-  FileText
+  PackagePlus, 
+  FileText, 
+  Banknote, 
+  CreditCard, 
+  CheckCircle2, 
+  Store 
 } from 'lucide-react';
-import { Party, Item, SaleReturn, SaleReturnItem, BusinessDetails } from '../../types';
+import { Party, Item, SaleReturn, SaleReturnItem, BusinessDetails, Invoice } from '../../types';
 import { db, getActiveTenantId } from '../../db';
-import { createServerSaleReturn } from '../../services/api';
+import { createServerSaleReturn, saveServerItemLocation, updateServerParty } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { recordCashEntry } from '../../services/cash';
 import { useToast } from '../Common/ToastContext';
@@ -19,6 +23,7 @@ import { useToast } from '../Common/ToastContext';
 interface CreateSaleReturnScreenProps {
   parties: Party[];
   items: Item[];
+  invoices?: Invoice[];
   business: BusinessDetails;
   onReturnCreated: () => void;
   onCancel: () => void;
@@ -27,6 +32,7 @@ interface CreateSaleReturnScreenProps {
 export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
   parties,
   items,
+  invoices = [],
   business,
   onReturnCreated,
   onCancel
@@ -42,6 +48,9 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
+  // Settlement / Refund Mode: Cash Payout vs Store Credit (Advance Account Balance)
+  const [refundMode, setRefundMode] = useState<'CASH_REFUND' | 'STORE_CREDIT'>('CASH_REFUND');
+
   // Return items state
   const [returnItems, setReturnItems] = useState<Array<{
     itemId?: number;
@@ -56,11 +65,23 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
     { itemName: '', hsnSacCode: '1000', unitType: 'PCS', returnQuantity: 1, unitPrice: 0, taxAmount: 0, totalAmount: 0 }
   ]);
 
+  const selectedPartyObj = parties.find(p => p.id === selectedPartyId);
+
+  // Invoices for the selected party
+  const partyInvoices = useMemo(() => {
+    if (!selectedPartyId && !partyName) return [];
+    return (invoices || []).filter(inv =>
+      (selectedPartyId !== '' && String(inv.partyId) === String(selectedPartyId)) ||
+      (inv.partyName && inv.partyName.trim().toLowerCase() === partyName.trim().toLowerCase())
+    );
+  }, [invoices, selectedPartyId, partyName]);
+
   const handlePartySelect = (partyIdStr: string) => {
     if (!partyIdStr) {
       setSelectedPartyId('');
       setPartyName('');
       setPartyPhone('');
+      setInvoiceNumber('');
       return;
     }
     const pid = Number(partyIdStr);
@@ -69,6 +90,26 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
     if (p) {
       setPartyName(p.name);
       setPartyPhone(p.phone || '');
+    }
+  };
+
+  const handleInvoiceSelect = (invNum: string) => {
+    setInvoiceNumber(invNum);
+    if (!invNum) return;
+    const inv = partyInvoices.find(i => i.invoiceNumber === invNum);
+    if (inv && inv.items && inv.items.length > 0) {
+      const newItems = inv.items.map(it => ({
+        itemId: it.itemId,
+        itemName: it.itemName,
+        hsnSacCode: it.hsnSacCode || '1000',
+        unitType: it.unitType || 'PCS',
+        returnQuantity: it.quantity || 1,
+        unitPrice: it.unitPrice || 0,
+        taxAmount: it.taxAmount || 0,
+        totalAmount: (it.quantity || 1) * (it.unitPrice || 0)
+      }));
+      setReturnItems(newItems);
+      showToast(`Loaded ${newItems.length} item(s) from invoice ${invNum}`, 'info');
     }
   };
 
@@ -158,7 +199,7 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
         subtotal: grandTotal,
         taxTotal: 0,
         grandTotal,
-        refundAmount: grandTotal,
+        refundAmount: refundMode === 'CASH_REFUND' ? grandTotal : 0,
         notes,
         createdAt: new Date().toISOString()
       };
@@ -166,20 +207,13 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
       // 1. Save locally to Dexie IndexedDB
       await db.saleReturns.add(newReturn);
 
-      // Record Cash Outflow Refund if grandTotal > 0
-      if (grandTotal > 0) {
-        await recordCashEntry({
-          tenantId: activeTenant,
-          type: 'OUT',
-          amount: grandTotal,
-          source: 'SALE_RETURN_REFUND',
-          referenceId: creditNoteNumber,
-          description: `Cash refund for Sale Return ${creditNoteNumber} (${partyName})`,
-          transactionDate: returnDate
-        });
-      }
+      // 2. Increase Item Stock Levels & RESTOCK into Store Front shelf mapping
+      const allLocs = await db.locations.toArray();
+      const storeLoc = allLocs.find(l =>
+        (l.tenantId === activeTenant) &&
+        (l.isStoreFront || l.code === 'STORE-FRONT' || (l.name && l.name.toLowerCase().includes('store front')))
+      );
 
-      // 2. Increase Item Stock Levels (item.currentStock += returnedQty) & restore Store Front shelf mapping
       for (const item of validItems) {
         if (item.itemId) {
           const dbItem = await db.items.get(item.itemId);
@@ -191,40 +225,117 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
               updatedAt: new Date().toISOString()
             });
 
-            // Restore returned stock to store front shelf mapping if exists
-            const mappedLoc = await db.itemLocations.filter(il => Number(il.itemId) === Number(item.itemId)).first();
+            await syncManager.logMutation('ITEM', String(item.itemId), 'UPDATE', { 
+              id: item.itemId, 
+              name: dbItem.name, 
+              skuCode: dbItem.skuCode, 
+              currentStock: newStock 
+            });
+          }
+
+          // Restore specifically to Store Front Shelf Mapping
+          if (storeLoc && storeLoc.id) {
+            let mappedLoc = await db.itemLocations.filter(il =>
+              (il.tenantId || 'default-tenant') === activeTenant &&
+              String(il.itemId) === String(item.itemId) &&
+              String(il.locationId) === String(storeLoc.id)
+            ).first();
+
+            if (!mappedLoc) {
+              mappedLoc = await db.itemLocations.filter(il =>
+                (il.tenantId || 'default-tenant') === activeTenant &&
+                String(il.itemId) === String(item.itemId) &&
+                ((il as any).code === 'STORE-FRONT' || ((il as any).locationName && (il as any).locationName.toLowerCase().includes('store front')))
+              ).first();
+            }
+
             if (mappedLoc && mappedLoc.id) {
               const newLocStock = (mappedLoc.quantity || 0) + item.returnQuantity;
               await db.itemLocations.update(mappedLoc.id, {
                 quantity: newLocStock,
                 updatedAt: new Date().toISOString()
               });
+              await syncManager.logMutation('ITEM_LOCATION', String(mappedLoc.id), 'UPDATE', {
+                ...mappedLoc,
+                quantity: newLocStock,
+                updatedAt: new Date().toISOString()
+              });
+              saveServerItemLocation({
+                tenantId: activeTenant,
+                itemId: String(item.itemId),
+                locationId: String(mappedLoc.locationId),
+                quantity: newLocStock
+              }).catch(() => {});
+            } else {
+              const newMapId = `map-${item.itemId}-${storeLoc.id}`;
+              const newMap = {
+                id: newMapId,
+                tenantId: activeTenant,
+                itemId: String(item.itemId),
+                locationId: String(storeLoc.id),
+                quantity: item.returnQuantity,
+                updatedAt: new Date().toISOString()
+              };
+              await db.itemLocations.add(newMap as any);
+              await syncManager.logMutation('ITEM_LOCATION', newMapId, 'INSERT', newMap);
+              saveServerItemLocation({
+                tenantId: activeTenant,
+                itemId: String(item.itemId),
+                locationId: String(storeLoc.id),
+                quantity: item.returnQuantity
+              }).catch(() => {});
             }
-
-            await syncManager.logMutation('ITEM', String(item.itemId), 'UPDATE', { id: item.itemId, name: dbItem.name, skuCode: dbItem.skuCode, currentStock: newStock });
           }
         }
       }
 
-      // 3. Deduct Customer Ledger Balance (customer.balance -= returnAmount)
-      if (selectedPartyId !== '') {
-        const party = await db.parties.get(Number(selectedPartyId));
-        if (party) {
-          const currentBal = party.currentBalance || 0;
-          await db.parties.update(Number(selectedPartyId), {
-            currentBalance: Math.max(0, currentBal - grandTotal)
+      // 3. Customer Balance & Cash Handling based on refundMode
+      if (refundMode === 'CASH_REFUND') {
+        // Record Cash Outflow Refund from Cash Drawer
+        if (grandTotal > 0) {
+          await recordCashEntry({
+            tenantId: activeTenant,
+            type: 'OUT',
+            amount: grandTotal,
+            source: 'SALE_RETURN_REFUND',
+            referenceId: creditNoteNumber,
+            description: `Cash refund for Sale Return ${creditNoteNumber} (${partyName})`,
+            transactionDate: returnDate
           });
+        }
+
+        // If customer had pending balance (dues), reduce dues
+        if (selectedPartyId !== '') {
+          const party = await db.parties.get(Number(selectedPartyId));
+          if (party && (party.currentBalance || 0) > 0) {
+            const newBal = Math.max(0, (party.currentBalance || 0) - grandTotal);
+            await db.parties.update(Number(selectedPartyId), { currentBalance: newBal });
+            await syncManager.logMutation('PARTY', String(selectedPartyId), 'UPDATE', { id: selectedPartyId, currentBalance: newBal });
+            updateServerParty(Number(selectedPartyId), { currentBalance: newBal }).catch(() => {});
+          }
+        }
+      } else {
+        // STORE_CREDIT: Credit to customer account (Advance balance for future shopping)
+        if (selectedPartyId !== '') {
+          const party = await db.parties.get(Number(selectedPartyId));
+          if (party) {
+            const currentBal = party.currentBalance || 0;
+            const newBal = currentBal - grandTotal;
+            await db.parties.update(Number(selectedPartyId), { currentBalance: newBal });
+            await syncManager.logMutation('PARTY', String(selectedPartyId), 'UPDATE', { id: selectedPartyId, currentBalance: newBal });
+            updateServerParty(Number(selectedPartyId), { currentBalance: newBal }).catch(() => {});
+          }
         }
       }
 
-      // 4. Update corresponding Sales Invoice dueAmount & paymentStatus in Dexie IndexedDB
+      // 4. Update Sales Invoice dueAmount & paymentStatus in Dexie IndexedDB if applicable
       let targetInvoice: any = null;
       if (invoiceNumber.trim() !== '') {
         targetInvoice = await db.invoices.where('invoiceNumber').equalsIgnoreCase(invoiceNumber.trim()).first();
       }
       if (!targetInvoice && selectedPartyId !== '') {
         const openInvoices = await db.invoices
-          .filter(inv => inv.partyId === Number(selectedPartyId) && (inv.dueAmount !== undefined ? inv.dueAmount : inv.grandTotal) > 0)
+          .filter(inv => String(inv.partyId) === String(selectedPartyId) && (inv.dueAmount !== undefined ? inv.dueAmount : inv.grandTotal) > 0)
           .toArray();
         if (openInvoices.length > 0) targetInvoice = openInvoices[0];
       }
@@ -239,26 +350,30 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
           paymentStatus: newStatus
         });
 
-        // Log mutation to update sales invoice in sync engine
         const updatedInvoice = { ...targetInvoice, dueAmount: newDue, paymentStatus: newStatus };
         await syncManager.logMutation('INVOICE', targetInvoice.invoiceId || String(targetInvoice.id), 'UPDATE', updatedInvoice);
       }
 
       // 5. Log SaleReturn mutation to offline sync journal
-      await syncManager.logMutation('SALE_RETURN', uniqueReturnId, 'INSERT', newReturn);
+      await syncManager.logMutation('SALE_RETURN', uniqueReturnId, 'INSERT', { ...newReturn, refundMode });
 
       // 6. Try syncing directly to Express/Sequelize PostgreSQL server
       try {
-        await createServerSaleReturn(newReturn);
+        await createServerSaleReturn({ ...newReturn, refundMode });
       } catch (serverErr) {
         console.warn('Server sync offline for sale return:', serverErr);
       }
 
-      showToast(`Credit Note ${creditNoteNumber} created! Stock restored (+qty) & customer ledger credited.`, 'success');
+      syncManager.triggerSync();
+
+      const successMsg = refundMode === 'CASH_REFUND'
+        ? `Credit Note ${creditNoteNumber} saved! Restocked to Store Front & Cash Refund of Rs. ${grandTotal.toFixed(2)} recorded.`
+        : `Credit Note ${creditNoteNumber} saved! Restocked to Store Front & Rs. ${grandTotal.toFixed(2)} credited to ${partyName}'s account.`;
+      showToast(successMsg, 'success');
       onReturnCreated();
     } catch (err: any) {
       console.error('Error creating sale return:', err);
-      showToast(`Failed to create sale return: ${err.message}`, 'error');
+      showToast(`Failed to create sale return: ${err?.message || err}`, 'error');
     } finally {
       setIsSaving(false);
     }
@@ -284,7 +399,7 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
                 <RotateCcw className="w-5 h-5 text-emerald-600" />
                 <span>Create Sale Return / Credit Note</span>
               </h1>
-              <p className="text-xs text-slate-500 font-medium">Record returned goods from customer — Stock restocks & customer balance reduces</p>
+              <p className="text-xs text-slate-500 font-medium">Record returned goods from customer — Stock restocks to Store Front & customer balance updates</p>
             </div>
           </div>
 
@@ -309,9 +424,24 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
 
         {/* Basic Details Card */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-4">
-          <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider border-b border-slate-100 pb-2 flex items-center gap-2">
-            <User className="w-4 h-4 text-emerald-600" />
-            <span>Customer & Return Information</span>
+          <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider border-b border-slate-100 pb-2 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <User className="w-4 h-4 text-emerald-600" />
+              <span>Customer & Return Information</span>
+            </div>
+            {selectedPartyObj && (
+              <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1 ${
+                (selectedPartyObj.currentBalance || 0) > 0
+                  ? 'bg-amber-100 text-amber-800'
+                  : (selectedPartyObj.currentBalance || 0) < 0
+                    ? 'bg-blue-100 text-blue-800'
+                    : 'bg-emerald-100 text-emerald-800'
+              }`}>
+                {(selectedPartyObj.currentBalance || 0) > 0 && `🔴 Outstanding Dues: Rs. ${(selectedPartyObj.currentBalance || 0).toFixed(2)}`}
+                {(selectedPartyObj.currentBalance || 0) === 0 && '🟢 All Dues Cleared (Rs. 0.00)'}
+                {(selectedPartyObj.currentBalance || 0) < 0 && `🔵 Store Credit / Advance: Rs. ${Math.abs(selectedPartyObj.currentBalance || 0).toFixed(2)}`}
+              </span>
+            )}
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
@@ -323,11 +453,15 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
                 className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
               >
                 <option value="">-- Choose Customer --</option>
-                {customerParties.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} {p.phone ? `(${p.phone})` : ''} - Bal: Rs {p.currentBalance || 0}
-                  </option>
-                ))}
+                {customerParties.map(p => {
+                  const bal = p.currentBalance || 0;
+                  const balLabel = bal > 0 ? `Dues: Rs ${bal}` : bal < 0 ? `Advance: Rs ${Math.abs(bal)}` : 'Clear (Rs 0)';
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {p.name} {p.phone ? `(${p.phone})` : ''} — [{balLabel}]
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
@@ -375,14 +509,83 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
             </div>
 
             <div>
-              <label className="block font-bold text-slate-700 mb-1">Ref Original Invoice # (Optional)</label>
-              <input
-                type="text"
-                placeholder="e.g. INV-2026-0001"
-                value={invoiceNumber}
-                onChange={e => setInvoiceNumber(e.target.value)}
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
+              <label className="block font-bold text-slate-700 mb-1">
+                Ref Original Invoice (Auto-Populate Items)
+              </label>
+              {partyInvoices.length > 0 ? (
+                <select
+                  value={invoiceNumber}
+                  onChange={e => handleInvoiceSelect(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                >
+                  <option value="">-- Choose Customer's Past Invoice --</option>
+                  {partyInvoices.map(inv => (
+                    <option key={inv.invoiceNumber} value={inv.invoiceNumber}>
+                      {inv.invoiceNumber} ({inv.invoiceDate}) — Rs {inv.grandTotal} [{inv.paymentStatus}]
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  placeholder="e.g. INV-6635"
+                  value={invoiceNumber}
+                  onChange={e => setInvoiceNumber(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Refund Settlement Mode Selection */}
+          <div className="pt-3 border-t border-slate-100">
+            <label className="block font-bold text-slate-700 mb-2 text-xs">
+              Return Settlement Method (How is the customer compensated?)
+            </label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div 
+                onClick={() => setRefundMode('CASH_REFUND')}
+                className={`p-3 rounded-xl border-2 cursor-pointer transition flex items-start gap-3 ${
+                  refundMode === 'CASH_REFUND'
+                    ? 'border-emerald-500 bg-emerald-50/60'
+                    : 'border-slate-200 bg-slate-50 hover:bg-slate-100/70'
+                }`}
+              >
+                <div className={`p-2 rounded-lg ${refundMode === 'CASH_REFUND' ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                  <Banknote className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-extrabold text-slate-900 text-xs flex items-center gap-1.5">
+                    <span>💵 Immediate Cash Refund</span>
+                    {refundMode === 'CASH_REFUND' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />}
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Pay the customer cash directly from the cash drawer. Records a cash outflow entry.
+                  </p>
+                </div>
+              </div>
+
+              <div 
+                onClick={() => setRefundMode('STORE_CREDIT')}
+                className={`p-3 rounded-xl border-2 cursor-pointer transition flex items-start gap-3 ${
+                  refundMode === 'STORE_CREDIT'
+                    ? 'border-blue-500 bg-blue-50/60'
+                    : 'border-slate-200 bg-slate-50 hover:bg-slate-100/70'
+                }`}
+              >
+                <div className={`p-2 rounded-lg ${refundMode === 'STORE_CREDIT' ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                  <CreditCard className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-extrabold text-slate-900 text-xs flex items-center gap-1.5">
+                    <span>💳 Store Credit / Khata (Advance Balance)</span>
+                    {refundMode === 'STORE_CREDIT' && <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />}
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    No cash paid. Credits Rs {grandTotal.toFixed(2)} to {partyName || 'Customer'}'s account to deduct from future purchases.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -390,10 +593,16 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
         {/* Returned Items Table Card */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-            <h2 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <PackagePlus className="w-4 h-4 text-emerald-600" />
-              <span>Returned Items & Restock Quantities</span>
-            </h2>
+              <span className="text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                Returned Items & Store Front Restock
+              </span>
+              <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2 py-0.5 rounded-full flex items-center gap-1">
+                <Store className="w-3 h-3" />
+                <span>Restocks Directly to Store Front Shelf</span>
+              </span>
+            </div>
             <button
               type="button"
               onClick={handleAddItemRow}
@@ -410,7 +619,7 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
                 <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
                   <th className="py-2.5 px-3">Select Inventory Product</th>
                   <th className="py-2.5 px-3">Product Name</th>
-                  <th className="py-2.5 px-3 text-center">Return Qty (+Stock)</th>
+                  <th className="py-2.5 px-3 text-center">Return Qty (+Store Stock)</th>
                   <th className="py-2.5 px-3 text-right">Unit Price (Rs)</th>
                   <th className="py-2.5 px-3 text-right">Total Amount (Rs)</th>
                   <th className="py-2.5 px-3 text-center">Action</th>
@@ -445,14 +654,13 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
                       />
                     </td>
 
-                    <td className="py-2.5 px-3 text-center w-32">
+                    <td className="py-2.5 px-3 text-center w-36">
                       <input
                         type="number"
                         min="1"
-                        step="1"
                         value={item.returnQuantity}
-                        onChange={e => handleItemChange(index, 'returnQuantity', parseFloat(e.target.value) || 0)}
-                        className="w-full p-2 bg-emerald-50 border border-emerald-300 rounded-lg text-xs font-bold text-center text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        onChange={e => handleItemChange(index, 'returnQuantity', e.target.value)}
+                        className="w-20 p-2 text-center bg-emerald-50 border border-emerald-300 rounded-lg text-xs font-bold text-emerald-800 font-mono"
                         required
                       />
                     </td>
@@ -463,8 +671,8 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
                         min="0"
                         step="0.01"
                         value={item.unitPrice}
-                        onChange={e => handleItemChange(index, 'unitPrice', parseFloat(e.target.value) || 0)}
-                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-right font-bold text-slate-800"
+                        onChange={e => handleItemChange(index, 'unitPrice', e.target.value)}
+                        className="w-24 p-2 text-right bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-semibold text-slate-800"
                         required
                       />
                     </td>
@@ -499,7 +707,7 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
             </label>
             <textarea
               rows={3}
-              placeholder="e.g. 2 defective chairs returned by customer. Restocked into inventory."
+              placeholder="e.g. 1 bread returned by customer. Restocked into store front shelf display."
               value={notes}
               onChange={e => setNotes(e.target.value)}
               className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -513,14 +721,18 @@ export const CreateSaleReturnScreen: React.FC<CreateSaleReturnScreenProps> = ({
                 <span className="font-mono font-bold text-slate-800">Rs. {grandTotal.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-emerald-700 font-bold border-t border-slate-100 pt-2 text-sm">
-                <span>TOTAL CREDIT AMOUNT:</span>
+                <span>TOTAL RETURN VALUE:</span>
                 <span className="font-mono text-base font-black">Rs. {grandTotal.toFixed(2)}</span>
               </div>
             </div>
 
-            <div className="p-2.5 bg-emerald-50 rounded-xl border border-emerald-200 text-[11px] text-emerald-800 font-bold text-center">
-              ✓ Stock Level will INCREASE by returned quantities<br />
-              ✓ Customer Ledger Balance will DECREASE by Rs {grandTotal.toFixed(2)}
+            <div className="p-2.5 bg-emerald-50 rounded-xl border border-emerald-200 text-[11px] text-emerald-800 font-bold space-y-1">
+              <div>🏪 Store Front on-shelf stock will <strong>INCREASE</strong> by returned quantities</div>
+              {refundMode === 'CASH_REFUND' ? (
+                <div>💵 Cash Drawer will record <strong>Rs. {grandTotal.toFixed(2)} CASH REFUND OUT</strong></div>
+              ) : (
+                <div>💳 Customer account will be <strong>CREDITED with Rs. {grandTotal.toFixed(2)} Store Credit / Advance</strong></div>
+              )}
             </div>
           </div>
         </div>

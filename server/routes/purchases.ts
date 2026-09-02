@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { Item, Party, PurchaseBill, PurchaseBillItem, CashAccount, CashTransaction, isDbConnected, sequelize } from '../db/sequelize.js';
+import { Item, Party, PurchaseBill, PurchaseBillItem, ItemLocationMapping, CashAccount, CashTransaction, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const purchasesRouter = Router();
 
@@ -37,12 +37,15 @@ purchasesRouter.post('/', async (req: Request, res: Response) => {
       supplierName,
       supplierPhone,
       supplierGstin,
+      receivingLocationId,
       notes = '',
       items = [],
       paymentMethod = 'CASH',
       paidAmount,
-      tenantId = 'default-tenant'
+      tenantId: rawTenantId
     } = req.body;
+
+    const tenantId = rawTenantId || (req as any).user?.tenantId || 'default-tenant';
 
     if (!supplierName || items.length === 0) {
       return res.status(400).json({ success: false, error: 'Supplier name and items are required' });
@@ -94,28 +97,56 @@ purchasesRouter.post('/', async (req: Request, res: Response) => {
             totalAmount: itemTotal
           }, { transaction: t });
 
-          // Update Item Stock
-          let dbItem = item.itemId ? await Item.findByPk(item.itemId, { transaction: t }) : null;
+          // Update Item Stock in PostgreSQL
+          let dbItem = item.itemId ? await Item.findOne({ where: { id: String(item.itemId), tenantId }, transaction: t }) : null;
           if (!dbItem && item.itemName) {
-            dbItem = await Item.findOne({ where: { name: item.itemName }, transaction: t });
+            dbItem = await Item.findOne({ where: { name: item.itemName, tenantId }, transaction: t });
+          }
+          if (!dbItem && item.itemId) {
+            dbItem = await Item.findByPk(String(item.itemId), { transaction: t });
           }
           if (dbItem) {
-            const curStock = (dbItem.get('currentStock') as number) || 0;
+            const curStock = Number(dbItem.get('currentStock')) || 0;
             await dbItem.update({
               currentStock: curStock + qty,
-              purchasePrice: rate || (dbItem.get('purchasePrice') as number) || 0
+              purchasePrice: rate || Number(dbItem.get('purchasePrice')) || 0
             }, { transaction: t });
+
+            // If receiving location is specified, upsert item location mapping in PostgreSQL
+            if (receivingLocationId) {
+              const locIdStr = String(receivingLocationId);
+              const existingMapping = await ItemLocationMapping.findOne({
+                where: { tenantId, itemId: String(dbItem.id), locationId: locIdStr },
+                transaction: t
+              });
+              if (existingMapping) {
+                const currentQty = Number(existingMapping.get('quantity')) || 0;
+                await existingMapping.update({ quantity: currentQty + qty }, { transaction: t });
+              } else {
+                await ItemLocationMapping.create({
+                  id: `map-${dbItem.id}-${locIdStr}-${Date.now()}`,
+                  tenantId,
+                  itemId: String(dbItem.id),
+                  locationId: locIdStr,
+                  quantity: qty,
+                  maxCapacity: 10000
+                }, { transaction: t });
+              }
+            }
           }
         }
 
         // 3. Update Supplier Account Balance in parties table (supplier.balance += total_bill_amount)
         if (supplierId || supplierName) {
-          let supplier = supplierId ? await Party.findByPk(supplierId, { transaction: t }) : null;
+          let supplier = supplierId ? await Party.findByPk(String(supplierId), { transaction: t }) : null;
+          if (!supplier && supplierName) {
+            supplier = await Party.findOne({ where: { name: supplierName, tenantId }, transaction: t });
+          }
           if (!supplier && supplierName) {
             supplier = await Party.findOne({ where: { name: supplierName }, transaction: t });
           }
           if (supplier) {
-            const curBal = (supplier.get('currentBalance') as number) || 0;
+            const curBal = Number(supplier.get('currentBalance')) || 0;
             await supplier.update({ currentBalance: curBal + totalCost }, { transaction: t });
           }
         }
@@ -135,6 +166,7 @@ purchasesRouter.post('/', async (req: Request, res: Response) => {
         });
       } catch (err: any) {
         await t.rollback();
+        console.error('PURCHASE POST ERROR:', err);
         return res.status(500).json({ success: false, error: err.message });
       }
     }

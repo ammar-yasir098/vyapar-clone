@@ -271,6 +271,19 @@ export async function createServerInvoice(invoiceData: any) {
   }
 }
 
+export async function updateServerInvoice(id: string | number, invoiceData: any) {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/invoices/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(invoiceData)
+    });
+    return await res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 // PURCHASES
 export async function fetchServerPurchaseBills(tenantId?: string) {
   try {

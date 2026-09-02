@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { Op } from 'sequelize';
-import { PaymentIn, PaymentOut, Party, CashAccount, CashTransaction, isDbConnected } from '../db/sequelize.js';
+import { PaymentIn, PaymentOut, Party, Invoice, CashAccount, CashTransaction, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const paymentsRouter = Router();
 
@@ -26,11 +26,11 @@ paymentsRouter.get('/in', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/v1/payments/in - Create new Payment-In receipt
+// POST /api/v1/payments/in - Create new Payment-In receipt with automatic invoice reconciliation
 paymentsRouter.post('/in', async (req: Request, res: Response) => {
   try {
     const {
-      tenantId = 'default-tenant',
+      tenantId: rawTenantId,
       receiptNumber,
       partyId,
       partyName,
@@ -41,60 +41,130 @@ paymentsRouter.post('/in', async (req: Request, res: Response) => {
       notes = ''
     } = req.body;
 
+    const tenantId = rawTenantId || (req as any).user?.tenantId || 'default-tenant';
+    const numAmount = Number(amount) || 0;
+
     if (isDbConnected()) {
-      const recNum = receiptNumber || `PAYIN-${Date.now()}`;
+      const t = await sequelize.transaction();
 
-      const newPayment = await PaymentIn.create({
-        receiptNumber: recNum,
-        tenantId,
-        partyId: partyId || null,
-        partyName: partyName || 'Walk-in Customer',
-        partyPhone: partyPhone || '',
-        paymentDate: paymentDate || new Date().toISOString().split('T')[0],
-        paymentMethod,
-        amount,
-        notes
-      });
+      try {
+        const recNum = receiptNumber || `PAYIN-${Date.now()}`;
 
-      // Update party balance in PostgreSQL
-      if (partyId) {
-        const party = await Party.findByPk(partyId);
+        const newPayment = await PaymentIn.create({
+          receiptNumber: recNum,
+          tenantId,
+          partyId: partyId ? String(partyId) : null,
+          partyName: partyName || 'Walk-in Customer',
+          partyPhone: partyPhone || '',
+          paymentDate: paymentDate || new Date().toISOString().split('T')[0],
+          paymentMethod,
+          amount: numAmount,
+          notes
+        }, { transaction: t });
+
+        // 1. Update party balance in PostgreSQL
+        let party = partyId ? await Party.findByPk(String(partyId), { transaction: t }) : null;
+        if (!party && partyName) {
+          party = await Party.findOne({ where: { name: partyName, tenantId }, transaction: t })
+            || await Party.findOne({ where: { name: partyName }, transaction: t });
+        }
         if (party) {
           const curBal = Number(party.get('currentBalance')) || 0;
-          const newBal = Math.max(0, curBal - Number(amount));
-          await party.update({ currentBalance: newBal });
+          const newBal = Math.max(0, curBal - numAmount);
+          await party.update({ currentBalance: newBal }, { transaction: t });
         }
-      }
 
-      // Post Cash Inflow Entry if Payment-In is in CASH
-      if (paymentMethod === 'CASH' && Number(amount) > 0) {
-        let cAccount = await CashAccount.findOne({ where: { tenantId } });
-        if (!cAccount) {
-          cAccount = await CashAccount.create({ tenantId, name: 'Main Cash Drawer', openingBalance: 0 });
+        // 2. Automatically apply payment towards unpaid invoices for this party (oldest first)
+        if (numAmount > 0) {
+          const partyCriteria: any[] = [];
+          if (party && party.id) partyCriteria.push({ partyId: String(party.id) });
+          if (partyId) partyCriteria.push({ partyId: String(partyId) });
+          if (partyName) partyCriteria.push({ partyName });
+
+          const whereClause: any = {
+            tenantId,
+            [Op.and]: [
+              {
+                [Op.or]: partyCriteria.length > 0 ? partyCriteria : [{ partyName: partyName || 'Customer' }]
+              },
+              {
+                [Op.or]: [
+                  { paymentStatus: { [Op.ne]: 'PAID' } },
+                  { dueAmount: { [Op.gt]: 0 } }
+                ]
+              }
+            ]
+          };
+
+          const unpaidInvoices = await Invoice.findAll({
+            where: whereClause,
+            order: [['invoiceDate', 'ASC'], ['id', 'ASC']],
+            transaction: t
+          });
+
+          let remainingPay = numAmount;
+          for (const inv of unpaidInvoices) {
+            if (remainingPay <= 0) break;
+            const currentDue = Number(inv.get('dueAmount')) !== undefined && Number(inv.get('dueAmount')) > 0
+              ? Number(inv.get('dueAmount'))
+              : Math.max(0, Number(inv.get('grandTotal')) - Number(inv.get('receivedAmount')));
+
+            if (remainingPay >= currentDue) {
+              remainingPay -= currentDue;
+              await inv.update({
+                receivedAmount: Number(inv.get('grandTotal')),
+                dueAmount: 0,
+                paymentStatus: 'PAID'
+              }, { transaction: t });
+            } else {
+              const curRec = Number(inv.get('receivedAmount')) || 0;
+              const newRec = curRec + remainingPay;
+              const newDue = Math.max(0, currentDue - remainingPay);
+              remainingPay = 0;
+              await inv.update({
+                receivedAmount: newRec,
+                dueAmount: newDue,
+                paymentStatus: newDue === 0 ? 'PAID' : 'PARTIAL'
+              }, { transaction: t });
+            }
+          }
         }
-        await CashTransaction.create({
-          cashAccountId: (cAccount as any).id,
-          tenantId,
-          type: 'IN',
-          amount: Number(amount),
-          source: 'PAYMENT_IN',
-          referenceId: recNum,
-          description: `Payment-In received from ${partyName || 'Customer'}: ${notes || 'Cash Receipt'}`,
-          transactionDate: paymentDate || new Date().toISOString()
+
+        // 3. Post Cash Inflow Entry if Payment-In is in CASH
+        if (paymentMethod === 'CASH' && numAmount > 0) {
+          let cAccount = await CashAccount.findOne({ where: { tenantId }, transaction: t });
+          if (!cAccount) {
+            cAccount = await CashAccount.create({ tenantId, name: 'Main Cash Drawer', openingBalance: 0 }, { transaction: t });
+          }
+          await CashTransaction.create({
+            cashAccountId: (cAccount as any).id,
+            tenantId,
+            type: 'IN',
+            amount: numAmount,
+            source: 'PAYMENT_IN',
+            referenceId: recNum,
+            description: `Payment-In received from ${partyName || 'Customer'}: ${notes || 'Cash Receipt'}`,
+            transactionDate: paymentDate || new Date().toISOString()
+          }, { transaction: t });
+        }
+
+        await t.commit();
+
+        return res.status(201).json({
+          success: true,
+          message: 'Payment-In recorded in PostgreSQL and customer invoices reconciled.',
+          data: newPayment
         });
+      } catch (dbErr: any) {
+        await t.rollback();
+        console.error('Error in POST /payments/in transaction:', dbErr);
+        return res.status(500).json({ success: false, error: dbErr.message });
       }
-
-      return res.status(201).json({
-        success: true,
-        message: 'Payment-In recorded in PostgreSQL',
-        data: newPayment
-      });
     }
 
     return res.status(201).json({ success: true, data: req.body });
   } catch (err: any) {
-    console.error('Error creating Payment-In:', err);
-    return res.status(500).json({ success: false, error: err.message });
+    console.error('Error recording Payment-In receipt:', err);
   }
 });
 

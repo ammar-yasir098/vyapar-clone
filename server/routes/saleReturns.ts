@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { Item, Party, Invoice, SaleReturn, SaleReturnItem, isDbConnected, sequelize } from '../db/sequelize.js';
+import { Item, Party, Invoice, SaleReturn, SaleReturnItem, ItemLocationMapping, InventoryLocation, CashAccount, CashTransaction, isDbConnected, sequelize } from '../db/sequelize.js';
 
 export const saleReturnsRouter = Router();
 
@@ -39,9 +39,12 @@ saleReturnsRouter.post('/', async (req: Request, res: Response) => {
       partyPhone = '',
       items = [],
       refundAmount = 0,
+      refundMode = 'CASH_REFUND',
       notes = '',
-      tenantId = 'default-tenant'
+      tenantId: rawTenantId
     } = req.body;
+
+    const tenantId = rawTenantId || (req as any).user?.tenantId || 'default-tenant';
 
     if (!partyName || items.length === 0) {
       return res.status(400).json({ success: false, error: 'Customer name and returned items are required' });
@@ -65,12 +68,12 @@ saleReturnsRouter.post('/', async (req: Request, res: Response) => {
           creditNoteNumber,
           returnDate,
           invoiceNumber,
-          partyId: partyId || null,
+          partyId: partyId ? String(partyId) : null,
           partyName,
           partyPhone,
           subtotal: totalReturnAmount,
           grandTotal: totalReturnAmount,
-          refundAmount,
+          refundAmount: refundMode === 'CASH_REFUND' ? totalReturnAmount : 0,
           notes
         }, { transaction: t });
 
@@ -81,8 +84,8 @@ saleReturnsRouter.post('/', async (req: Request, res: Response) => {
           const itemTotal = Number(item.totalAmount) || (returnQty * rate);
 
           await SaleReturnItem.create({
-            saleReturnId: newReturn.id,
-            itemId: item.itemId || item.id || null,
+            saleReturnId: (newReturn as any).id,
+            itemId: item.itemId ? String(item.itemId) : (item.id ? String(item.id) : null),
             itemName: item.itemName || item.name || 'Returned Item',
             hsnSacCode: item.hsnSacCode || '1000',
             unitType: item.unitType || 'PCS',
@@ -93,49 +96,101 @@ saleReturnsRouter.post('/', async (req: Request, res: Response) => {
           }, { transaction: t });
 
           // INCREASE Item Stock Level (item.stock += returned_qty)
-          let dbItem = item.itemId ? await Item.findByPk(item.itemId, { transaction: t }) : null;
+          let dbItem = item.itemId ? await Item.findByPk(String(item.itemId), { transaction: t }) : null;
           if (!dbItem && item.itemName) {
-            dbItem = await Item.findOne({ where: { name: item.itemName }, transaction: t });
+            dbItem = await Item.findOne({ where: { name: item.itemName, tenantId }, transaction: t })
+              || await Item.findOne({ where: { name: item.itemName }, transaction: t });
           }
           if (dbItem) {
-            const curStock = (dbItem.get('currentStock') as number) || 0;
+            const curStock = Number(dbItem.get('currentStock')) || 0;
             await dbItem.update({
               currentStock: curStock + returnQty
             }, { transaction: t });
-          }
-        }
 
-        // 3. Update Customer Account Balance in parties table (customer.balance -= return_amount)
-        if (partyId || partyName) {
-          let customer = partyId ? await Party.findByPk(partyId, { transaction: t }) : null;
-          if (!customer && partyName) {
-            customer = await Party.findOne({ where: { name: partyName }, transaction: t });
-          }
-          if (customer) {
-            const curBal = (customer.get('currentBalance') as number) || 0;
-            await customer.update({ currentBalance: Math.max(0, curBal - totalReturnAmount) }, { transaction: t });
-          }
-        }
-
-        // 3b. Update Sales Invoice dueAmount & paymentStatus in PostgreSQL
-        let targetInvoice: any = null;
-        if (invoiceNumber && invoiceNumber.trim() !== '') {
-          targetInvoice = await Invoice.findOne({ where: { invoiceNumber: invoiceNumber.trim() }, transaction: t });
-        }
-        if (!targetInvoice && (partyId || partyName)) {
-          let cust = partyId ? await Party.findByPk(partyId, { transaction: t }) : null;
-          if (!cust && partyName) cust = await Party.findOne({ where: { name: partyName }, transaction: t });
-          if (cust) {
-            targetInvoice = await Invoice.findOne({
-              where: { partyId: cust.id },
-              order: [['id', 'DESC']],
+            // RESTOCK into Store Front shelf mapping in PostgreSQL!
+            const storeLoc = await InventoryLocation.findOne({
+              where: { tenantId, code: 'STORE-FRONT' },
               transaction: t
             });
+
+            if (storeLoc) {
+              const storeMap = await ItemLocationMapping.findOne({
+                where: { tenantId, itemId: String(dbItem.id), locationId: String((storeLoc as any).id) },
+                transaction: t
+              });
+
+              if (storeMap) {
+                const curLocQty = Number(storeMap.get('quantity')) || 0;
+                await storeMap.update({ quantity: curLocQty + returnQty }, { transaction: t });
+              } else {
+                await ItemLocationMapping.create({
+                  id: `map-${dbItem.id}-${(storeLoc as any).id}`,
+                  tenantId,
+                  itemId: String(dbItem.id),
+                  locationId: String((storeLoc as any).id),
+                  quantity: returnQty
+                }, { transaction: t });
+              }
+            }
           }
         }
+
+        // 3. Update Customer Account Balance
+        let customer = partyId ? await Party.findByPk(String(partyId), { transaction: t }) : null;
+        if (!customer && partyName) {
+          customer = await Party.findOne({ where: { name: partyName, tenantId }, transaction: t })
+            || await Party.findOne({ where: { name: partyName }, transaction: t });
+        }
+
+        if (customer) {
+          const curBal = Number(customer.get('currentBalance')) || 0;
+          if (refundMode === 'STORE_CREDIT') {
+            // Store Credit: credit to customer account (reduces balance, can go negative = advance)
+            const newBal = curBal - totalReturnAmount;
+            await customer.update({ currentBalance: newBal }, { transaction: t });
+          } else {
+            // CASH_REFUND: If customer had outstanding dues, reduce dues; otherwise balance stays 0
+            if (curBal > 0) {
+              const newBal = Math.max(0, curBal - totalReturnAmount);
+              await customer.update({ currentBalance: newBal }, { transaction: t });
+            }
+
+            // Post Cash Outflow Entry if cash was refunded
+            if (totalReturnAmount > 0) {
+              let cAccount = await CashAccount.findOne({ where: { tenantId }, transaction: t });
+              if (!cAccount) {
+                cAccount = await CashAccount.create({ tenantId, name: 'Main Cash Drawer', openingBalance: 0 }, { transaction: t });
+              }
+              await CashTransaction.create({
+                cashAccountId: (cAccount as any).id,
+                tenantId,
+                type: 'OUT',
+                amount: totalReturnAmount,
+                source: 'SALE_RETURN_REFUND',
+                referenceId: creditNoteNumber,
+                description: `Cash refund for Sale Return ${creditNoteNumber} (${partyName})`,
+                transactionDate: returnDate
+              }, { transaction: t });
+            }
+          }
+        }
+
+        // 4. Update Sales Invoice dueAmount & paymentStatus in PostgreSQL if applicable
+        let targetInvoice: any = null;
+        if (invoiceNumber && invoiceNumber.trim() !== '') {
+          targetInvoice = await Invoice.findOne({ where: { tenantId, invoiceNumber: invoiceNumber.trim() }, transaction: t })
+            || await Invoice.findOne({ where: { invoiceNumber: invoiceNumber.trim() }, transaction: t });
+        }
+        if (!targetInvoice && customer) {
+          targetInvoice = await Invoice.findOne({
+            where: { tenantId, partyId: String(customer.id) },
+            order: [['id', 'DESC']],
+            transaction: t
+          });
+        }
         if (targetInvoice) {
-          const curDue = (targetInvoice.get('dueAmount') as number) ?? (targetInvoice.get('grandTotal') as number) ?? 0;
-          const grandTotalVal = (targetInvoice.get('grandTotal') as number) || 0;
+          const curDue = Number(targetInvoice.get('dueAmount')) || 0;
+          const grandTotalVal = Number(targetInvoice.get('grandTotal')) || 0;
           const newDue = Math.max(0, curDue - totalReturnAmount);
           const newStatus = newDue === 0 ? 'PAID' : (newDue < grandTotalVal ? 'PARTIAL' : targetInvoice.get('paymentStatus'));
           await targetInvoice.update({
@@ -144,21 +199,25 @@ saleReturnsRouter.post('/', async (req: Request, res: Response) => {
           }, { transaction: t });
         }
 
-
+        const fullReturn = await SaleReturn.findByPk(String((newReturn as any).id), {
+          include: [{ model: SaleReturnItem, as: 'items' }],
+          transaction: t
+        });
 
         await t.commit();
 
-        const fullReturn = await SaleReturn.findByPk(newReturn.id, {
-          include: [{ model: SaleReturnItem, as: 'items' }]
-        });
-
         return res.status(201).json({
           success: true,
-          message: 'Sale Return / Credit Note recorded in PostgreSQL. Stock increased & customer balance reduced.',
+          message: 'Sale Return / Credit Note recorded in PostgreSQL. Stock increased & customer balance updated.',
           data: fullReturn
         });
       } catch (err: any) {
-        await t.rollback();
+        try {
+          if (t && !(t as any).finished) {
+            await t.rollback();
+          }
+        } catch (_) {}
+        console.error('Error in POST /sale-returns transaction:', err);
         return res.status(500).json({ success: false, error: err.message });
       }
     }

@@ -1,3 +1,4 @@
+// Vyapar Server Entrypoint - Active v2
 import dotenv from 'dotenv';
 dotenv.config();
 

@@ -244,7 +244,7 @@ export async function allocateStockToMainWarehouse(
         updatedAt: new Date().toISOString()
       });
       syncManager.logMutation('ITEM_LOCATION', String(existingMap.id), 'UPDATE', { ...existingMap, quantity: newQty, updatedAt: new Date().toISOString() });
-      saveServerItemLocation({ tenantId, itemId: Number(itemId) || 0, skuCode: skuCode || '', name: itemName || '', locationId: Number(whId) || 0, quantity: newQty }).catch(() => {});
+      saveServerItemLocation({ tenantId, itemId: String(itemId), skuCode: skuCode || '', name: itemName || '', locationId: String(whId), quantity: newQty }).catch(() => {});
     } else {
       const initialQty = Math.max(0, deltaQty);
       const newMapId = `map-${itemId}-${whId}`;
@@ -252,7 +252,7 @@ export async function allocateStockToMainWarehouse(
         id: newMapId,
         tenantId,
         itemId: String(itemId),
-        locationId: whId,
+        locationId: String(whId),
         quantity: initialQty,
         maxCapacity: 10000,
         skuCode: skuCode || '',
@@ -260,7 +260,7 @@ export async function allocateStockToMainWarehouse(
       };
       await db.itemLocations.put(newPayload);
       syncManager.logMutation('ITEM_LOCATION', newMapId, 'INSERT', newPayload);
-      saveServerItemLocation({ tenantId, itemId: Number(itemId) || 0, skuCode: skuCode || '', name: itemName || '', locationId: Number(whId) || 0, quantity: initialQty }).catch(() => {});
+      saveServerItemLocation({ tenantId, itemId: String(itemId), skuCode: skuCode || '', name: itemName || '', locationId: String(whId), quantity: initialQty }).catch(() => {});
     }
   } catch (err) {
     console.error('Error in allocateStockToMainWarehouse:', err);

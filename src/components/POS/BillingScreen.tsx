@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
   Search,
@@ -19,7 +19,7 @@ import {
 import { Item, Party, InvoiceItem, Invoice, PaymentMethod, BusinessDetails, ItemLocationMapping } from '../../types';
 import { db, getActiveTenantId } from '../../db';
 import { printA4TaxInvoice, buildWhatsAppInvoiceLink } from '../../services/pdfInvoice';
-import { createServerInvoice } from '../../services/api';
+import { createServerInvoice, saveServerItemLocation } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { InvoicePrintModal } from '../Invoice/InvoicePrintModal';
 import { useToast } from '../Common/ToastContext';
@@ -100,6 +100,33 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
     };
   }, [liveLocations, liveItemLocations, activeTenantId]);
 
+  // Authoritative real-time on-shelf Store Front stock for active store
+  const getAvailableStoreStock = useCallback((itemId: number | string): number => {
+    const targetItemId = String(itemId);
+    const targetItem = items.find(i => String(i.id) === targetItemId);
+    const itemSku = targetItem?.skuCode;
+
+    if (storeFrontLocationIds.size > 0) {
+      const allProductMappings = liveItemLocations.filter(il => {
+        if ((il.quantity || 0) <= 0) return false;
+        if (String(il.itemId) === targetItemId) return true;
+        if ((targetItem as any)?.cloudId && String(il.itemId) === String((targetItem as any).cloudId)) return true;
+        if (itemSku && (il as any).skuCode && String((il as any).skuCode).toLowerCase() === itemSku.toLowerCase()) return true;
+        return false;
+      });
+
+      const storeMaps = allProductMappings.filter(il => {
+        const mapTenant = il.tenantId || 'default-tenant';
+        if (mapTenant !== activeTenantId) return false;
+        return storeFrontLocationIds.has(il.locationId as any) || storeFrontLocationIds.has(String(il.locationId));
+      });
+
+      return storeMaps.reduce((sum: number, il: any) => sum + (il.quantity || 0), 0);
+    }
+
+    return targetItem ? Math.max(0, targetItem.currentStock || 0) : 0;
+  }, [items, liveItemLocations, activeTenantId, storeFrontLocationIds]);
+
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -136,6 +163,12 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   });
 
   const handleAddItemToCart = (item: Item) => {
+    const availStoreStock = getAvailableStoreStock(item.id!);
+    if (availStoreStock <= 0) {
+      showToast(`⚠️ "${item.name}" is OUT OF STOCK on Store Front! Please replenish from Warehouse reserve first.`, 'warning');
+      return;
+    }
+
     const sPrice = Number(item.salesPrice || 0);
     const pPrice = Number(item.purchasePrice || 0);
     const cgst = Number(item.cgstRate || 0);
@@ -145,8 +178,13 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
 
     const existingIndex = cartItems.findIndex(i => i.itemId === item.id);
     if (existingIndex > -1) {
+      const currentQty = Number(cartItems[existingIndex].quantity || 0);
+      if (currentQty + 1 > availStoreStock) {
+        showToast(`⚠️ Cannot add more! Only ${availStoreStock} ${item.unitType || 'PCS'} available on Store Front shelf.`, 'warning');
+        return;
+      }
       const updated = [...cartItems];
-      const newQty = Number(updated[existingIndex].quantity || 0) + 1;
+      const newQty = currentQty + 1;
       const uPrice = Number(updated[existingIndex].unitPrice || 0);
       const sub = newQty * uPrice;
       const tax = (sub * effTaxRate) / 100;
@@ -183,11 +221,16 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   };
 
   const updateQuantity = (itemId: number, delta: number) => {
+    const availStoreStock = getAvailableStoreStock(itemId);
     setCartItems(prev =>
       prev
         .map(item => {
           if (item.itemId === itemId) {
-            const newQty = Math.max(1, Number(item.quantity || 0) + delta);
+            let newQty = Math.max(1, Number(item.quantity || 0) + delta);
+            if (newQty > availStoreStock) {
+              showToast(`⚠️ Cannot exceed Store Front shelf stock (${availStoreStock} ${item.unitType || 'PCS'})! Replenish from warehouse reserve.`, 'warning');
+              newQty = availStoreStock;
+            }
             const uPrice = Number(item.unitPrice || 0);
             const cgst = Number(item.cgstRate || 0);
             const sgst = Number(item.sgstRate || 0);
@@ -281,10 +324,26 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
   const handleSaveAndPrint = async () => {
     if (cartItems.length === 0) return;
 
-    if (paymentMethod === 'CASH' && (receivedAmount.trim() === '' || recAmtNum <= 0)) {
-      showToast("Please enter the Amount Received (or click 'Exact Paid') for Cash payment!", 'warning');
-      return;
+    // Validate shelf stock availability for every item before saving
+    for (const cItem of cartItems) {
+      const availStock = getAvailableStoreStock(cItem.itemId);
+      if (cItem.quantity > availStock) {
+        showToast(`⚠️ Cannot bill "${cItem.itemName}"! Requested quantity (${cItem.quantity}) exceeds Store Front shelf stock (${availStock}).`, 'error');
+        return;
+      }
     }
+
+    const recAmtNum = paymentMethod === 'CREDIT'
+      ? 0
+      : (receivedAmount.trim() !== '' && !isNaN(parseFloat(receivedAmount))
+          ? Math.max(0, parseFloat(receivedAmount))
+          : grandTotal);
+
+    const changeToReturn = Math.max(0, recAmtNum - grandTotal);
+    const dueAmount = paymentMethod === 'CREDIT'
+      ? grandTotal
+      : Math.max(0, grandTotal - recAmtNum);
+    const paymentStatus = paymentMethod === 'CREDIT' ? 'UNPAID' : (dueAmount === 0 ? 'PAID' : (dueAmount === grandTotal ? 'UNPAID' : 'PARTIAL'));
 
     const activeTenantId = business?.tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
     const defaultWalkIn = await db.parties.filter(p => (p.tenantId || 'default-tenant') === activeTenantId && p.name === 'Walk-in Retail Customer').first();
@@ -356,23 +415,69 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
         synced: false
       });
 
-      // 4. Decrement Item stock levels from Store Front Stock (preserving Warehouse Rack allocations)
+      // 4. Decrement Item stock levels from Store Front Stock and global stock
       for (const cItem of cartItems) {
-        const dbItem = await db.items.get(cItem.itemId);
-        if (dbItem) {
-          const newStock = Math.max(0, dbItem.currentStock - cItem.quantity);
-          await db.items.update(cItem.itemId, { currentStock: newStock, updatedAt: new Date().toISOString() });
+        let dbItem = await db.items.get(cItem.itemId);
+        if (!dbItem) dbItem = await db.items.get(Number(cItem.itemId));
+
+        if (dbItem && dbItem.id) {
+          const newStock = Math.max(0, (dbItem.currentStock || 0) - cItem.quantity);
+          await db.items.update(dbItem.id, { currentStock: newStock, updatedAt: new Date().toISOString() });
 
           await db.syncJournal.add({
-            versionId: `client-v-${Date.now()}-item-${cItem.itemId}`,
+            versionId: `client-v-${Date.now()}-item-${dbItem.id}`,
             clientSequence: Date.now(),
             entityType: 'ITEM',
-            entityId: String(cItem.itemId),
+            entityId: String(dbItem.id),
             mutationType: 'UPDATE',
-            payload: JSON.stringify({ id: cItem.itemId, name: dbItem.name, skuCode: dbItem.skuCode, currentStock: newStock }),
+            payload: JSON.stringify({ id: dbItem.id, name: dbItem.name, skuCode: dbItem.skuCode, currentStock: newStock }),
             timestamp: new Date().toISOString(),
             synced: false
           });
+        }
+
+        // Deduct from Store Front location mapping
+        const storeMaps = await db.itemLocations
+          .filter(il => {
+            const mapTenant = il.tenantId || 'default-tenant';
+            if (mapTenant !== activeTenantId) return false;
+            const itemSku = (cItem as any).skuCode || dbItem?.skuCode;
+            const matchesItem = String(il.itemId) === String(cItem.itemId) || (itemSku && (il as any).skuCode === itemSku);
+            if (!matchesItem) return false;
+            return storeFrontLocationIds.has(il.locationId as any) || storeFrontLocationIds.has(String(il.locationId));
+          })
+          .toArray();
+
+        let remainingToDeduct = cItem.quantity;
+        for (const sMap of storeMaps) {
+          if (remainingToDeduct <= 0) break;
+          const currentQty = sMap.quantity || 0;
+          const deductQty = Math.min(currentQty, remainingToDeduct);
+          const newStoreQty = Math.max(0, currentQty - deductQty);
+          remainingToDeduct -= deductQty;
+
+          await db.itemLocations.update(sMap.id, {
+            quantity: newStoreQty,
+            updatedAt: new Date().toISOString()
+          });
+
+          await db.syncJournal.add({
+            versionId: `client-v-${Date.now()}-loc-${sMap.id}`,
+            clientSequence: Date.now(),
+            entityType: 'ITEM_LOCATION',
+            entityId: String(sMap.id),
+            mutationType: 'UPDATE',
+            payload: JSON.stringify({ ...sMap, quantity: newStoreQty, updatedAt: new Date().toISOString() }),
+            timestamp: new Date().toISOString(),
+            synced: false
+          });
+
+          saveServerItemLocation({
+            tenantId: activeTenantId,
+            itemId: String(cItem.itemId),
+            locationId: String(sMap.locationId),
+            quantity: newStoreQty
+          }).catch(() => {});
         }
       }
     });
@@ -385,6 +490,7 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
     onInvoiceCreated(newInvoice);
     setCheckoutInvoice(newInvoice);
     handleResetBill();
+    showToast(`Invoice ${invoiceNumber} saved successfully! Rs ${grandTotal} billed.`, 'success');
   };
 
   return (
@@ -561,9 +667,16 @@ export const BillingScreen: React.FC<BillingScreenProps> = ({
                             </button>
                             <input
                               type="number"
+                              min={1}
+                              max={getAvailableStoreStock(item.itemId)}
                               value={item.quantity}
                               onChange={e => {
-                                const val = parseInt(e.target.value) || 1;
+                                const maxStock = getAvailableStoreStock(item.itemId);
+                                let val = parseInt(e.target.value) || 1;
+                                if (val > maxStock) {
+                                  showToast(`⚠️ Cannot exceed Store Front shelf stock (${maxStock} ${item.unitType || 'PCS'})!`, 'warning');
+                                  val = maxStock;
+                                }
                                 updateQuantity(item.itemId, val - item.quantity);
                               }}
                               className="w-12 text-center bg-slate-50 border border-slate-300 rounded text-xs text-slate-900 font-bold py-0.5"

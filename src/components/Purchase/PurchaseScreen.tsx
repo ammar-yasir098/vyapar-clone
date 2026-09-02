@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ShoppingCart, Plus, Trash2, CheckCircle2, User, FileText, ArrowUpRight } from 'lucide-react';
 import { Item, Party, InvoiceItem, PaymentMethod, BusinessDetails, PurchaseBill, InventoryLocation } from '../../types';
 import { db, getActiveTenantId, allocateStockToMainWarehouse } from '../../db';
-import { createServerPurchase } from '../../services/api';
+import { createServerPurchase, saveServerItemLocation } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { useToast } from '../Common/ToastContext';
 
@@ -35,14 +35,34 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
   const [receivingLocationId, setReceivingLocationId] = useState<string>('');
 
   useEffect(() => {
-    db.locations.toArray().then(locs => {
-      setLocations(locs);
-      const defaultWh = locs.find(l => l.type === 'WAREHOUSE');
-      if (defaultWh?.id) {
-        setReceivingLocationId(String(defaultWh.id));
+    const currentTenantId = getActiveTenantId(business);
+    Promise.all([
+      db.locations.toArray(),
+      db.storeWarehouseAccess.toArray()
+    ]).then(([locs, accessList]) => {
+      const accessWhSet = new Set<string>();
+      accessList.forEach(a => {
+        if (a.storeId === currentTenantId) accessWhSet.add(String(a.warehouseId));
+      });
+
+      // Filter to ONLY warehouses linked or accessible to this store
+      const linkedWarehouses = locs.filter(l => {
+        if (l.type !== 'WAREHOUSE') return false;
+        const locTenant = l.tenantId || 'default-tenant';
+        const isOwner = locTenant === currentTenantId || (currentTenantId === 'default-tenant' && locTenant === 'default-tenant');
+        const isLinked = (l.allowedTenantIds && Array.isArray(l.allowedTenantIds) && l.allowedTenantIds.includes(currentTenantId)) || accessWhSet.has(String(l.id));
+        const isShared = l.isShared === true;
+        return isOwner || isLinked || isShared;
+      });
+
+      const finalWhs = linkedWarehouses.length > 0 ? linkedWarehouses : locs.filter(l => l.type === 'WAREHOUSE');
+      setLocations(finalWhs);
+
+      if (finalWhs.length > 0 && finalWhs[0].id) {
+        setReceivingLocationId(String(finalWhs[0].id));
       }
     });
-  }, []);
+  }, [business]);
 
   const safeNum = (val: any): number => {
     if (val === null || val === undefined) return 0;
@@ -171,7 +191,7 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       supplierName: selectedSupplier?.name || 'Walk-in Vendor',
       supplierPhone: selectedSupplier?.phone || '',
       supplierGstin: selectedSupplier?.gstin || '',
-      receivingLocationId: receivingLocationId ? Number(receivingLocationId) : undefined,
+      receivingLocationId: receivingLocationId ? String(receivingLocationId) : undefined,
       items: purchaseItems.map(i => ({
         itemId: i.itemId,
         itemName: i.itemName,
@@ -196,29 +216,24 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
     await db.purchaseBills.add(newPurchaseBill);
 
     for (const pItem of purchaseItems) {
-      const dbItem = await db.items.get(pItem.itemId);
-      if (dbItem) {
+      let dbItem = await db.items.get(pItem.itemId);
+      if (!dbItem) dbItem = await db.items.get(Number(pItem.itemId));
+      if (!dbItem) dbItem = await db.items.filter(i => (i.tenantId || 'default-tenant') === currentTenantId && i.name === pItem.itemName).first();
+
+      if (dbItem && dbItem.id) {
         const newStock = safeNum(dbItem.currentStock) + safeNum(pItem.quantity);
-        await db.items.update(pItem.itemId, {
+        await db.items.update(dbItem.id, {
           currentStock: newStock,
           purchasePrice: pItem.unitPrice,
           updatedAt: new Date().toISOString()
         });
-        await syncManager.logMutation('ITEM', String(pItem.itemId), 'UPDATE', { id: pItem.itemId, name: dbItem.name, skuCode: dbItem.skuCode, currentStock: newStock, purchasePrice: pItem.unitPrice });
-        
-        await allocateStockToMainWarehouse(
-          currentTenantId,
-          pItem.itemId,
-          safeNum(pItem.quantity),
-          dbItem.skuCode,
-          dbItem.name
-        );
+        await syncManager.logMutation('ITEM', String(dbItem.id), 'UPDATE', { id: dbItem.id, name: dbItem.name, skuCode: dbItem.skuCode, currentStock: newStock, purchasePrice: pItem.unitPrice });
       }
 
-      if (receivingLocationId) {
-        const locIdStr = String(receivingLocationId);
+      const targetLocId = receivingLocationId ? String(receivingLocationId) : (locations[0]?.id ? String(locations[0].id) : '');
+      if (targetLocId && dbItem && dbItem.id) {
         const existingMapping = await db.itemLocations
-          .filter(il => String(il.itemId) === String(pItem.itemId) && String(il.locationId) === locIdStr)
+          .filter(il => String(il.itemId) === String(dbItem.id) && String(il.locationId) === targetLocId)
           .first();
 
         if (existingMapping && existingMapping.id) {
@@ -227,15 +242,23 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
             quantity: newLocQty,
             updatedAt: new Date().toISOString()
           });
+          syncManager.logMutation('ITEM_LOCATION', String(existingMapping.id), 'UPDATE', { ...existingMapping, quantity: newLocQty, updatedAt: new Date().toISOString() });
+          saveServerItemLocation({ tenantId: currentTenantId, itemId: String(dbItem.id), skuCode: dbItem.skuCode, name: dbItem.name, locationId: targetLocId, quantity: newLocQty }).catch(() => {});
         } else {
-          await db.itemLocations.add({
+          const newMapId = `map-${dbItem.id}-${targetLocId}`;
+          const newPayload = {
+            id: newMapId,
             tenantId: currentTenantId,
-            itemId: String(pItem.itemId),
-            locationId: locIdStr,
+            itemId: String(dbItem.id),
+            locationId: targetLocId,
             quantity: pItem.quantity,
-            maxCapacity: 1000,
+            maxCapacity: 10000,
+            skuCode: dbItem.skuCode || '',
             updatedAt: new Date().toISOString()
-          });
+          };
+          await db.itemLocations.put(newPayload);
+          syncManager.logMutation('ITEM_LOCATION', newMapId, 'INSERT', newPayload);
+          saveServerItemLocation({ tenantId: currentTenantId, itemId: String(dbItem.id), skuCode: dbItem.skuCode, name: dbItem.name, locationId: targetLocId, quantity: pItem.quantity }).catch(() => {});
         }
       }
 
@@ -272,6 +295,8 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
       await createServerPurchase({
         billNumber,
         billDate,
+        tenantId: currentTenantId,
+        receivingLocationId: receivingLocationId ? String(receivingLocationId) : (locations[0]?.id ? String(locations[0].id) : undefined),
         supplierId: selectedSupplier.id,
         supplierName: selectedSupplier.name,
         items: purchaseItems
@@ -326,13 +351,15 @@ export const PurchaseScreen: React.FC<PurchaseScreenProps> = ({
                 onChange={e => setReceivingLocationId(e.target.value)}
                 className="input-field text-xs font-bold bg-purple-50/70 border-purple-200 text-purple-900 focus:ring-purple-500"
               >
-                <option value="">-- Unassigned General Stock --</option>
-                {locations.map(loc => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.type === 'WAREHOUSE' ? '🏢 Warehouse: ' : loc.type === 'ZONE' ? '📂 Zone: ' : '📦 Shelf: '}
-                    {loc.name} ({loc.code})
-                  </option>
-                ))}
+                {locations.length === 0 ? (
+                  <option value="">-- No Linked Warehouse Found --</option>
+                ) : (
+                  locations.map(wh => (
+                    <option key={wh.id} value={String(wh.id)}>
+                      🏢 Warehouse: {wh.name} ({wh.code})
+                    </option>
+                  ))
+                )}
               </select>
             </div>
 

@@ -189,12 +189,12 @@ export class Invoice extends Model {
 }
 Invoice.init(
   {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    id: { type: DataTypes.STRING, primaryKey: true, defaultValue: () => `inv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` },
     invoiceId: { type: DataTypes.STRING, allowNull: false, field: 'invoice_id' },
     tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
     invoiceNumber: { type: DataTypes.STRING, allowNull: false, field: 'invoice_number' },
     invoiceDate: { type: DataTypes.DATEONLY, allowNull: false, field: 'invoice_date' },
-    partyId: { type: DataTypes.INTEGER, allowNull: true, field: 'party_id' },
+    partyId: { type: DataTypes.STRING, allowNull: true, field: 'party_id' },
     partyName: { type: DataTypes.STRING, allowNull: false, field: 'party_name' },
     partyPhone: { type: DataTypes.STRING, allowNull: true, field: 'party_phone' },
     partyGstin: { type: DataTypes.STRING, allowNull: true, field: 'party_gstin' },
@@ -212,9 +212,9 @@ Invoice.init(
 
 // 5. InvoiceItem Model
 export class InvoiceItem extends Model {
-  declare id: number;
-  declare invoiceId: number;
-  declare itemId: number;
+  declare id: string;
+  declare invoiceId: string;
+  declare itemId: string;
   declare itemName: string;
   declare hsnSacCode: string;
   declare unitType: string;
@@ -226,9 +226,9 @@ export class InvoiceItem extends Model {
 }
 InvoiceItem.init(
   {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-    invoiceId: { type: DataTypes.INTEGER, allowNull: false, field: 'invoice_id' },
-    itemId: { type: DataTypes.INTEGER, allowNull: true, field: 'item_id' },
+    id: { type: DataTypes.STRING, primaryKey: true, defaultValue: () => `invi-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` },
+    invoiceId: { type: DataTypes.STRING, allowNull: false, field: 'invoice_id' },
+    itemId: { type: DataTypes.STRING, allowNull: true, field: 'item_id' },
     itemName: { type: DataTypes.STRING, allowNull: false, field: 'item_name' },
     hsnSacCode: { type: DataTypes.STRING, allowNull: true, field: 'hsn_sac_code' },
     unitType: { type: DataTypes.STRING, defaultValue: 'PCS', field: 'unit_type' },
@@ -464,12 +464,12 @@ PurchaseOrderItem.belongsTo(PurchaseOrder, { foreignKey: 'purchaseOrderId' });
 
 // 11. PurchaseBill & PurchaseBillItem Models
 export class PurchaseBill extends Model {
-  declare id: number;
+  declare id: string | number;
   declare billId: string;
   declare tenantId: string;
   declare billNumber: string;
   declare billDate: string;
-  declare supplierId: number;
+  declare supplierId: string | number;
   declare supplierName: string;
   declare supplierPhone: string;
   declare supplierGstin: string;
@@ -481,12 +481,12 @@ export class PurchaseBill extends Model {
 
 PurchaseBill.init(
   {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    id: { type: DataTypes.STRING, primaryKey: true, defaultValue: () => `pb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` },
     billId: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'bill_id' },
     tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
     billNumber: { type: DataTypes.STRING, allowNull: false, field: 'bill_number' },
     billDate: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW, field: 'bill_date' },
-    supplierId: { type: DataTypes.INTEGER, allowNull: true, field: 'supplier_id' },
+    supplierId: { type: DataTypes.STRING, allowNull: true, field: 'supplier_id' },
     supplierName: { type: DataTypes.STRING, allowNull: false, field: 'supplier_name' },
     supplierPhone: { type: DataTypes.STRING, allowNull: true, field: 'supplier_phone' },
     supplierGstin: { type: DataTypes.STRING, allowNull: true, field: 'supplier_gstin' },
@@ -499,9 +499,9 @@ PurchaseBill.init(
 );
 
 export class PurchaseBillItem extends Model {
-  declare id: number;
-  declare purchaseBillId: number;
-  declare itemId: number;
+  declare id: string | number;
+  declare purchaseBillId: string | number;
+  declare itemId: string | number;
   declare itemName: string;
   declare hsnSacCode: string;
   declare unitType: string;
@@ -514,9 +514,9 @@ export class PurchaseBillItem extends Model {
 
 PurchaseBillItem.init(
   {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-    purchaseBillId: { type: DataTypes.INTEGER, allowNull: false, field: 'purchase_bill_id' },
-    itemId: { type: DataTypes.INTEGER, allowNull: true, field: 'item_id' },
+    id: { type: DataTypes.STRING, primaryKey: true, defaultValue: () => `pbi-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` },
+    purchaseBillId: { type: DataTypes.STRING, allowNull: false, field: 'purchase_bill_id' },
+    itemId: { type: DataTypes.STRING, allowNull: true, field: 'item_id' },
     itemName: { type: DataTypes.STRING, allowNull: false, field: 'item_name' },
     hsnSacCode: { type: DataTypes.STRING, allowNull: true, field: 'hsn_sac_code' },
     unitType: { type: DataTypes.STRING, defaultValue: 'PCS', field: 'unit_type' },
@@ -614,13 +614,13 @@ export class SaleReturn extends Model {
 
 SaleReturn.init(
   {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    id: { type: DataTypes.STRING, primaryKey: true, defaultValue: () => `sr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` },
     returnId: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'return_id' },
     tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
     creditNoteNumber: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'credit_note_number' },
     returnDate: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW, field: 'return_date' },
     invoiceNumber: { type: DataTypes.STRING, allowNull: true, field: 'invoice_number' },
-    partyId: { type: DataTypes.INTEGER, allowNull: true, field: 'party_id' },
+    partyId: { type: DataTypes.STRING, allowNull: true, field: 'party_id' },
     partyName: { type: DataTypes.STRING, allowNull: false, field: 'party_name' },
     partyPhone: { type: DataTypes.STRING, allowNull: true, field: 'party_phone' },
     subtotal: { type: DataTypes.FLOAT, defaultValue: 0.0 },
@@ -633,9 +633,9 @@ SaleReturn.init(
 );
 
 export class SaleReturnItem extends Model {
-  declare id: number;
-  declare saleReturnId: number;
-  declare itemId: number;
+  declare id: string;
+  declare saleReturnId: string;
+  declare itemId: string;
   declare itemName: string;
   declare hsnSacCode: string;
   declare unitType: string;
@@ -647,9 +647,9 @@ export class SaleReturnItem extends Model {
 
 SaleReturnItem.init(
   {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-    saleReturnId: { type: DataTypes.INTEGER, allowNull: false, field: 'sale_return_id' },
-    itemId: { type: DataTypes.INTEGER, allowNull: true, field: 'item_id' },
+    id: { type: DataTypes.STRING, primaryKey: true, defaultValue: () => `sri-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` },
+    saleReturnId: { type: DataTypes.STRING, allowNull: false, field: 'sale_return_id' },
+    itemId: { type: DataTypes.STRING, allowNull: true, field: 'item_id' },
     itemName: { type: DataTypes.STRING, allowNull: false, field: 'item_name' },
     hsnSacCode: { type: DataTypes.STRING, defaultValue: '1000', field: 'hsn_sac_code' },
     unitType: { type: DataTypes.STRING, defaultValue: 'PCS', field: 'unit_type' },
@@ -850,6 +850,8 @@ export async function bootstrapSequelize() {
 
     // Sync ORM models with PostgreSQL tables safely (creates missing tables without heavy locks)
     await sequelize.sync();
+    // Ensure purchase_bill_items.purchase_bill_id matches purchase_bills.id VARCHAR type
+    await sequelize.query(`ALTER TABLE purchase_bill_items ALTER COLUMN purchase_bill_id TYPE VARCHAR USING purchase_bill_id::VARCHAR;`).catch(() => {});
     console.log(`✨ Sequelize Migration Complete: Document-driven database tables ready!`);
     isSequelizeConnected = true;
   } catch (err: any) {

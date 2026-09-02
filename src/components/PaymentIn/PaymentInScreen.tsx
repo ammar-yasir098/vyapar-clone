@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { PaymentIn, Party, Invoice, BusinessDetails } from '../../types';
 import { db, getActiveTenantId } from '../../db';
-import { createServerPaymentIn, recordServerPartyPayment } from '../../services/api';
+import { createServerPaymentIn, recordServerPartyPayment, updateServerInvoice } from '../../services/api';
 import { syncManager } from '../../services/sync';
 import { recordCashEntry } from '../../services/cash';
 import { useToast } from '../Common/ToastContext';
@@ -23,9 +23,9 @@ import { useToast } from '../Common/ToastContext';
 interface PaymentInScreenProps {
   payments: PaymentIn[];
   parties: Party[];
-  invoices: Invoice[];
+  invoices?: Invoice[];
   business?: BusinessDetails;
-  onPaymentRecorded: () => void;
+  onPaymentRecorded?: () => void;
   selectedPartyFromParties?: Party | null;
   onClearSelectedParty?: () => void;
 }
@@ -70,7 +70,7 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
   // Safe Number helper to compute true live due balance for a customer
   const getPartyDueBalance = (party: Party): number => {
     const customerInvoices = (invoices || []).filter(inv =>
-      (party.id !== undefined && Number(inv.partyId) === Number(party.id)) ||
+      (party.id !== undefined && String(inv.partyId) === String(party.id)) ||
       (inv.partyName && inv.partyName.trim().toLowerCase() === party.name.trim().toLowerCase())
     );
 
@@ -164,7 +164,7 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
       // 3. Automatically apply payment towards unpaid invoices for this party (oldest first)
       const allInvoices = await db.invoices.toArray();
       const partyInvoices = allInvoices.filter(inv =>
-        (party.id !== undefined && inv.partyId === party.id) ||
+        (party.id !== undefined && String(inv.partyId) === String(party.id)) ||
         (inv.partyName && inv.partyName.trim().toLowerCase() === party.name.trim().toLowerCase())
       );
 
@@ -197,6 +197,12 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
               paymentStatus: 'PAID'
             });
             await syncManager.logMutation('INVOICE', inv.invoiceId, 'UPDATE', updatedInv);
+            updateServerInvoice(inv.invoiceNumber || inv.invoiceId || inv.id, {
+              tenantId: activeTenantId,
+              receivedAmount: inv.grandTotal,
+              dueAmount: 0,
+              paymentStatus: 'PAID'
+            }).catch(() => {});
           }
         } else {
           const newReceived = (inv.receivedAmount || 0) + remainingPay;
@@ -217,23 +223,33 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
               paymentStatus: newDue === 0 ? 'PAID' : 'PARTIAL'
             });
             await syncManager.logMutation('INVOICE', inv.invoiceId, 'UPDATE', updatedInv);
+            updateServerInvoice(inv.invoiceNumber || inv.invoiceId || inv.id, {
+              tenantId: activeTenantId,
+              receivedAmount: newReceived,
+              dueAmount: newDue,
+              paymentStatus: newDue === 0 ? 'PAID' : 'PARTIAL'
+            }).catch(() => {});
           }
         }
       }
 
-      // 4. Send API request to Server
+      // 4. Send API request to Server (which automatically reconciles unpaid invoices in PostgreSQL)
       await createServerPaymentIn(newPayment);
+      syncManager.triggerSync();
 
       showToast(`Payment of Rs. ${amount.toFixed(2)} recorded successfully for ${party.name}!`, 'success');
       setIsSaving(false);
       setIsRecordModalOpen(false);
       setAmount(0);
       setNotes('');
-      onPaymentRecorded();
+
+      if (onPaymentRecorded) {
+        onPaymentRecorded();
+      }
     } catch (err: any) {
       console.error('Error saving Payment-In:', err);
-      setIsSaving(false);
       showToast(`Error saving payment: ${err?.message || err}`, 'error');
+      setIsSaving(false);
     }
   };
 
@@ -252,7 +268,7 @@ export const PaymentInScreen: React.FC<PaymentInScreenProps> = ({
         } else {
           showToast(res.error || 'Failed to void Payment-In receipt', 'error');
         }
-        onPaymentRecorded();
+        if (onPaymentRecorded) onPaymentRecorded();
       }
     });
   };
