@@ -819,11 +819,12 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
               tenantId: tenantId || 'default-tenant',
               debitNoteNumber: payload.debitNoteNumber || `DN-${Math.floor(1000 + Math.random() * 9000)}`,
               returnDate: payload.returnDate || new Date().toISOString().split('T')[0],
-              supplierId: payload.supplierId || null,
+              purchaseBillNumber: payload.purchaseBillNumber || '',
+              supplierId: payload.supplierId ? String(payload.supplierId) : null,
               supplierName: payload.supplierName || 'Supplier',
               supplierPhone: payload.supplierPhone || '',
+              sourceLocationId: payload.sourceLocationId ? String(payload.sourceLocationId) : null,
               subtotal: payload.subtotal || 0,
-              taxTotal: payload.taxTotal || 0,
               grandTotal: payload.grandTotal || 0,
               notes: payload.notes || ''
             };
@@ -831,21 +832,20 @@ syncRouter.post('/push', async (req: Request, res: Response) => {
             if (existingReturn) {
               await existingReturn.update(retData, { transaction: dbTx });
               targetReturn = existingReturn;
-              await PurchaseReturnItem.destroy({ where: { purchaseReturnId: existingReturn.get('id') as number }, transaction: dbTx });
+              await PurchaseReturnItem.destroy({ where: { purchaseReturnId: String(existingReturn.get('id')) }, transaction: dbTx });
             } else {
               targetReturn = await PurchaseReturn.create(retData, { transaction: dbTx });
             }
             if (payload.items && Array.isArray(payload.items)) {
               for (const item of payload.items) {
                 await PurchaseReturnItem.create({
-                  purchaseReturnId: targetReturn.id,
-                  itemId: item.itemId || item.id || null,
+                  purchaseReturnId: String(targetReturn.id),
+                  itemId: item.itemId ? String(item.itemId) : (item.id ? String(item.id) : null),
                   itemName: item.itemName || item.name || 'Returned Item',
-                  hsnSacCode: item.hsnSacCode || '1000',
                   unitType: item.unitType || 'PCS',
-                  quantity: item.quantity || 1,
+                  returnQuantity: item.returnQuantity || item.quantity || 1,
                   unitPrice: item.unitPrice || item.purchasePrice || 0,
-                  totalAmount: item.totalAmount || ((item.quantity || 1) * (item.unitPrice || 0))
+                  totalAmount: item.totalAmount || ((item.returnQuantity || item.quantity || 1) * (item.unitPrice || 0))
                 }, { transaction: dbTx });
               }
             }

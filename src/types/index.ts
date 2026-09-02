@@ -328,15 +328,17 @@ export interface PurchaseReturnItem {
 }
 
 export interface PurchaseReturn {
-  id?: number;
+  id?: number | string;
   returnId: string;
   tenantId: string;
   debitNoteNumber: string;
   returnDate: string;
   purchaseBillNumber?: string;
-  supplierId?: number;
+  supplierId?: number | string;
   supplierName: string;
   supplierPhone?: string;
+  sourceLocationId?: string;
+  refundMode?: 'CASH_REFUND' | 'STORE_CREDIT';
   items: PurchaseReturnItem[];
   subtotal: number;
   grandTotal: number;

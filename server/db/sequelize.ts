@@ -416,12 +416,12 @@ export class PurchaseOrder extends Model {
 
 PurchaseOrder.init(
   {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    id: { type: DataTypes.STRING, primaryKey: true, defaultValue: () => `po-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` },
     poId: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'po_id' },
     tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
-    poNumber: { type: DataTypes.STRING, allowNull: false, field: 'po_number' },
+    poNumber: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'po_number' },
     poDate: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW, field: 'po_date' },
-    supplierId: { type: DataTypes.INTEGER, allowNull: true, field: 'supplier_id' },
+    supplierId: { type: DataTypes.STRING, allowNull: true, field: 'supplier_id' },
     supplierName: { type: DataTypes.STRING, allowNull: false, field: 'supplier_name' },
     supplierPhone: { type: DataTypes.STRING, allowNull: true, field: 'supplier_phone' },
     supplierGstin: { type: DataTypes.STRING, allowNull: true, field: 'supplier_gstin' },
@@ -435,9 +435,9 @@ PurchaseOrder.init(
 );
 
 export class PurchaseOrderItem extends Model {
-  declare id: number;
-  declare purchaseOrderId: number;
-  declare itemId: number;
+  declare id: string;
+  declare purchaseOrderId: string;
+  declare itemId: string;
   declare itemName: string;
   declare unitType: string;
   declare quantity: number;
@@ -447,9 +447,9 @@ export class PurchaseOrderItem extends Model {
 
 PurchaseOrderItem.init(
   {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-    purchaseOrderId: { type: DataTypes.INTEGER, allowNull: false, field: 'purchase_order_id' },
-    itemId: { type: DataTypes.INTEGER, allowNull: true, field: 'item_id' },
+    id: { type: DataTypes.STRING, primaryKey: true, defaultValue: () => `poi-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` },
+    purchaseOrderId: { type: DataTypes.STRING, allowNull: false, field: 'purchase_order_id' },
+    itemId: { type: DataTypes.STRING, allowNull: true, field: 'item_id' },
     itemName: { type: DataTypes.STRING, allowNull: false, field: 'item_name' },
     unitType: { type: DataTypes.STRING, defaultValue: 'PCS', field: 'unit_type' },
     quantity: { type: DataTypes.FLOAT, defaultValue: 1.0 },
@@ -534,15 +534,16 @@ PurchaseBillItem.belongsTo(PurchaseBill, { foreignKey: 'purchaseBillId' });
 
 // 12. PurchaseReturn & PurchaseReturnItem Models
 export class PurchaseReturn extends Model {
-  declare id: number;
+  declare id: string;
   declare returnId: string;
   declare tenantId: string;
   declare debitNoteNumber: string;
   declare returnDate: string;
   declare purchaseBillNumber: string;
-  declare supplierId: number;
+  declare supplierId: string;
   declare supplierName: string;
   declare supplierPhone: string;
+  declare sourceLocationId: string;
   declare subtotal: number;
   declare grandTotal: number;
   declare notes: string;
@@ -550,15 +551,16 @@ export class PurchaseReturn extends Model {
 
 PurchaseReturn.init(
   {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
+    id: { type: DataTypes.STRING, primaryKey: true, defaultValue: () => `pr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` },
     returnId: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'return_id' },
     tenantId: { type: DataTypes.STRING, defaultValue: 'default-tenant', field: 'tenant_id' },
     debitNoteNumber: { type: DataTypes.STRING, allowNull: false, unique: true, field: 'debit_note_number' },
     returnDate: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW, field: 'return_date' },
     purchaseBillNumber: { type: DataTypes.STRING, allowNull: true, field: 'purchase_bill_number' },
-    supplierId: { type: DataTypes.INTEGER, allowNull: true, field: 'supplier_id' },
+    supplierId: { type: DataTypes.STRING, allowNull: true, field: 'supplier_id' },
     supplierName: { type: DataTypes.STRING, allowNull: false, field: 'supplier_name' },
     supplierPhone: { type: DataTypes.STRING, allowNull: true, field: 'supplier_phone' },
+    sourceLocationId: { type: DataTypes.STRING, allowNull: true, field: 'source_location_id' },
     subtotal: { type: DataTypes.FLOAT, defaultValue: 0.0 },
     grandTotal: { type: DataTypes.FLOAT, defaultValue: 0.0, field: 'grand_total' },
     notes: { type: DataTypes.TEXT, allowNull: true }
@@ -567,9 +569,9 @@ PurchaseReturn.init(
 );
 
 export class PurchaseReturnItem extends Model {
-  declare id: number;
-  declare purchaseReturnId: number;
-  declare itemId: number;
+  declare id: string;
+  declare purchaseReturnId: string;
+  declare itemId: string;
   declare itemName: string;
   declare unitType: string;
   declare returnQuantity: number;
@@ -579,9 +581,9 @@ export class PurchaseReturnItem extends Model {
 
 PurchaseReturnItem.init(
   {
-    id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
-    purchaseReturnId: { type: DataTypes.INTEGER, allowNull: false, field: 'purchase_return_id' },
-    itemId: { type: DataTypes.INTEGER, allowNull: true, field: 'item_id' },
+    id: { type: DataTypes.STRING, primaryKey: true, defaultValue: () => `pri-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` },
+    purchaseReturnId: { type: DataTypes.STRING, allowNull: false, field: 'purchase_return_id' },
+    itemId: { type: DataTypes.STRING, allowNull: true, field: 'item_id' },
     itemName: { type: DataTypes.STRING, allowNull: false, field: 'item_name' },
     unitType: { type: DataTypes.STRING, defaultValue: 'PCS', field: 'unit_type' },
     returnQuantity: { type: DataTypes.FLOAT, defaultValue: 1.0, field: 'return_quantity' },

@@ -43,7 +43,10 @@ export const PurchaseReturnListScreen: React.FC<PurchaseReturnListScreenProps> =
   );
 
   const totalReturnValue = purchaseReturns.reduce((acc, r) => acc + (r.grandTotal || 0), 0);
-  const totalItemsCount = purchaseReturns.reduce((acc, r) => acc + (r.items?.length || 0), 0);
+  const totalItemsCount = purchaseReturns.reduce((acc, r) => {
+    const itemsSum = (r.items || []).reduce((sum, item) => sum + Number(item.returnQuantity || (item as any).quantity || 1), 0);
+    return acc + itemsSum;
+  }, 0);
 
   const handleDeleteReturn = async (ret: PurchaseReturn) => {
     if (!ret.id && !ret.returnId) return;

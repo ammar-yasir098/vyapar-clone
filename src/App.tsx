@@ -776,6 +776,7 @@ export function App() {
             <CreatePurchaseReturnScreen
               items={items}
               parties={parties}
+              purchaseBills={purchaseBills}
               business={businessDetails}
               onReturnSaved={() => setActiveTab('purchase-returns')}
               onCancel={() => setActiveTab('purchase-returns')}
