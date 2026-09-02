@@ -184,7 +184,7 @@ cashRouter.get('/transactions', async (req: Request, res: Response) => {
       // Fetch all transactions sorted ASC to calculate correct running balances
       const allTxns = await CashTransaction.findAll({
         where: { cashAccountId: cId },
-        order: [['transactionDate', 'ASC'], ['id', 'ASC']]
+        order: [['createdAt', 'ASC'], ['id', 'ASC']]
       });
 
       let balanceTracker = openingBal;
@@ -210,7 +210,7 @@ cashRouter.get('/transactions', async (req: Request, res: Response) => {
           source: t.get('source'),
           referenceId: t.get('referenceId'),
           description: t.get('description'),
-          transactionDate: t.get('transactionDate'),
+          transactionDate: t.get('createdAt') || t.get('transactionDate'),
           createdAt: t.get('createdAt'),
           runningBalance: balanceTracker
         };

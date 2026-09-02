@@ -6,16 +6,25 @@ import { checkServerHealth } from './api';
 
 const API_BASE_URL = 'http://localhost:5000/api/v1/cash';
 
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 1500): Promise<Response> {
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 2500): Promise<Response> {
   const isOnline = await checkServerHealth(600);
   if (!isOnline) {
     throw new Error('Backend server offline');
   }
 
+  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> || {})
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetch(url, { ...options, headers, signal: controller.signal });
     clearTimeout(id);
     return response;
   } catch (err) {
@@ -111,18 +120,44 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
   ]);
 
   const items: CashTransaction[] = [];
+  const seenRefs = new Set<string>();
 
-  // 1. Sales (Upfront Cash Sales)
+  // 1. Manual and explicit cash ledger records first
+  for (const ct of manualCashTxns) {
+    const amt = roundCurrency(ct.amount);
+    if (amt <= 0) continue;
+    const refKey = ct.referenceId ? `${ct.referenceId}-${ct.type}` : `id-${ct.id}`;
+    if (seenRefs.has(refKey)) continue;
+    seenRefs.add(refKey);
+
+    const txDate = ct.createdAt || ct.transactionDate || new Date().toISOString();
+    items.push({
+      id: `cash-tx-${ct.id}`,
+      cashAccountId: ct.cashAccountId || activeAccountId,
+      tenantId: activeTenantId,
+      type: ct.type,
+      amount: amt,
+      source: ct.source || 'MANUAL_ADJUSTMENT',
+      referenceId: ct.referenceId || '',
+      description: ct.description || (ct.type === 'IN' ? 'Cash Inflow' : 'Cash Outflow'),
+      transactionDate: txDate,
+      createdAt: ct.createdAt || txDate
+    });
+  }
+
+  // 2. Sales (Upfront Cash Sales) - if not already recorded
   for (const inv of invoices) {
     const pm = (inv.paymentMethod || '').toUpperCase();
-    const isCredit = pm === 'CREDIT';
-    if (isCredit) continue; // Cash received for credit sales is tracked via PaymentIn vouchers
+    if (pm === 'CREDIT') continue;
 
     const grand = Number(inv.grandTotal || 0);
     const rec = Number(inv.receivedAmount ?? (inv.paymentStatus === 'PAID' ? grand : 0));
     const amt = roundCurrency(rec);
+    const refKey = inv.invoiceNumber ? `${inv.invoiceNumber}-IN` : '';
 
-    if (amt > 0) {
+    if (amt > 0 && (!refKey || !seenRefs.has(refKey))) {
+      if (refKey) seenRefs.add(refKey);
+      const txDate = inv.createdAt || (inv.invoiceDate ? `${inv.invoiceDate}T12:00:00.000Z` : new Date().toISOString());
       items.push({
         id: `cash-sale-${inv.id || inv.invoiceNumber}`,
         cashAccountId: activeAccountId,
@@ -132,16 +167,21 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
         source: 'POS_SALE' as CashTransactionSource,
         referenceId: inv.invoiceNumber || '',
         description: `POS Cash Sale - ${inv.partyName || 'Retail Customer'}`,
-        transactionDate: inv.invoiceDate || inv.createdAt || new Date().toISOString()
+        transactionDate: txDate,
+        createdAt: inv.createdAt || txDate
       });
     }
   }
 
-  // 2. Payment-In (Cash Receipts)
+  // 3. Payment-In (Cash Receipts)
   for (const p of paymentsIn) {
     const mode = (p.paymentMethod || 'CASH').toUpperCase();
     const amt = Number(p.amount || 0);
-    if (mode === 'CASH' && amt > 0) {
+    const refKey = p.receiptNumber ? `${p.receiptNumber}-IN` : '';
+
+    if (mode === 'CASH' && amt > 0 && (!refKey || !seenRefs.has(refKey))) {
+      if (refKey) seenRefs.add(refKey);
+      const txDate = p.createdAt || (p.paymentDate ? `${p.paymentDate}T12:00:00.000Z` : new Date().toISOString());
       items.push({
         id: `cash-payin-${p.id || p.receiptNumber}`,
         cashAccountId: activeAccountId,
@@ -151,21 +191,24 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
         source: 'PAYMENT_IN' as CashTransactionSource,
         referenceId: p.receiptNumber || '',
         description: `Payment-In from ${p.partyName || 'Customer'}`,
-        transactionDate: p.paymentDate || p.createdAt || new Date().toISOString()
+        transactionDate: txDate,
+        createdAt: p.createdAt || txDate
       });
     }
   }
 
-  // 3. Purchase Bills (Upfront Cash Purchases)
+  // 4. Purchase Bills (Upfront Cash Purchases)
   for (const b of purchaseBills) {
     const pm = (b.paymentMethod || '').toUpperCase();
-    const isCredit = pm === 'CREDIT';
-    if (isCredit) continue; // Cash paid for credit purchases is tracked via PaymentOut vouchers
+    if (pm === 'CREDIT') continue;
 
     const paid = Number(b.paidAmount ?? (pm === 'CASH' ? b.grandTotal : 0));
     const amt = roundCurrency(paid);
+    const refKey = b.billNumber ? `${b.billNumber}-OUT` : '';
 
-    if (amt > 0) {
+    if (amt > 0 && (!refKey || !seenRefs.has(refKey))) {
+      if (refKey) seenRefs.add(refKey);
+      const txDate = b.createdAt || (b.billDate ? `${b.billDate}T12:00:00.000Z` : new Date().toISOString());
       items.push({
         id: `cash-pur-${b.id || b.billNumber}`,
         cashAccountId: activeAccountId,
@@ -175,16 +218,21 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
         source: 'PURCHASE_BILL' as CashTransactionSource,
         referenceId: b.billNumber || '',
         description: `Cash Purchase - ${b.supplierName || 'Supplier'}`,
-        transactionDate: b.billDate || b.createdAt || new Date().toISOString()
+        transactionDate: txDate,
+        createdAt: b.createdAt || txDate
       });
     }
   }
 
-  // 4. Payment-Out (Cash Payments)
+  // 5. Payment-Out (Cash Payments)
   for (const po of paymentsOut) {
     const mode = (po.paymentMethod || 'CASH').toUpperCase();
     const amt = Number(po.amount || 0);
-    if (mode === 'CASH' && amt > 0) {
+    const refKey = po.receiptNumber ? `${po.receiptNumber}-OUT` : '';
+
+    if (mode === 'CASH' && amt > 0 && (!refKey || !seenRefs.has(refKey))) {
+      if (refKey) seenRefs.add(refKey);
+      const txDate = po.createdAt || (po.paymentDate ? `${po.paymentDate}T12:00:00.000Z` : new Date().toISOString());
       items.push({
         id: `cash-payout-${po.id || po.receiptNumber}`,
         cashAccountId: activeAccountId,
@@ -194,16 +242,21 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
         source: 'PAYMENT_OUT' as CashTransactionSource,
         referenceId: po.receiptNumber || '',
         description: `Payment-Out to ${po.partyName || 'Supplier'}`,
-        transactionDate: po.paymentDate || po.createdAt || new Date().toISOString()
+        transactionDate: txDate,
+        createdAt: po.createdAt || txDate
       });
     }
   }
 
-  // 5. Expenses (Cash Expenses)
+  // 6. Expenses (Cash Expenses)
   for (const e of expenses) {
     const mode = (e.paymentMode || 'CASH').toUpperCase();
     const amt = Number(e.amount || 0);
-    if (mode === 'CASH' && amt > 0) {
+    const refKey = e.expenseNumber ? `${e.expenseNumber}-OUT` : '';
+
+    if (mode === 'CASH' && amt > 0 && (!refKey || !seenRefs.has(refKey))) {
+      if (refKey) seenRefs.add(refKey);
+      const txDate = e.createdAt || (e.expenseDate ? `${e.expenseDate}T12:00:00.000Z` : new Date().toISOString());
       items.push({
         id: `cash-exp-${e.id || e.expenseNumber}`,
         cashAccountId: activeAccountId,
@@ -213,69 +266,56 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
         source: 'EXPENSE' as CashTransactionSource,
         referenceId: e.expenseNumber || '',
         description: `Cash Expense - ${e.categoryName || 'Miscellaneous'}`,
-        transactionDate: e.expenseDate || e.createdAt || new Date().toISOString()
+        transactionDate: txDate,
+        createdAt: e.createdAt || txDate
       });
     }
   }
 
-  // 6. Purchase Returns (Cash Refund Received)
+  // 7. Purchase Returns (Cash Refund Received)
   for (const pr of purchaseReturns) {
     const amt = Number(pr.grandTotal || 0);
-    if (amt > 0) {
+    const refKey = pr.debitNoteNumber ? `${pr.debitNoteNumber}-IN` : '';
+
+    if (amt > 0 && (!refKey || !seenRefs.has(refKey))) {
+      if (refKey) seenRefs.add(refKey);
+      const txDate = pr.createdAt || (pr.returnDate ? `${pr.returnDate}T12:00:00.000Z` : new Date().toISOString());
       items.push({
         id: `cash-pur-ret-${pr.id || pr.debitNoteNumber}`,
         cashAccountId: activeAccountId,
         tenantId: activeTenantId,
         type: 'IN',
         amount: roundCurrency(amt),
-        source: 'PURCHASE_BILL' as CashTransactionSource,
+        source: 'PURCHASE_RETURN_REFUND' as CashTransactionSource,
         referenceId: pr.debitNoteNumber || '',
         description: `Purchase Return Refund - ${pr.supplierName || 'Supplier'}`,
-        transactionDate: pr.returnDate || pr.createdAt || new Date().toISOString()
+        transactionDate: txDate,
+        createdAt: pr.createdAt || txDate
       });
     }
   }
 
-  // 7. Sale Returns (Cash Refund Paid Out)
+  // 8. Sale Returns (Cash Refund Paid Out)
   for (const sr of saleReturns) {
     const amt = Number(sr.refundAmount ?? sr.grandTotal ?? 0);
-    if (amt > 0) {
+    const refKey = sr.creditNoteNumber ? `${sr.creditNoteNumber}-OUT` : '';
+
+    if (amt > 0 && (!refKey || !seenRefs.has(refKey))) {
+      if (refKey) seenRefs.add(refKey);
+      const txDate = sr.createdAt || (sr.returnDate ? `${sr.returnDate}T12:00:00.000Z` : new Date().toISOString());
       items.push({
         id: `cash-sale-ret-${sr.id || sr.creditNoteNumber}`,
         cashAccountId: activeAccountId,
         tenantId: activeTenantId,
         type: 'OUT',
         amount: roundCurrency(amt),
-        source: 'POS_SALE' as CashTransactionSource,
+        source: 'SALE_RETURN_REFUND' as CashTransactionSource,
         referenceId: sr.creditNoteNumber || '',
         description: `Sale Return Cash Refund - ${sr.partyName || 'Customer'}`,
-        transactionDate: sr.returnDate || sr.createdAt || new Date().toISOString()
+        transactionDate: txDate,
+        createdAt: sr.createdAt || txDate
       });
     }
-  }
-
-  // 8. Manual Cash Adjustments
-  for (const ct of manualCashTxns) {
-    const isLinkedSource =
-      ct.source === 'POS_SALE' ||
-      ct.source === 'EXPENSE' ||
-      ct.source === 'PAYMENT_IN' ||
-      ct.source === 'PAYMENT_OUT' ||
-      ct.source === 'PURCHASE_BILL';
-
-    if (isLinkedSource) continue;
-
-    items.push({
-      id: `cash-tx-${ct.id}`,
-      cashAccountId: ct.cashAccountId || activeAccountId,
-      tenantId: activeTenantId,
-      type: ct.type,
-      amount: roundCurrency(ct.amount),
-      source: ct.source || 'MANUAL_ADJUSTMENT',
-      referenceId: ct.referenceId || '',
-      description: ct.description || (ct.type === 'IN' ? 'Cash Increase' : 'Cash Reduction'),
-      transactionDate: ct.transactionDate || ct.createdAt || new Date().toISOString()
-    });
   }
 
   return items;
@@ -286,6 +326,30 @@ export async function getAllAggregatedCashTransactions(tenantId: string): Promis
  */
 export async function fetchCashBalance(tenantId: string) {
   const activeTenantId = tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+
+  // 1. Try server first if online
+  try {
+    const isOnline = await checkServerHealth(600);
+    if (isOnline) {
+      const res = await fetchWithTimeout(`${API_BASE_URL}/balance?tenantId=${encodeURIComponent(activeTenantId)}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          return {
+            accountId: Number(json.data.accountId || 0),
+            name: json.data.name || 'Main Cash Drawer',
+            openingBalance: roundCurrency(json.data.openingBalance || 0),
+            totalIn: roundCurrency(json.data.totalIn || 0),
+            totalOut: roundCurrency(json.data.totalOut || 0),
+            currentBalance: roundCurrency(json.data.currentBalance || 0)
+          };
+        }
+      }
+    }
+  } catch (e) {
+    // Fallback to local Dexie
+  }
+
   await deduplicateLocalCashTransactions();
 
   const cashAcc = await getOrCreateLocalCashAccount(activeTenantId);
@@ -315,17 +379,80 @@ export async function fetchCashBalance(tenantId: string) {
 }
 
 /**
- * Fetches transaction history with calculated running balances strictly from local Dexie IndexedDB
+ * Helper to extract accurate sort timestamp from an item
+ */
+function getTxnSortTimestamp(t: any): number {
+  if (t.createdAt) {
+    const ms = new Date(t.createdAt).getTime();
+    if (!isNaN(ms) && ms > 0) return ms;
+  }
+  if (t.transactionDate && t.transactionDate.includes('T')) {
+    const ms = new Date(t.transactionDate).getTime();
+    if (!isNaN(ms) && ms > 0) return ms;
+  }
+  const match = String(t.referenceId || t.id || '').match(/\d{10,13}/);
+  if (match) {
+    const ms = Number(match[0]);
+    if (ms > 1700000000000) return ms;
+  }
+  if (t.transactionDate) {
+    const ms = new Date(t.transactionDate).getTime();
+    if (!isNaN(ms) && ms > 0) return ms;
+  }
+  return 0;
+}
+
+/**
+ * Fetches transaction history with calculated running balances strictly from local Dexie IndexedDB or Server
  */
 export async function fetchCashTransactions(tenantId: string, filters: any = {}) {
   const activeTenantId = tenantId || localStorage.getItem('vyapar_current_tenant') || 'default-tenant';
+
+  // 1. Try fetching from server first (has authentic PostgreSQL ledger and order)
+  try {
+    const isOnline = await checkServerHealth(600);
+    if (isOnline) {
+      const q = new URLSearchParams({
+        tenantId: activeTenantId,
+        type: filters.type || '',
+        source: filters.source || '',
+        search: filters.search || '',
+        startDate: filters.startDate || '',
+        endDate: filters.endDate || '',
+        limit: 'all'
+      });
+      const res = await fetchWithTimeout(`${API_BASE_URL}/transactions?${q.toString()}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data && Array.isArray(json.data.transactions)) {
+          return {
+            transactions: json.data.transactions,
+            openingBalance: roundCurrency(json.data.openingBalance || 0),
+            currentBalance: roundCurrency(json.data.currentBalance || 0),
+            totalIn: roundCurrency(json.data.totalIn || 0),
+            totalOut: roundCurrency(json.data.totalOut || 0),
+            page: 1,
+            totalPages: 1
+          };
+        }
+      }
+    }
+  } catch (e) {
+    // Fallback to local Dexie
+  }
+
   const cashAcc = await getOrCreateLocalCashAccount(activeTenantId);
   const openingBal = roundCurrency(cashAcc.openingBalance || 0);
 
   let txns = await getAllAggregatedCashTransactions(activeTenantId);
 
-  // Sort ascending to calculate running balances correctly
-  txns.sort((a, b) => new Date(a.transactionDate || a.createdAt || '').getTime() - new Date(b.transactionDate || b.createdAt || '').getTime());
+  // Sort ascending by true timestamp to calculate running balances correctly
+  txns.sort((a, b) => {
+    const diff = getTxnSortTimestamp(a) - getTxnSortTimestamp(b);
+    if (diff !== 0) return diff;
+    if (a.type !== b.type) return a.type === 'IN' ? -1 : 1;
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  });
 
   let tracker = openingBal;
   let totalIn = 0;
@@ -349,7 +476,7 @@ export async function fetchCashTransactions(tenantId: string, filters: any = {})
     if (filters.type && filters.type !== 'ALL' && t.type !== filters.type) return false;
     if (filters.source && filters.source !== 'ALL' && t.source !== filters.source) return false;
     if (filters.startDate && filters.endDate) {
-      const txTime = new Date(t.transactionDate || t.createdAt || 0).getTime();
+      const txTime = getTxnSortTimestamp(t);
       const sTime = new Date(String(filters.startDate)).getTime();
       const eTime = new Date(String(filters.endDate)).setHours(23, 59, 59, 999);
       if (isNaN(sTime) || isNaN(eTime) || txTime < sTime || txTime > eTime) return false;

@@ -20,8 +20,10 @@ import {
   CheckCircle2,
   AlertTriangle,
   FileText,
-  DollarSign
+  DollarSign,
+  ArrowUpDown
 } from 'lucide-react';
+import { useMemo } from 'react';
 import { BusinessDetails, CashTransaction, CashTransactionSource } from '../../types';
 import { fetchCashBalance, fetchCashTransactions, recordCashEntry, transferToBank, transferFromBank, adjustCashBalance } from '../../services/cash';
 import { useToast } from '../Common/ToastContext';
@@ -60,6 +62,16 @@ export const CashInHandScreen: React.FC<CashInHandScreenProps> = ({ business }) 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'IN' | 'OUT'>('ALL');
   const [filterSource, setFilterSource] = useState<string>('ALL');
+  const [sortOrder, setSortOrder] = useState<'LATEST' | 'OLDEST'>('LATEST');
+
+  // Sorted Transactions
+  const sortedTransactions = useMemo(() => {
+    if (!transactions || transactions.length === 0) return [];
+    if (sortOrder === 'OLDEST') {
+      return [...transactions].reverse();
+    }
+    return transactions;
+  }, [transactions, sortOrder]);
 
   // Modal States
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -398,6 +410,17 @@ export const CashInHandScreen: React.FC<CashInHandScreenProps> = ({ business }) 
                 Cash Out
               </button>
             </div>
+
+            {/* Sort Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setSortOrder(prev => prev === 'LATEST' ? 'OLDEST' : 'LATEST')}
+              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 flex items-center gap-1.5 transition cursor-pointer"
+              title="Click to toggle ordering"
+            >
+              <ArrowUpDown className="w-3.5 h-3.5 text-slate-500" />
+              <span>{sortOrder === 'LATEST' ? 'Newest First ⬇' : 'Oldest First ⬆'}</span>
+            </button>
           </div>
         </div>
 
@@ -445,8 +468,16 @@ export const CashInHandScreen: React.FC<CashInHandScreenProps> = ({ business }) 
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {transactions.map((txn, idx) => {
-                  const dateStr = txn.transactionDate ? new Date(txn.transactionDate).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : '-';
+                {sortedTransactions.map((txn, idx) => {
+                  const rawDate = txn.createdAt || txn.transactionDate;
+                  const dateStr = rawDate ? new Date(rawDate).toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: true
+                  }) : '-';
                   return (
                     <tr key={txn.id || idx} className="hover:bg-slate-50/80 transition">
                       <td className="p-3 pl-4 font-mono text-slate-600 whitespace-nowrap">{dateStr}</td>
