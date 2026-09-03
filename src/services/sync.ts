@@ -345,11 +345,24 @@ export class ClientSyncManager {
               return false;
             })
             .first();
+
+          const incomingItems = (sInv.items && Array.isArray(sInv.items) && sInv.items.length > 0) ? sInv.items : null;
+
           if (existing && existing.id) {
-            await db.invoices.update(existing.id, { ...sInv, id: existing.id, tenantId: activeTenantId });
+            const preservedItems = incomingItems || (existing.items && Array.isArray(existing.items) && existing.items.length > 0 ? existing.items : []);
+            await db.invoices.update(existing.id, {
+              ...sInv,
+              items: preservedItems,
+              id: existing.id,
+              tenantId: activeTenantId
+            });
           } else {
             const { id, ...invData } = sInv;
-            await db.invoices.add({ ...invData, tenantId: activeTenantId });
+            await db.invoices.add({
+              ...invData,
+              items: incomingItems || [],
+              tenantId: activeTenantId
+            });
           }
         }
       }
@@ -371,11 +384,24 @@ export class ClientSyncManager {
               return false;
             })
             .first();
+
+          const incomingItems = (sEst.items && Array.isArray(sEst.items) && sEst.items.length > 0) ? sEst.items : null;
+
           if (existing && existing.id) {
-            await db.estimates.update(existing.id, { ...sEst, id: existing.id, tenantId: activeTenantId });
+            const preservedItems = incomingItems || (existing.items && Array.isArray(existing.items) && existing.items.length > 0 ? existing.items : []);
+            await db.estimates.update(existing.id, {
+              ...sEst,
+              items: preservedItems,
+              id: existing.id,
+              tenantId: activeTenantId
+            });
           } else {
             const { id, ...estData } = sEst;
-            await db.estimates.add({ ...estData, tenantId: activeTenantId });
+            await db.estimates.add({
+              ...estData,
+              items: incomingItems || [],
+              tenantId: activeTenantId
+            });
           }
         }
       }
@@ -388,13 +414,17 @@ export class ClientSyncManager {
 
           const recNum = sPayIn.receiptNumber || sPayIn.receipt_number;
           const existing = await db.paymentIn
-            .filter(p => (p.tenantId || 'default-tenant') === activeTenantId && recNum && p.receiptNumber === recNum)
+            .filter(p => {
+              const tMatch = (p.tenantId || 'default-tenant') === activeTenantId;
+              if (!tMatch) return false;
+              return Boolean(recNum && p.receiptNumber === recNum);
+            })
             .first();
           if (existing && existing.id) {
             await db.paymentIn.update(existing.id, { ...sPayIn, id: existing.id, tenantId: activeTenantId });
           } else {
-            const { id, ...payInData } = sPayIn;
-            await db.paymentIn.add({ ...payInData, tenantId: activeTenantId });
+            const { id, ...payData } = sPayIn;
+            await db.paymentIn.add({ ...payData, tenantId: activeTenantId });
           }
         }
       }
@@ -416,11 +446,24 @@ export class ClientSyncManager {
               return false;
             })
             .first();
+
+          const incomingItems = (sPO.items && Array.isArray(sPO.items) && sPO.items.length > 0) ? sPO.items : null;
+
           if (existing && existing.id) {
-            await db.purchaseOrders.update(existing.id, { ...sPO, id: existing.id, tenantId: activeTenantId });
+            const preservedItems = incomingItems || (existing.items && Array.isArray(existing.items) && existing.items.length > 0 ? existing.items : []);
+            await db.purchaseOrders.update(existing.id, {
+              ...sPO,
+              items: preservedItems,
+              id: existing.id,
+              tenantId: activeTenantId
+            });
           } else {
             const { id, ...poData } = sPO;
-            await db.purchaseOrders.add({ ...poData, tenantId: activeTenantId });
+            await db.purchaseOrders.add({
+              ...poData,
+              items: incomingItems || [],
+              tenantId: activeTenantId
+            });
           }
         }
       }
@@ -442,11 +485,24 @@ export class ClientSyncManager {
               return false;
             })
             .first();
+
+          const incomingItems = (sBill.items && Array.isArray(sBill.items) && sBill.items.length > 0) ? sBill.items : null;
+
           if (existing && existing.id) {
-            await db.purchaseBills.update(existing.id, { ...sBill, id: existing.id, tenantId: activeTenantId });
+            const preservedItems = incomingItems || (existing.items && Array.isArray(existing.items) && existing.items.length > 0 ? existing.items : []);
+            await db.purchaseBills.update(existing.id, {
+              ...sBill,
+              items: preservedItems,
+              id: existing.id,
+              tenantId: activeTenantId
+            });
           } else {
             const { id, ...billData } = sBill;
-            await db.purchaseBills.add({ ...billData, tenantId: activeTenantId });
+            await db.purchaseBills.add({
+              ...billData,
+              items: incomingItems || [],
+              tenantId: activeTenantId
+            });
           }
         }
       }

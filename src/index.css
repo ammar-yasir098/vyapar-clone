@@ -39,10 +39,10 @@ body {
 }
 
 /* ── Scrollbars ─────────────────────────────────── */
-::-webkit-scrollbar       { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: #f8fafc; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 6px; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+::-webkit-scrollbar       { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #f1f5f9; }
+::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #64748b; }
 
 /* Sidebar scrollbar — dark variant */
 .sidebar-scroll::-webkit-scrollbar-track { background: transparent; }

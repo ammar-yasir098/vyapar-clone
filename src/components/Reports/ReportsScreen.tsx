@@ -20,8 +20,9 @@ import {
 } from 'lucide-react';
 import { Invoice, BusinessDetails, PurchaseBill, PurchaseReturn, PaymentIn, PaymentOut, Expense, SaleReturn, CashTransaction, Item, Party } from '../../types';
 import { triggerThermalPrint } from '../../services/printer';
-import { calculateProfitAndLoss, generatePartyLedger, calculateTaxSummary } from '../../services/reportsService';
+import { calculateProfitAndLoss, generatePartyLedger, calculateTaxSummary, calculateCashFlow, calculateTrialBalance, calculateBalanceSheet } from '../../services/reportsService';
 import { db, getActiveTenantId } from '../../db';
+import { fetchServerInvoices } from '../../services/api';
 
 interface ReportsScreenProps {
   items?: Item[];
@@ -194,33 +195,68 @@ function getPresetDates(preset: DatePreset): { startDate: string; endDate: strin
 // Helper to compute individual invoice total cost, profit, and margin %
 function calculateInvoiceCostAndProfit(inv: Invoice, itemsList: Item[] = []) {
   const grandTotal = Number(inv.grandTotal || 0);
+  const taxTotal = Number(inv.taxTotal || 0);
+  // Net revenue excluding sales tax/GST (tax is not business income)
+  const netRevenue = Math.max(0, grandTotal - taxTotal);
   let totalCost = 0;
+  let hasMissingCost = false;
 
-  if (Array.isArray(inv.items) && inv.items.length > 0) {
-    totalCost = inv.items.reduce((sum, item: any) => {
+  // Safe parse items in case inv.items was serialized as a string
+  const rawItems = inv.items;
+  const parsedItems: any[] = Array.isArray(rawItems)
+    ? rawItems
+    : (typeof rawItems === 'string'
+        ? (() => { try { return JSON.parse(rawItems); } catch { return []; } })()
+        : []);
+
+  // Build lookup index from master inventory items for fast and reliable matching
+  const itemMap = new Map<string, Item>();
+  for (const it of itemsList) {
+    if (it.id) itemMap.set(String(it.id), it);
+    if (it.skuCode) itemMap.set(it.skuCode.trim().toLowerCase(), it);
+    if (it.barcode) itemMap.set(it.barcode.trim(), it);
+    if (it.name) itemMap.set(it.name.trim().toLowerCase(), it);
+  }
+
+  if (parsedItems.length > 0) {
+    totalCost = parsedItems.reduce((sum, item: any) => {
       const qty = Number(item.quantity || 1);
       let cost = Number(item.purchasePrice || item.costPrice || 0);
 
+      // If item line has no purchase price, lookup in master inventory
       if (cost <= 0 && itemsList.length > 0) {
-        const found = itemsList.find(i => (item.itemId && i.id === item.itemId) || (item.itemName && i.name.toLowerCase() === item.itemName.toLowerCase()));
-        if (found && found.purchasePrice > 0) {
+        const lineId = item.itemId !== undefined && item.itemId !== null ? String(item.itemId) : (item.id ? String(item.id) : '');
+        const lineBarcode = (item.barcode || '').trim();
+        const lineSku = (item.skuCode || item.hsnSacCode || '').trim().toLowerCase();
+        const lineName = (item.itemName || item.name || '').trim().toLowerCase();
+
+        let found: Item | undefined;
+        if (lineId && itemMap.has(lineId)) found = itemMap.get(lineId);
+        else if (lineBarcode && itemMap.has(lineBarcode)) found = itemMap.get(lineBarcode);
+        else if (lineSku && itemMap.has(lineSku)) found = itemMap.get(lineSku);
+        else if (lineName && itemMap.has(lineName)) found = itemMap.get(lineName);
+
+        if (found && Number(found.purchasePrice) > 0) {
           cost = Number(found.purchasePrice);
         }
       }
 
       if (cost <= 0) {
-        cost = Number(item.unitPrice || 0) * 0.7;
+        hasMissingCost = true;
+        cost = 0;
       }
+
       return sum + (qty * cost);
     }, 0);
   } else {
-    totalCost = grandTotal * 0.7;
+    hasMissingCost = true;
+    totalCost = 0;
   }
 
-  const profit = grandTotal - totalCost;
-  const marginPercent = grandTotal > 0 ? (profit / grandTotal) * 100 : 0;
+  const profit = netRevenue - totalCost;
+  const marginPercent = netRevenue > 0 ? (profit / netRevenue) * 100 : 0;
 
-  return { grandTotal, totalCost, profit, marginPercent };
+  return { grandTotal, netRevenue, taxTotal, totalCost, profit, marginPercent, hasMissingCost };
 }
 
 export const ReportsScreen: React.FC<ReportsScreenProps> = ({
@@ -295,6 +331,11 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const [search, setSearch] = useState<string>('');
   const [showChart, setShowChart] = useState<boolean>(false);
 
+  // Cash Flow Filter States
+  const [cashFlowTypeFilter, setCashFlowTypeFilter] = useState<'all' | 'INFLOW' | 'OUTFLOW'>('all');
+  const [cashFlowMethodFilter, setCashFlowMethodFilter] = useState<string>('all');
+  const [showCashFlowBreakdown, setShowCashFlowBreakdown] = useState<boolean>(false);
+
   // Auto-sync selectedFirm whenever active tenant is changed from top-left store selector
   useEffect(() => {
     if (activeTenantId) {
@@ -311,6 +352,75 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const safeExpenses = Array.isArray(expenses) ? expenses : [];
   const safeSaleReturns = Array.isArray(saleReturns) ? saleReturns : [];
   const safeCashTransactions = Array.isArray(cashTransactions) ? cashTransactions : [];
+
+  // Self-heal: If an invoice in Dexie has empty items (e.g. from an earlier sync), restore items from syncJournal or server!
+  useEffect(() => {
+    let isMounted = true;
+    const repairInvoicesWithoutItems = async () => {
+      const brokenInvoices = safeInvoices.filter(inv => !Array.isArray(inv.items) || inv.items.length === 0);
+      if (brokenInvoices.length === 0) return;
+
+      for (const inv of brokenInvoices) {
+        let restoredItems: any[] = [];
+
+        // 1. Check syncJournal for original invoice payload
+        try {
+          const journalEntry = await db.syncJournal
+            .filter(j => j.entityType === 'INVOICE' && (j.entityId === inv.invoiceId || (Boolean(j.payload) && j.payload.includes(inv.invoiceNumber))))
+            .reverse()
+            .first();
+
+          if (journalEntry && journalEntry.payload) {
+            const parsed = typeof journalEntry.payload === 'string' ? JSON.parse(journalEntry.payload) : journalEntry.payload;
+            if (Array.isArray(parsed?.items) && parsed.items.length > 0) {
+              restoredItems = parsed.items;
+            }
+          }
+        } catch { }
+
+        // 2. If not in syncJournal, fetch from server API
+        if (restoredItems.length === 0) {
+          try {
+            const serverInvoices = await fetchServerInvoices(inv.tenantId || activeTenantId);
+            const serverMatch = serverInvoices.find((si: any) => si.invoiceNumber === inv.invoiceNumber || si.invoiceId === inv.invoiceId);
+            if (serverMatch && Array.isArray(serverMatch.items) && serverMatch.items.length > 0) {
+              restoredItems = serverMatch.items;
+            }
+          } catch { }
+        }
+
+        // 3. Fallback: If still empty, match against inventory products by unit price
+        if (restoredItems.length === 0 && safeItems.length > 0) {
+          const grandTotal = Number(inv.grandTotal || 0);
+          const matchedItem = safeItems.find(it => Number(it.salesPrice) > 0 && Math.abs(grandTotal % Number(it.salesPrice)) < 0.01);
+          if (matchedItem && Number(matchedItem.salesPrice) > 0) {
+            const qty = Math.round(grandTotal / Number(matchedItem.salesPrice));
+            if (qty > 0) {
+              restoredItems = [{
+                itemId: matchedItem.id,
+                itemName: matchedItem.name,
+                skuCode: matchedItem.skuCode,
+                barcode: matchedItem.barcode,
+                quantity: qty,
+                unitPrice: matchedItem.salesPrice,
+                purchasePrice: matchedItem.purchasePrice || 0,
+                taxAmount: 0,
+                totalAmount: grandTotal
+              }];
+            }
+          }
+        }
+
+        // Save repaired items back to Dexie so print receipt, profit report, etc. work seamlessly!
+        if (isMounted && restoredItems.length > 0 && inv.id) {
+          await db.invoices.update(inv.id, { items: restoredItems });
+        }
+      }
+    };
+
+    repairInvoicesWithoutItems();
+    return () => { isMounted = false; };
+  }, [safeInvoices, safeItems, activeTenantId]);
 
   // Centralized report calculation hooks via reportsService
   const pnlReport = useMemo(() => {
@@ -332,8 +442,28 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   }, [selectedParty, safeInvoices, safePaymentsIn, safeSaleReturns, safePurchaseBills, safePaymentsOut, safePurchaseReturns, startDate, endDate]);
 
   const taxSummaryReport = useMemo(() => {
-    return calculateTaxSummary(safeInvoices, safePurchaseBills, { startDate, endDate });
-  }, [safeInvoices, safePurchaseBills, startDate, endDate]);
+    const firmInvoices = selectedFirm === 'all' 
+      ? safeInvoices 
+      : safeInvoices.filter(i => (i.tenantId || 'default-tenant') === selectedFirm);
+    const firmBills = selectedFirm === 'all' 
+      ? safePurchaseBills 
+      : safePurchaseBills.filter(b => (b.tenantId || 'default-tenant') === selectedFirm);
+    const firmSaleReturns = selectedFirm === 'all' 
+      ? safeSaleReturns 
+      : safeSaleReturns.filter(sr => (sr.tenantId || 'default-tenant') === selectedFirm);
+    const firmPurchaseReturns = selectedFirm === 'all' 
+      ? safePurchaseReturns 
+      : safePurchaseReturns.filter(pr => (pr.tenantId || 'default-tenant') === selectedFirm);
+
+    return calculateTaxSummary(
+      firmInvoices,
+      firmBills,
+      { startDate, endDate },
+      firmSaleReturns,
+      firmPurchaseReturns,
+      safeItems
+    );
+  }, [safeInvoices, safePurchaseBills, safeSaleReturns, safePurchaseReturns, safeItems, selectedFirm, startDate, endDate]);
 
   // Handle Preset Change
   const handlePresetChange = (preset: DatePreset) => {
@@ -1359,7 +1489,7 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   const billWiseProfitData = useMemo(() => {
     return safeInvoices.map(inv => {
       const { dateISO } = parseLocalDate(inv.invoiceDate, inv.createdAt);
-      const { grandTotal, totalCost, profit, marginPercent } = calculateInvoiceCostAndProfit(inv, safeItems);
+      const { grandTotal, netRevenue, taxTotal, totalCost, profit, marginPercent, hasMissingCost } = calculateInvoiceCostAndProfit(inv, safeItems);
 
       return {
         id: `bill-profit-${inv.id || inv.invoiceNumber}`,
@@ -1367,9 +1497,12 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
         invoiceNumber: inv.invoiceNumber || 'INV-000',
         partyName: inv.partyName || 'Walk-in Retail Customer',
         grandTotal,
+        netRevenue,
+        taxTotal,
         totalCost,
         profit,
         marginPercent,
+        hasMissingCost,
         tenantId: inv.tenantId || 'default-tenant',
         rawInvoice: inv
       };
@@ -1393,17 +1526,25 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
     return billWiseProfitData.reduce((sum, b) => sum + b.grandTotal, 0);
   }, [billWiseProfitData]);
 
+  const billWiseTotalNetRevenue = useMemo(() => {
+    return billWiseProfitData.reduce((sum, b) => sum + b.netRevenue, 0);
+  }, [billWiseProfitData]);
+
   const billWiseTotalCost = useMemo(() => {
     return billWiseProfitData.reduce((sum, b) => sum + b.totalCost, 0);
   }, [billWiseProfitData]);
 
   const billWiseTotalProfit = useMemo(() => {
-    return billWiseTotalSales - billWiseTotalCost;
-  }, [billWiseTotalSales, billWiseTotalCost]);
+    return billWiseProfitData.reduce((sum, b) => sum + b.profit, 0);
+  }, [billWiseProfitData]);
 
   const billWiseAvgMargin = useMemo(() => {
-    return billWiseTotalSales > 0 ? (billWiseTotalProfit / billWiseTotalSales) * 100 : 0;
-  }, [billWiseTotalSales, billWiseTotalProfit]);
+    return billWiseTotalNetRevenue > 0 ? (billWiseTotalProfit / billWiseTotalNetRevenue) * 100 : 0;
+  }, [billWiseTotalNetRevenue, billWiseTotalProfit]);
+
+  const missingCostCount = useMemo(() => {
+    return billWiseProfitData.filter(b => b.hasMissingCost).length;
+  }, [billWiseProfitData]);
 
   const handleExportBillWiseProfitCSV = () => {
     if (billWiseProfitData.length === 0) {
@@ -1411,25 +1552,383 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
       return;
     }
 
-    const headers = ['Date', 'Invoice No', 'Customer Name', 'Total Amount (Rs)', 'Total Cost (Rs)', 'Profit Amount (Rs)', 'Margin (%)'];
+    const headers = ['Date', 'Invoice No', 'Customer Name', 'Total Billed (Rs)', 'Net Revenue (Rs)', 'Total Cost (Rs)', 'Profit Amount (Rs)', 'Margin (%)', 'Cost Status'];
     const rows = billWiseProfitData.map(b => [
       formatDateDisplay(b.date),
       `"${b.invoiceNumber}"`,
       `"${b.partyName}"`,
       b.grandTotal.toFixed(2),
+      b.netRevenue.toFixed(2),
       b.totalCost.toFixed(2),
       b.profit.toFixed(2),
-      `${b.marginPercent.toFixed(2)}%`
+      `${b.marginPercent.toFixed(2)}%`,
+      b.hasMissingCost ? '"Unset Cost in Inventory"' : '"Verified Cost"'
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(e => e.join(','))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
+    link.href = url;
     link.setAttribute('download', `Bill_Wise_Profit_${startDate}_to_${endDate}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // ----------------- CASH FLOW AGGREGATION & DATA -----------------
+  const cashFlowReport = useMemo(() => {
+    const firmInvoices = safeInvoices.filter(i => selectedFirm === 'all' || (i.tenantId || 'default-tenant') === selectedFirm);
+    const firmPurchases = safePurchaseBills.filter(p => selectedFirm === 'all' || (p.tenantId || 'default-tenant') === selectedFirm);
+    const firmPaymentsIn = safePaymentsIn.filter(p => selectedFirm === 'all' || (p.tenantId || 'default-tenant') === selectedFirm);
+    const firmPaymentsOut = safePaymentsOut.filter(p => selectedFirm === 'all' || (p.tenantId || 'default-tenant') === selectedFirm);
+    const firmExpenses = safeExpenses.filter(e => selectedFirm === 'all' || (e.tenantId || 'default-tenant') === selectedFirm);
+    const firmSaleReturns = safeSaleReturns.filter(sr => selectedFirm === 'all' || (sr.tenantId || 'default-tenant') === selectedFirm);
+    const firmCashTxns = safeCashTransactions.filter(c => selectedFirm === 'all' || (c.tenantId || 'default-tenant') === selectedFirm);
+
+    return calculateCashFlow(
+      firmInvoices,
+      firmPurchases,
+      firmPaymentsIn,
+      firmPaymentsOut,
+      firmExpenses,
+      firmSaleReturns,
+      firmCashTxns,
+      { startDate, endDate }
+    );
+  }, [safeInvoices, safePurchaseBills, safePaymentsIn, safePaymentsOut, safeExpenses, safeSaleReturns, safeCashTransactions, selectedFirm, startDate, endDate]);
+
+  const filteredCashFlowTransactions = useMemo(() => {
+    return cashFlowReport.transactions.filter(t => {
+      if (cashFlowTypeFilter !== 'all' && t.type !== cashFlowTypeFilter) return false;
+      const isBank = t.paymentMethod.toUpperCase().includes('BANK') || t.paymentMethod.toUpperCase().includes('ONLINE') || t.paymentMethod.toUpperCase().includes('UPI');
+      if (cashFlowMethodFilter === 'cash' && isBank) return false;
+      if (cashFlowMethodFilter === 'bank' && !isBank) return false;
+      if (search.trim()) {
+        const q = search.toLowerCase().trim();
+        return (
+          t.referenceNo.toLowerCase().includes(q) ||
+          t.partyOrCategory.toLowerCase().includes(q) ||
+          t.sourceLabel.toLowerCase().includes(q) ||
+          t.paymentMethod.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [cashFlowReport.transactions, cashFlowTypeFilter, cashFlowMethodFilter, search]);
+
+  const handleExportCashFlowCSV = () => {
+    if (cashFlowReport.transactions.length === 0) {
+      alert('No cash flow records available to export for the selected date range.');
+      return;
+    }
+
+    const firmName = selectedFirm !== 'all'
+      ? (companies.find(c => c.tenantId === selectedFirm)?.name || business?.name || 'Selected Firm')
+      : (business?.name || 'All Firms / Stores');
+
+    const csvLines: string[] = [];
+
+    const addRow = (...cells: any[]) => {
+      csvLines.push(cells.map(c => {
+        if (c === null || c === undefined) return '""';
+        const s = String(c);
+        return `"${s.replace(/"/g, '""')}"`;
+      }).join(','));
+    };
+
+    // 1. Report Title & Business Header
+    addRow('VYAPAR POS - CASH FLOW STATEMENT');
+    addRow('Business / Store:', firmName, '', 'Period:', `${formatDateDisplay(startDate)} to ${formatDateDisplay(endDate)}`, '', 'Generated:', new Date().toLocaleString());
+    addRow('Filters Applied:', `Flow: ${cashFlowTypeFilter.toUpperCase()} | Payment Mode: ${cashFlowMethodFilter.toUpperCase()} | Search: ${search || 'None'}`);
+    addRow('');
+
+    // 2. Executive Summary Metrics (Horizontal Bar across Columns A to E)
+    addRow('Opening Balance (Rs)', 'Total Inflow (+) Rs', 'Total Outflow (-) Rs', 'Net Cash Flow Rs', 'Closing Balance Rs');
+    addRow(
+      cashFlowReport.openingBalance.toFixed(2),
+      cashFlowReport.totalInflows.toFixed(2),
+      cashFlowReport.totalOutflows.toFixed(2),
+      cashFlowReport.netCashFlow.toFixed(2),
+      cashFlowReport.closingBalance.toFixed(2)
+    );
+    addRow('');
+
+    // 3. Transactions Register Table (Immediately on Screen 1)
+    addRow(
+      'Date',
+      'Movement Type',
+      'Source / Activity',
+      'Voucher No',
+      'Party / Description',
+      'Payment Mode',
+      'Inflow (+) Rs',
+      'Outflow (-) Rs',
+      'Running Balance Rs'
+    );
+
+    filteredCashFlowTransactions.forEach(t => {
+      addRow(
+        formatDateDisplay(t.date),
+        t.type,
+        t.sourceLabel,
+        t.referenceNo,
+        t.partyOrCategory,
+        t.paymentMethod,
+        t.type === 'INFLOW' ? t.amount.toFixed(2) : '0.00',
+        t.type === 'OUTFLOW' ? t.amount.toFixed(2) : '0.00',
+        t.runningBalance.toFixed(2)
+      );
+    });
+
+    // 4. Grand Totals Row
+    addRow(
+      'TOTALS',
+      '',
+      '',
+      `${filteredCashFlowTransactions.length} Record(s)`,
+      '',
+      '',
+      cashFlowReport.totalInflows.toFixed(2),
+      cashFlowReport.totalOutflows.toFixed(2),
+      cashFlowReport.closingBalance.toFixed(2)
+    );
+
+    addRow('');
+    addRow('');
+
+    // 5. Inflow & Outflow Category Breakdown (At bottom)
+    addRow('--- CATEGORY & SOURCE BREAKDOWN ---');
+    addRow('Source / Activity Category', 'Movement Type', 'Amount (Rs)', 'Notes');
+    addRow('Cash Sales (POS Checkout)', 'INFLOW', cashFlowReport.inflowBreakdown.salesCash.toFixed(2), 'Direct counter cash sales');
+    addRow('Customer Payments (Payment-In)', 'INFLOW', cashFlowReport.inflowBreakdown.paymentsIn.toFixed(2), 'Recoveries from customers');
+    if (cashFlowReport.inflowBreakdown.otherInflows > 0) {
+      addRow('Other Deposits / Inflows', 'INFLOW', cashFlowReport.inflowBreakdown.otherInflows.toFixed(2), 'Direct liquid cash deposits');
+    }
+    addRow('Supplier Cash Purchases', 'OUTFLOW', cashFlowReport.outflowBreakdown.purchasesCash.toFixed(2), 'Direct cash purchases');
+    addRow('Supplier Payments (Payment-Out)', 'OUTFLOW', cashFlowReport.outflowBreakdown.paymentsOut.toFixed(2), 'Paid out to suppliers');
+    addRow('Operating Expenses (Rent, Bills)', 'OUTFLOW', cashFlowReport.outflowBreakdown.expenses.toFixed(2), 'Daily operating expenses');
+    if (cashFlowReport.outflowBreakdown.saleReturnsRefunds > 0) {
+      addRow('Customer Sale Return Refunds', 'OUTFLOW', cashFlowReport.outflowBreakdown.saleReturnsRefunds.toFixed(2), 'Refunds on returned items');
+    }
+    addRow('Cash in Hand Movements', 'CASH TOTAL', `In: Rs ${cashFlowReport.methodBreakdown.cashInHand.inflow.toFixed(2)} | Out: Rs ${cashFlowReport.methodBreakdown.cashInHand.outflow.toFixed(2)}`, `Net Cash: Rs ${(cashFlowReport.methodBreakdown.cashInHand.inflow - cashFlowReport.methodBreakdown.cashInHand.outflow).toFixed(2)}`);
+    addRow('Bank / Online Movements', 'BANK TOTAL', `In: Rs ${cashFlowReport.methodBreakdown.bankOnline.inflow.toFixed(2)} | Out: Rs ${cashFlowReport.methodBreakdown.bankOnline.outflow.toFixed(2)}`, `Net Bank: Rs ${(cashFlowReport.methodBreakdown.bankOnline.inflow - cashFlowReport.methodBreakdown.bankOnline.outflow).toFixed(2)}`);
+
+    // Export via UTF-8 BOM Blob (guarantees Excel renders symbols and formatting correctly on Windows)
+    const csvContent = '\uFEFF' + csvLines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Cash_Flow_Statement_${startDate}_to_${endDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // ----------------- TRIAL BALANCE AGGREGATION & DATA -----------------
+  const [trialBalanceGroupFilter, setTrialBalanceGroupFilter] = useState<string>('all');
+
+  const trialBalanceReport = useMemo(() => {
+    const firmInvoices = safeInvoices.filter(i => selectedFirm === 'all' || (i.tenantId || 'default-tenant') === selectedFirm);
+    const firmPurchases = safePurchaseBills.filter(p => selectedFirm === 'all' || (p.tenantId || 'default-tenant') === selectedFirm);
+    const firmPaymentsIn = safePaymentsIn.filter(p => selectedFirm === 'all' || (p.tenantId || 'default-tenant') === selectedFirm);
+    const firmPaymentsOut = safePaymentsOut.filter(p => selectedFirm === 'all' || (p.tenantId || 'default-tenant') === selectedFirm);
+    const firmExpenses = safeExpenses.filter(e => selectedFirm === 'all' || (e.tenantId || 'default-tenant') === selectedFirm);
+    const firmSaleReturns = safeSaleReturns.filter(sr => selectedFirm === 'all' || (sr.tenantId || 'default-tenant') === selectedFirm);
+    const firmPurchaseReturns = safePurchaseReturns.filter(pr => selectedFirm === 'all' || (pr.tenantId || 'default-tenant') === selectedFirm);
+    const firmParties = partiesList.filter(p => selectedFirm === 'all' || (p.tenantId || 'default-tenant') === selectedFirm);
+    const firmItems = safeItems.filter(item => selectedFirm === 'all' || (item.tenantId || 'default-tenant') === selectedFirm);
+    const firmCashTxns = safeCashTransactions.filter(c => selectedFirm === 'all' || (c.tenantId || 'default-tenant') === selectedFirm);
+
+    return calculateTrialBalance(
+      firmInvoices,
+      firmPurchases,
+      firmPaymentsIn,
+      firmPaymentsOut,
+      firmExpenses,
+      firmSaleReturns,
+      firmPurchaseReturns,
+      firmParties,
+      firmItems,
+      firmCashTxns,
+      { startDate, endDate }
+    );
+  }, [safeInvoices, safePurchaseBills, safePaymentsIn, safePaymentsOut, safeExpenses, safeSaleReturns, safePurchaseReturns, partiesList, safeItems, safeCashTransactions, selectedFirm, startDate, endDate]);
+
+  const filteredTrialBalanceAccounts = useMemo(() => {
+    return trialBalanceReport.accounts.filter(a => {
+      if (trialBalanceGroupFilter !== 'all' && a.group !== trialBalanceGroupFilter) return false;
+      if (search.trim()) {
+        const q = search.toLowerCase().trim();
+        return (
+          a.accountHead.toLowerCase().includes(q) ||
+          a.groupLabel.toLowerCase().includes(q) ||
+          (Boolean(a.details) && a.details!.toLowerCase().includes(q))
+        );
+      }
+      return true;
+    });
+  }, [trialBalanceReport.accounts, trialBalanceGroupFilter, search]);
+
+  const handleExportTrialBalanceCSV = () => {
+    if (trialBalanceReport.accounts.length === 0) {
+      alert('No trial balance records available to export.');
+      return;
+    }
+
+    const firmName = selectedFirm !== 'all'
+      ? (companies.find(c => c.tenantId === selectedFirm)?.name || business?.name || 'Selected Firm')
+      : (business?.name || 'All Firms / Stores');
+
+    const csvLines: string[] = [];
+    const addRow = (...cells: any[]) => {
+      csvLines.push(cells.map(c => {
+        if (c === null || c === undefined) return '""';
+        const s = String(c);
+        return `"${s.replace(/"/g, '""')}"`;
+      }).join(','));
+    };
+
+    addRow('VYAPAR POS - TRIAL BALANCE REPORT');
+    addRow('Business / Store:', firmName, '', 'Period:', `${formatDateDisplay(startDate)} to ${formatDateDisplay(endDate)}`, '', 'Generated:', new Date().toLocaleString());
+    addRow('Status:', trialBalanceReport.isMatched ? 'MATCHED (Debits == Credits)' : 'UNMATCHED', '', 'Difference (Rs):', trialBalanceReport.difference.toFixed(2));
+    addRow('');
+
+    // Executive Metrics Bar
+    addRow('Total Debits (Dr) Rs', 'Total Credits (Cr) Rs', 'Net Difference Rs', 'Balance Status');
+    addRow(
+      trialBalanceReport.totalDebits.toFixed(2),
+      trialBalanceReport.totalCredits.toFixed(2),
+      trialBalanceReport.difference.toFixed(2),
+      trialBalanceReport.isMatched ? 'MATCHED' : 'UNMATCHED'
+    );
+    addRow('');
+
+    // Table Header
+    addRow('Account Head / Particulars', 'Account Group', 'Debit (Dr) Rs', 'Credit (Cr) Rs', 'Accounting Details / Notes');
+
+    filteredTrialBalanceAccounts.forEach(acc => {
+      addRow(
+        acc.accountHead,
+        acc.groupLabel,
+        acc.debit > 0 ? acc.debit.toFixed(2) : '0.00',
+        acc.credit > 0 ? acc.credit.toFixed(2) : '0.00',
+        acc.details || ''
+      );
+    });
+
+    addRow(
+      'TOTALS',
+      `${filteredTrialBalanceAccounts.length} Account(s)`,
+      trialBalanceReport.totalDebits.toFixed(2),
+      trialBalanceReport.totalCredits.toFixed(2),
+      trialBalanceReport.isMatched ? 'MATCHED (Debits == Credits)' : 'DIFFERENCE DETECTED'
+    );
+
+    const csvContent = '\uFEFF' + csvLines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Trial_Balance_${startDate}_to_${endDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // ----------------- BALANCE SHEET AGGREGATION & DATA -----------------
+  const balanceSheetReport = useMemo(() => {
+    const firmInvoices = safeInvoices.filter(i => selectedFirm === 'all' || (i.tenantId || 'default-tenant') === selectedFirm);
+    const firmPurchases = safePurchaseBills.filter(p => selectedFirm === 'all' || (p.tenantId || 'default-tenant') === selectedFirm);
+    const firmPaymentsIn = safePaymentsIn.filter(p => selectedFirm === 'all' || (p.tenantId || 'default-tenant') === selectedFirm);
+    const firmPaymentsOut = safePaymentsOut.filter(p => selectedFirm === 'all' || (p.tenantId || 'default-tenant') === selectedFirm);
+    const firmExpenses = safeExpenses.filter(e => selectedFirm === 'all' || (e.tenantId || 'default-tenant') === selectedFirm);
+    const firmSaleReturns = safeSaleReturns.filter(sr => selectedFirm === 'all' || (sr.tenantId || 'default-tenant') === selectedFirm);
+    const firmPurchaseReturns = safePurchaseReturns.filter(pr => selectedFirm === 'all' || (pr.tenantId || 'default-tenant') === selectedFirm);
+    const firmParties = partiesList.filter(p => selectedFirm === 'all' || (p.tenantId || 'default-tenant') === selectedFirm);
+    const firmItems = safeItems.filter(item => selectedFirm === 'all' || (item.tenantId || 'default-tenant') === selectedFirm);
+    const firmCashTxns = safeCashTransactions.filter(c => selectedFirm === 'all' || (c.tenantId || 'default-tenant') === selectedFirm);
+
+    return calculateBalanceSheet(
+      firmInvoices,
+      firmPurchases,
+      firmPaymentsIn,
+      firmPaymentsOut,
+      firmExpenses,
+      firmSaleReturns,
+      firmPurchaseReturns,
+      firmParties,
+      firmItems,
+      firmCashTxns,
+      endDate
+    );
+  }, [safeInvoices, safePurchaseBills, safePaymentsIn, safePaymentsOut, safeExpenses, safeSaleReturns, safePurchaseReturns, partiesList, safeItems, safeCashTransactions, selectedFirm, endDate]);
+
+  const handleExportBalanceSheetCSV = () => {
+    const firmName = selectedFirm !== 'all'
+      ? (companies.find(c => c.tenantId === selectedFirm)?.name || business?.name || 'Selected Firm')
+      : (business?.name || 'All Firms / Stores');
+
+    const csvLines: string[] = [];
+    const addRow = (...cells: any[]) => {
+      csvLines.push(cells.map(c => {
+        if (c === null || c === undefined) return '""';
+        const s = String(c);
+        return `"${s.replace(/"/g, '""')}"`;
+      }).join(','));
+    };
+
+    addRow('VYAPAR POS - BALANCE SHEET');
+    addRow('Business / Store:', firmName, '', 'As of Date:', formatDateDisplay(endDate), '', 'Generated:', new Date().toLocaleString());
+    addRow('Accounting Status:', balanceSheetReport.isBalanced ? 'BALANCED (Assets = Liabilities + Equity)' : 'UNBALANCED');
+    addRow('');
+
+    // Summary Metrics Bar
+    addRow('Total Assets (Rs)', 'Total Liabilities (Rs)', "Owner's Equity (Rs)", 'Net Worth (Rs)');
+    addRow(
+      balanceSheetReport.assets.totalAssets.toFixed(2),
+      balanceSheetReport.liabilitiesAndEquity.totalLiabilities.toFixed(2),
+      balanceSheetReport.liabilitiesAndEquity.equity.totalEquity.toFixed(2),
+      balanceSheetReport.netWorth.toFixed(2)
+    );
+    addRow('');
+
+    // SECTION 1: ASSETS
+    addRow('--- ASSETS ---');
+    addRow('Asset Particulars', 'Classification', 'Amount (Rs)', 'Accounting Notes');
+    balanceSheetReport.assets.currentAssets.forEach(a => {
+      addRow(a.title, 'Current Assets', a.amount.toFixed(2), a.notes || '');
+    });
+    addRow('TOTAL ASSETS', '', balanceSheetReport.assets.totalAssets.toFixed(2), 'Total Resources Owned by Store');
+    addRow('');
+    addRow('');
+
+    // SECTION 2: LIABILITIES & EQUITY
+    addRow('--- LIABILITIES & OWNER EQUITY ---');
+    addRow('Obligation / Equity Particulars', 'Classification', 'Amount (Rs)', 'Accounting Notes');
+    balanceSheetReport.liabilitiesAndEquity.currentLiabilities.forEach(l => {
+      addRow(l.title, 'Current Liabilities', l.amount.toFixed(2), l.notes || '');
+    });
+    addRow('Total Liabilities', 'Subtotal', balanceSheetReport.liabilitiesAndEquity.totalLiabilities.toFixed(2), 'Total External Claims / Debt');
+    addRow("Owner's Capital Account", 'Owner Equity', balanceSheetReport.liabilitiesAndEquity.equity.capital.toFixed(2), "Proprietor's Capital Investment");
+    addRow('Current Period Net Profit (P&L)', 'Retained Earnings', balanceSheetReport.liabilitiesAndEquity.equity.currentPeriodNetProfit.toFixed(2), 'Net Profit from Operations');
+    addRow("TOTAL OWNER'S EQUITY", 'Equity Total', balanceSheetReport.liabilitiesAndEquity.equity.totalEquity.toFixed(2), 'Net Proprietorship Stake');
+    addRow('TOTAL LIABILITIES & EQUITY', '', balanceSheetReport.liabilitiesAndEquity.totalLiabilitiesAndEquity.toFixed(2), 'Matched with Total Assets');
+
+    const csvContent = '\uFEFF' + csvLines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Balance_Sheet_As_Of_${endDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const handlePrintReport = () => {
@@ -1437,9 +1936,9 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
   };
 
   return (
-    <div className="flex-1 flex h-full bg-[#f3f4f6] overflow-hidden select-none">
+    <div className="flex-1 flex h-full min-h-0 min-w-0 bg-[#f3f4f6] overflow-hidden">
       {/* ----------------- LEFT SUB-SIDEBAR ----------------- */}
-      <div className="w-60 bg-white border-r border-slate-200 flex flex-col shrink-0 overflow-y-auto">
+      <div className="w-60 bg-white border-r border-slate-200 flex flex-col shrink-0 overflow-y-auto h-full min-h-0">
         <div className="p-4 border-b border-slate-100 flex items-center gap-2">
           <BarChart3 className="w-5 h-5 text-blue-600" />
           <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide">Reports</h2>
@@ -1475,7 +1974,10 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
       </div>
 
       {/* ----------------- RIGHT MAIN CONTENT AREA ----------------- */}
-      <div className="flex-1 flex flex-col overflow-y-auto p-5 sm:p-6 pb-20 gap-5">
+      <div
+        className="flex-1 flex flex-col overflow-y-auto min-h-0 min-w-0 p-5 sm:p-6 pb-32 gap-5"
+        style={{ height: '100%', maxHeight: '100%', overflowY: 'auto' }}
+      >
         {/* ================= SALE REPORT ================= */}
         {activeTab === 'sale' && (
           <>
@@ -2884,6 +3386,19 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
               </div>
             </div>
 
+            {/* Missing Cost Notice */}
+            {missingCostCount > 0 && (
+              <div className="bg-amber-50 border border-amber-200 text-amber-900 px-4 py-3 rounded-xl text-xs flex items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-base">⚠️</span>
+                  <div>
+                    <span className="font-bold">{missingCostCount} invoice(s)</span> contain items without a purchase price in Inventory.
+                    <span className="text-amber-700 ml-1">Profit for these items is calculated with Rs 0.00 cost. Set purchase prices in <strong>Inventory & Stock</strong> to see exact profit margins.</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Top Summary KPI Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
               <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-1">
@@ -2965,10 +3480,20 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
                             {b.partyName}
                           </td>
                           <td className="py-3 px-4 font-mono font-black text-slate-900 text-right whitespace-nowrap">
-                            Rs {b.grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            <div>Rs {b.grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                            {b.taxTotal > 0 && (
+                              <div className="text-[10px] font-sans font-semibold text-slate-400 font-normal">
+                                Net: Rs {b.netRevenue.toFixed(2)}
+                              </div>
+                            )}
                           </td>
                           <td className="py-3 px-4 font-mono font-bold text-slate-600 text-right whitespace-nowrap">
-                            Rs {b.totalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            <div>Rs {b.totalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                            {b.hasMissingCost && (
+                              <span className="inline-block text-[10px] font-sans font-extrabold text-amber-700 bg-amber-100/80 px-1.5 py-0.5 rounded mt-0.5" title="Purchase price was not set in Inventory">
+                                Unset Cost
+                              </span>
+                            )}
                           </td>
                           <td className={`py-3 px-4 font-mono font-black text-right whitespace-nowrap ${b.profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                             Rs {b.profit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -2999,6 +3524,341 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
                                 <Share2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ================= CASH FLOW STATEMENT REPORT ================= */}
+        {activeTab === 'cash-flow' && (
+          <>
+            {/* Header & Export Actions */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h1 className="text-xl font-black text-slate-900 flex items-center gap-2 uppercase tracking-tight">
+                  <span className="w-2.5 h-6 bg-emerald-600 rounded-sm inline-block"></span>
+                  Cash Flow Statement
+                </h1>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  Tracks actual cash & liquid bank movements: cash inflows, supplier outflows, and net cash balance.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowCashFlowBreakdown(!showCashFlowBreakdown)}
+                  className={`btn-vyapar-outline text-xs px-3 py-1.5 flex items-center gap-1.5 cursor-pointer font-bold transition-all ${
+                    showCashFlowBreakdown ? 'bg-blue-50 border-blue-300 text-blue-700' : 'text-slate-700'
+                  }`}
+                  title="Toggle Inflow & Outflow Breakdown"
+                >
+                  <PieChart className="w-3.5 h-3.5 text-blue-600" />
+                  <span>{showCashFlowBreakdown ? 'Hide Breakdown' : 'View Breakdown'}</span>
+                </button>
+                <button
+                  onClick={handleExportCashFlowCSV}
+                  className="btn-vyapar-outline text-xs px-3 py-1.5 flex items-center gap-1.5 cursor-pointer font-bold"
+                  title="Export to CSV / Excel"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Excel Report</span>
+                </button>
+                <button
+                  onClick={handlePrintReport}
+                  className="btn-vyapar-outline text-xs px-3 py-1.5 flex items-center gap-1.5 cursor-pointer font-bold"
+                  title="Print Cash Flow Statement"
+                >
+                  <Printer className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Print</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Preset Date Range Dropdown */}
+                <select
+                  value={datePreset}
+                  onChange={e => handlePresetChange(e.target.value as DatePreset)}
+                  aria-label="Cash Flow Date Range Preset"
+                  className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs min-w-[130px]"
+                >
+                  <option value="today">Today</option>
+                  <option value="this_week">This Week</option>
+                  <option value="this_month">This Month</option>
+                  <option value="this_quarter">This Quarter</option>
+                  <option value="this_year">This Fiscal Year</option>
+                  <option value="custom">Custom Range</option>
+                </select>
+
+                {/* Date Range Inputs */}
+                <div className="flex items-center bg-slate-50 border border-slate-300 rounded-lg overflow-hidden shadow-2xs">
+                  <span className="px-2.5 py-1 text-[11px] font-bold text-slate-500 bg-slate-100 border-r border-slate-200">Between</span>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={e => {
+                      setStartDate(e.target.value);
+                      setDatePreset('custom');
+                    }}
+                    className="px-2 py-1 text-xs font-mono font-bold text-slate-800 outline-none"
+                  />
+                  <span className="px-2 text-slate-400 font-bold text-xs">To</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={e => {
+                      setEndDate(e.target.value);
+                      setDatePreset('custom');
+                    }}
+                    className="px-2 py-1 text-xs font-mono font-bold text-slate-800 outline-none"
+                  />
+                </div>
+
+                {/* Firm Filter Dropdown */}
+                <select
+                  value={selectedFirm}
+                  onChange={e => setSelectedFirm(e.target.value)}
+                  aria-label="Select Firm"
+                  className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs min-w-[130px]"
+                >
+                  <option value="all">ALL FIRMS</option>
+                  {companies.map((c, idx) => (
+                    <option key={c.tenantId || idx} value={c.tenantId}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Flow Type Toggle & Method Filter */}
+              <div className="flex items-center gap-2">
+                <select
+                  value={cashFlowTypeFilter}
+                  onChange={e => setCashFlowTypeFilter(e.target.value as any)}
+                  aria-label="Transaction Type Filter"
+                  className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                >
+                  <option value="all">All Flows (In & Out)</option>
+                  <option value="INFLOW">Inflows Only (+)</option>
+                  <option value="OUTFLOW">Outflows Only (-)</option>
+                </select>
+
+                <select
+                  value={cashFlowMethodFilter}
+                  onChange={e => setCashFlowMethodFilter(e.target.value)}
+                  aria-label="Payment Method Filter"
+                  className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                >
+                  <option value="all">All Payment Modes</option>
+                  <option value="cash">Cash in Hand</option>
+                  <option value="bank">Bank / Online / UPI</option>
+                </select>
+              </div>
+            </div>
+
+            {/* 5 Top Summary KPI Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 text-xs">
+              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-1">
+                <div className="text-slate-500 font-extrabold uppercase text-[10.5px] tracking-wider">Opening Balance</div>
+                <div className="text-xl font-mono font-black text-slate-700">
+                  Rs {cashFlowReport.openingBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-[10px] text-slate-400 font-semibold">Cash before {formatDateDisplay(startDate)}</div>
+              </div>
+
+              <div className="bg-white border border-emerald-100 rounded-xl p-4 shadow-sm space-y-1 bg-gradient-to-b from-white to-emerald-50/20">
+                <div className="text-emerald-700 font-extrabold uppercase text-[10.5px] tracking-wider flex items-center gap-1">
+                  <span>Total Inflow (+)</span>
+                </div>
+                <div className="text-xl font-mono font-black text-emerald-600">
+                  + Rs {cashFlowReport.totalInflows.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-[10px] text-emerald-600/80 font-semibold">Sales & recoveries received</div>
+              </div>
+
+              <div className="bg-white border border-rose-100 rounded-xl p-4 shadow-sm space-y-1 bg-gradient-to-b from-white to-rose-50/20">
+                <div className="text-rose-700 font-extrabold uppercase text-[10.5px] tracking-wider flex items-center gap-1">
+                  <span>Total Outflow (-)</span>
+                </div>
+                <div className="text-xl font-mono font-black text-rose-600">
+                  - Rs {cashFlowReport.totalOutflows.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-[10px] text-rose-600/80 font-semibold">Purchases, expenses & refunds</div>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-1">
+                <div className="text-slate-500 font-extrabold uppercase text-[10.5px] tracking-wider">Net Cash Flow</div>
+                <div className={`text-xl font-mono font-black ${cashFlowReport.netCashFlow >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  {cashFlowReport.netCashFlow >= 0 ? '+' : ''} Rs {cashFlowReport.netCashFlow.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-[10px] text-slate-400 font-semibold">Inflow minus Outflow</div>
+              </div>
+
+              <div className="bg-white border border-blue-200 rounded-xl p-4 shadow-sm space-y-1 bg-gradient-to-b from-white to-blue-50/20">
+                <div className="text-blue-700 font-extrabold uppercase text-[10.5px] tracking-wider">Closing Balance</div>
+                <div className="text-xl font-mono font-black text-slate-900">
+                  Rs {cashFlowReport.closingBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-[10px] text-blue-600 font-semibold">Opening + Net Cash Flow</div>
+              </div>
+            </div>
+
+            {/* Inflow / Outflow Quick Breakdown Panels (Collapsible) */}
+            {showCashFlowBreakdown && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs animate-in fade-in duration-200">
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-2.5">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                    <span className="font-extrabold text-slate-800 uppercase tracking-wide text-[11px] flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                      Inflow Sources Breakdown
+                    </span>
+                    <span className="font-mono font-black text-emerald-600">
+                      Rs {cashFlowReport.totalInflows.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5 text-slate-600">
+                    <div className="flex justify-between items-center py-0.5">
+                      <span>Cash Sales (POS Checkout):</span>
+                      <span className="font-mono font-bold text-slate-900">Rs {cashFlowReport.inflowBreakdown.salesCash.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-0.5">
+                      <span>Customer Payments (Payment-In):</span>
+                      <span className="font-mono font-bold text-slate-900">Rs {cashFlowReport.inflowBreakdown.paymentsIn.toFixed(2)}</span>
+                    </div>
+                    {cashFlowReport.inflowBreakdown.otherInflows > 0 && (
+                      <div className="flex justify-between items-center py-0.5">
+                        <span>Other Deposits:</span>
+                        <span className="font-mono font-bold text-slate-900">Rs {cashFlowReport.inflowBreakdown.otherInflows.toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center pt-1 border-t border-slate-100 text-[11px]">
+                      <span className="text-slate-500 font-medium">Cash: <strong className="text-slate-800 font-mono">Rs {cashFlowReport.methodBreakdown.cashInHand.inflow.toFixed(2)}</strong></span>
+                      <span className="text-slate-500 font-medium">Bank / Online: <strong className="text-slate-800 font-mono">Rs {cashFlowReport.methodBreakdown.bankOnline.inflow.toFixed(2)}</strong></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-2.5">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                    <span className="font-extrabold text-slate-800 uppercase tracking-wide text-[11px] flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-rose-500 inline-block"></span>
+                      Outflow Sources Breakdown
+                    </span>
+                    <span className="font-mono font-black text-rose-600">
+                      Rs {cashFlowReport.totalOutflows.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5 text-slate-600">
+                    <div className="flex justify-between items-center py-0.5">
+                      <span>Supplier Cash Purchases:</span>
+                      <span className="font-mono font-bold text-slate-900">Rs {cashFlowReport.outflowBreakdown.purchasesCash.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-0.5">
+                      <span>Supplier Payments (Payment-Out):</span>
+                      <span className="font-mono font-bold text-slate-900">Rs {cashFlowReport.outflowBreakdown.paymentsOut.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-0.5">
+                      <span>Operating Expenses (Rent, Bills):</span>
+                      <span className="font-mono font-bold text-slate-900">Rs {cashFlowReport.outflowBreakdown.expenses.toFixed(2)}</span>
+                    </div>
+                    {cashFlowReport.outflowBreakdown.saleReturnsRefunds > 0 && (
+                      <div className="flex justify-between items-center py-0.5">
+                        <span>Customer Sale Return Refunds:</span>
+                        <span className="font-mono font-bold text-slate-900">Rs {cashFlowReport.outflowBreakdown.saleReturnsRefunds.toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center pt-1 border-t border-slate-100 text-[11px]">
+                      <span className="text-slate-500 font-medium">Cash: <strong className="text-slate-800 font-mono">Rs {cashFlowReport.methodBreakdown.cashInHand.outflow.toFixed(2)}</strong></span>
+                      <span className="text-slate-500 font-medium">Bank / Online: <strong className="text-slate-800 font-mono">Rs {cashFlowReport.methodBreakdown.bankOnline.outflow.toFixed(2)}</strong></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Cash Flow Ledger Table */}
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden">
+              <div className="p-3.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                <div className="relative w-full max-w-sm">
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    aria-label="Search cash flow transactions"
+                    placeholder="Search voucher, party, category, mode..."
+                    className="h-8 pl-8 pr-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold outline-none focus:border-blue-500 w-full"
+                  />
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                </div>
+                <div className="text-xs font-bold text-slate-500">
+                  Showing {filteredCashFlowTransactions.length} of {cashFlowReport.transactions.length} record(s)
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="vyapar-table w-full text-left border-collapse">
+                  <thead className="sticky top-0 bg-slate-100/95 backdrop-blur-xs z-10 shadow-2xs">
+                    <tr className="text-slate-600 text-[11px] font-extrabold uppercase tracking-wider border-b border-slate-200">
+                      <th className="py-3 px-4">Date</th>
+                      <th className="py-3 px-4">Type</th>
+                      <th className="py-3 px-4">Source</th>
+                      <th className="py-3 px-4">Voucher / Ref #</th>
+                      <th className="py-3 px-4">Party / Category</th>
+                      <th className="py-3 px-4">Payment Mode</th>
+                      <th className="py-3 px-4 text-right text-emerald-700">Inflow (+)</th>
+                      <th className="py-3 px-4 text-right text-rose-700">Outflow (-)</th>
+                      <th className="py-3 px-4 text-right">Running Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                    {filteredCashFlowTransactions.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="text-center py-12 text-slate-400 font-semibold">
+                          No cash flow movements found for the selected criteria.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredCashFlowTransactions.map(t => (
+                        <tr key={t.id} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="py-3 px-4 font-mono text-slate-600 whitespace-nowrap">
+                            {formatDateDisplay(t.date)}
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                              t.type === 'INFLOW' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                            }`}>
+                              {t.type === 'INFLOW' ? '↓ INFLOW' : '↑ OUTFLOW'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-bold text-slate-800 whitespace-nowrap">
+                            {t.sourceLabel}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-extrabold text-blue-600 whitespace-nowrap">
+                            {t.referenceNo}
+                          </td>
+                          <td className="py-3 px-4 font-semibold text-slate-700">
+                            {t.partyOrCategory}
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <span className="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10.5px] font-bold font-mono">
+                              {t.paymentMethod}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-mono font-black text-right whitespace-nowrap text-emerald-600">
+                            {t.type === 'INFLOW' ? `+ Rs ${t.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-black text-right whitespace-nowrap text-rose-600">
+                            {t.type === 'OUTFLOW' ? `- Rs ${t.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-black text-right whitespace-nowrap text-slate-900">
+                            Rs {t.runningBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </td>
                         </tr>
                       ))
@@ -3245,6 +4105,77 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
                 </div>
               </div>
 
+              {/* Filter Bar Controls */}
+              <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Preset Dropdown */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-bold">Filter by:</span>
+                    <select
+                      value={datePreset}
+                      onChange={e => handlePresetChange(e.target.value as DatePreset)}
+                      aria-label="Filter date range preset"
+                      className="h-9 px-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer"
+                    >
+                      <option value="this_month">This Month</option>
+                      <option value="today">Today</option>
+                      <option value="yesterday">Yesterday</option>
+                      <option value="this_week">This Week</option>
+                      <option value="last_month">Last Month</option>
+                      <option value="this_quarter">This Quarter</option>
+                      <option value="this_year">This Year</option>
+                      <option value="custom">Custom Date</option>
+                    </select>
+                  </div>
+
+                  {/* Date Inputs Display */}
+                  <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1">
+                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={e => {
+                        setStartDate(e.target.value);
+                        setDatePreset('custom');
+                      }}
+                      aria-label="Start date"
+                      className="bg-transparent font-mono text-slate-700 font-bold outline-none text-xs"
+                    />
+                    <span className="text-slate-400 font-bold">To</span>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={e => {
+                        setEndDate(e.target.value);
+                        setDatePreset('custom');
+                      }}
+                      aria-label="End date"
+                      className="bg-transparent font-mono text-slate-700 font-bold outline-none text-xs"
+                    />
+                  </div>
+                </div>
+
+                {/* Firm Filter Dropdown */}
+                {companies.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-bold">Store / Firm:</span>
+                    <select
+                      value={selectedFirm}
+                      onChange={e => setSelectedFirm(e.target.value)}
+                      aria-label="Filter by store or firm"
+                      className="h-9 px-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer"
+                    >
+                      <option value="all">All Stores</option>
+                      {companies.map(c => (
+                        <option key={c.tenantId || 'default-tenant'} value={c.tenantId || 'default-tenant'}>
+                          {c.name || 'Store'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
               {/* KPI Cards for Output Tax, Input Tax Credit, Net Payable */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
                 <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-1">
@@ -3310,8 +4241,607 @@ export const ReportsScreen: React.FC<ReportsScreenProps> = ({
           </>
         )}
 
+        {/* ================= TRIAL BALANCE REPORT ================= */}
+        {activeTab === 'trial-balance' && (
+          <>
+            {/* Top Header & Export Utilities */}
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-xl font-black text-slate-900 flex items-center gap-2 uppercase tracking-tight">
+                    TRIAL BALANCE REPORT
+                  </h1>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    Double-entry bookkeeping verification: Mathematical proof of ledger balance equality (Debits == Credits)
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleExportTrialBalanceCSV}
+                    title="Excel Report"
+                    className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                    <span>Excel Report</span>
+                  </button>
+
+                  <button
+                    onClick={handlePrintReport}
+                    title="Print"
+                    className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4 text-slate-600" />
+                    <span>Print</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Filter Controls Row */}
+              <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm space-y-3 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    {/* Date Preset Selector */}
+                    <select
+                      value={datePreset}
+                      onChange={e => handlePresetChange(e.target.value as DatePreset)}
+                      aria-label="Filter date range preset"
+                      className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                    >
+                      <option value="this_month">This Month</option>
+                      <option value="today">Today</option>
+                      <option value="yesterday">Yesterday</option>
+                      <option value="this_week">This Week</option>
+                      <option value="last_month">Last Month</option>
+                      <option value="this_quarter">This Quarter</option>
+                      <option value="this_year">This Year</option>
+                      <option value="custom">Custom Date</option>
+                    </select>
+
+                    {/* Date Range Badge */}
+                    <div className="flex items-center bg-white border border-slate-300 rounded-lg overflow-hidden shadow-2xs">
+                      <span className="bg-slate-100 text-slate-600 text-xs font-bold px-3 py-2 border-r border-slate-300">Between</span>
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={e => {
+                          setStartDate(e.target.value);
+                          setDatePreset('custom');
+                        }}
+                        aria-label="Start date"
+                        className="px-2.5 py-1 text-xs font-mono font-bold text-slate-800 outline-none"
+                      />
+                      <span className="bg-slate-100 text-slate-600 text-xs font-bold px-3 py-2 border-l border-r border-slate-300">To</span>
+                      <input
+                        type="date"
+                        value={endDate}
+                        onChange={e => {
+                          setEndDate(e.target.value);
+                          setDatePreset('custom');
+                        }}
+                        aria-label="End date"
+                        className="px-2.5 py-1 text-xs font-mono font-bold text-slate-800 outline-none"
+                      />
+                    </div>
+
+                    {/* Firm / Store Selector */}
+                    <select
+                      value={selectedFirm}
+                      onChange={e => setSelectedFirm(e.target.value)}
+                      aria-label="Filter Firm"
+                      className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                    >
+                      <option value="all">All Stores / Firms</option>
+                      {companies.map(c => (
+                        <option key={c.tenantId || c.name} value={c.tenantId}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    {/* Account Group Filter */}
+                    <select
+                      value={trialBalanceGroupFilter}
+                      onChange={e => setTrialBalanceGroupFilter(e.target.value)}
+                      aria-label="Filter Account Group"
+                      className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs min-w-[140px]"
+                    >
+                      <option value="all">All Account Groups</option>
+                      <option value="ASSET">Assets (Dr)</option>
+                      <option value="LIABILITY">Liabilities (Cr)</option>
+                      <option value="INCOME">Income / Revenue (Cr)</option>
+                      <option value="EXPENSE">Expenses (Dr)</option>
+                      <option value="EQUITY">Owner Equity (Cr)</option>
+                    </select>
+
+                    {/* Search Filter */}
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Search account head..."
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        className="h-9 pl-9 pr-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-medium outline-none focus:border-blue-500 shadow-2xs w-48 text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4 Executive KPI Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                {/* 1. Total Debits */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-slate-500 mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider">Total Debits (Dr)</span>
+                    <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-black text-xs">
+                      Dr
+                    </div>
+                  </div>
+                  <div className="text-xl font-black font-mono text-emerald-600">
+                    Rs {trialBalanceReport.totalDebits.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-semibold mt-1">
+                    Assets & Operating Expenses
+                  </div>
+                </div>
+
+                {/* 2. Total Credits */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-slate-500 mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider">Total Credits (Cr)</span>
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-black text-xs">
+                      Cr
+                    </div>
+                  </div>
+                  <div className="text-xl font-black font-mono text-blue-600">
+                    Rs {trialBalanceReport.totalCredits.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-semibold mt-1">
+                    Revenue, Liabilities & Capital
+                  </div>
+                </div>
+
+                {/* 3. Net Difference */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-slate-500 mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider">Difference (Dr - Cr)</span>
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-xs ${trialBalanceReport.isMatched ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                      ±
+                    </div>
+                  </div>
+                  <div className={`text-xl font-black font-mono ${trialBalanceReport.isMatched ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    Rs {trialBalanceReport.difference.toFixed(2)}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-semibold mt-1">
+                    {trialBalanceReport.isMatched ? 'Zero discrepancy detected' : 'Check unposted ledger entries'}
+                  </div>
+                </div>
+
+                {/* 4. Verification Status */}
+                <div className={`border rounded-xl p-4 shadow-sm flex flex-col justify-between ${trialBalanceReport.isMatched ? 'bg-emerald-50/50 border-emerald-200' : 'bg-rose-50/50 border-rose-200'}`}>
+                  <div className="flex items-center justify-between text-slate-600 mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider">Audit Status</span>
+                    <div className={`w-2.5 h-2.5 rounded-full ${trialBalanceReport.isMatched ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                  </div>
+                  <div className={`text-sm font-black flex items-center gap-1.5 ${trialBalanceReport.isMatched ? 'text-emerald-700' : 'text-rose-700'}`}>
+                    <span>{trialBalanceReport.isMatched ? '✓ Perfectly Balanced' : '⚠ Audit Discrepancy'}</span>
+                  </div>
+                  <div className={`text-[10px] font-medium mt-1 ${trialBalanceReport.isMatched ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    {trialBalanceReport.isMatched ? 'Double-entry golden rule satisfied' : 'Debits do not equal Credits'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Detailed Accounts Table */}
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
+                <div className="p-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-black uppercase text-slate-800 tracking-wide">Account Ledgers</span>
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
+                      {filteredTrialBalanceAccounts.length} Records
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-medium">
+                    Showing period from <strong className="text-slate-700">{formatDateDisplay(startDate)}</strong> to <strong className="text-slate-700">{formatDateDisplay(endDate)}</strong>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100/80 text-slate-700 border-b border-slate-200 font-extrabold text-[11px] uppercase tracking-wider">
+                        <th className="py-3 px-4 w-12 text-center">#</th>
+                        <th className="py-3 px-4">Account Head / Ledger</th>
+                        <th className="py-3 px-4">Group Classification</th>
+                        <th className="py-3 px-4">Accounting Notes</th>
+                        <th className="py-3 px-4 text-right">Debit (Dr) Rs</th>
+                        <th className="py-3 px-4 text-right">Credit (Cr) Rs</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium">
+                      {filteredTrialBalanceAccounts.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-12 text-center text-slate-400 text-xs">
+                            No ledger accounts found matching your selected filters.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredTrialBalanceAccounts.map((acc, idx) => {
+                          const isAsset = acc.group === 'ASSET';
+                          const isLiab = acc.group === 'LIABILITY';
+                          const isIncome = acc.group === 'INCOME';
+                          const isExpense = acc.group === 'EXPENSE';
+                          const isEquity = acc.group === 'EQUITY';
+
+                          return (
+                            <tr key={acc.id} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="py-3 px-4 text-center text-slate-400 font-mono text-[11px]">
+                                {idx + 1}
+                              </td>
+                              <td className="py-3 px-4 font-bold text-slate-800">
+                                {acc.accountHead}
+                              </td>
+                              <td className="py-3 px-4">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wide ${
+                                  isAsset ? 'bg-emerald-100 text-emerald-800' :
+                                  isLiab ? 'bg-amber-100 text-amber-800' :
+                                  isIncome ? 'bg-blue-100 text-blue-800' :
+                                  isExpense ? 'bg-rose-100 text-rose-800' :
+                                  'bg-purple-100 text-purple-800'
+                                }`}>
+                                  {acc.groupLabel}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-slate-500 text-[11px]">
+                                {acc.details || '-'}
+                              </td>
+                              <td className={`py-3 px-4 font-mono font-extrabold text-right ${acc.debit > 0 ? 'text-slate-900' : 'text-slate-300'}`}>
+                                {acc.debit > 0 ? `Rs ${acc.debit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                              </td>
+                              <td className={`py-3 px-4 font-mono font-extrabold text-right ${acc.credit > 0 ? 'text-blue-700' : 'text-slate-300'}`}>
+                                {acc.credit > 0 ? `Rs ${acc.credit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-slate-100 text-slate-800 font-black text-xs border-t-2 border-slate-300">
+                        <td colSpan={4} className="py-3 px-4 uppercase tracking-wider text-right">
+                          Grand Totals (Debits vs Credits):
+                        </td>
+                        <td className="py-3 px-4 font-mono text-right font-black text-emerald-700 text-sm">
+                          Rs {trialBalanceReport.totalDebits.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-3 px-4 font-mono text-right font-black text-blue-700 text-sm">
+                          Rs {trialBalanceReport.totalCredits.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ================= BALANCE SHEET REPORT ================= */}
+        {activeTab === 'balance-sheet' && (
+          <>
+            {/* Top Header & Export Utilities */}
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-xl font-black text-slate-900 flex items-center gap-2 uppercase tracking-tight">
+                    BALANCE SHEET (STATEMENT OF FINANCIAL POSITION)
+                  </h1>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    Fundamental Accounting Equation: <strong className="text-slate-700 font-bold">Total Assets = Total Liabilities + Owner's Equity</strong>
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleExportBalanceSheetCSV}
+                    title="Excel Report"
+                    className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                    <span>Excel Report</span>
+                  </button>
+
+                  <button
+                    onClick={handlePrintReport}
+                    title="Print"
+                    className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4 text-slate-600" />
+                    <span>Print</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Date Filter Bar */}
+              <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm space-y-3 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center bg-white border border-slate-300 rounded-lg overflow-hidden shadow-2xs">
+                      <span className="bg-slate-100 text-slate-600 text-xs font-bold px-3 py-2 border-r border-slate-300">Statement As Of Date</span>
+                      <input
+                        type="date"
+                        value={endDate}
+                        onChange={e => {
+                          setEndDate(e.target.value);
+                          setDatePreset('custom');
+                        }}
+                        aria-label="Balance Sheet As Of Date"
+                        className="px-3 py-1 text-xs font-mono font-bold text-slate-800 outline-none"
+                      />
+                    </div>
+
+                    <select
+                      value={datePreset}
+                      onChange={e => handlePresetChange(e.target.value as DatePreset)}
+                      aria-label="Preset"
+                      className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                    >
+                      <option value="today">Today</option>
+                      <option value="this_month">End of This Month</option>
+                      <option value="this_quarter">End of This Quarter</option>
+                      <option value="this_year">End of This Year</option>
+                      <option value="custom">Custom Date</option>
+                    </select>
+
+                    <select
+                      value={selectedFirm}
+                      onChange={e => setSelectedFirm(e.target.value)}
+                      aria-label="Filter Firm"
+                      className="h-9 px-3 bg-white border border-slate-300 rounded-lg text-slate-800 font-bold outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                    >
+                      <option value="all">All Stores / Firms</option>
+                      {companies.map(c => (
+                        <option key={c.tenantId || c.name} value={c.tenantId}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-500">Valuation Date:</span>
+                    <span className="text-xs font-black font-mono text-slate-800 bg-slate-100 px-2.5 py-1 rounded-lg">
+                      {formatDateDisplay(endDate)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4 Executive Financial Position KPI Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                {/* 1. Total Assets */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-slate-500 mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider">Total Assets (Asasay)</span>
+                    <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-black text-xs">
+                      Rs
+                    </div>
+                  </div>
+                  <div className="text-xl font-black font-mono text-emerald-600">
+                    Rs {balanceSheetReport.assets.totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-semibold mt-1">
+                    Cash, Receivables & Stock
+                  </div>
+                </div>
+
+                {/* 2. Total Liabilities */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-slate-500 mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider">Total Liabilities (Wajibaat)</span>
+                    <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center font-black text-xs">
+                      Rs
+                    </div>
+                  </div>
+                  <div className="text-xl font-black font-mono text-amber-600">
+                    Rs {balanceSheetReport.liabilitiesAndEquity.totalLiabilities.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-semibold mt-1">
+                    Supplier Dues & Obligations
+                  </div>
+                </div>
+
+                {/* 3. Owner's Equity */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-slate-500 mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider">Owner's Equity (Sarmaya)</span>
+                    <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center font-black text-xs">
+                      Eq
+                    </div>
+                  </div>
+                  <div className="text-xl font-black font-mono text-purple-600">
+                    Rs {balanceSheetReport.liabilitiesAndEquity.equity.totalEquity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-semibold mt-1">
+                    Capital + Retained Net Profit
+                  </div>
+                </div>
+
+                {/* 4. Net Worth */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-slate-500 mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider">Business Net Worth</span>
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-black text-xs">
+                      NW
+                    </div>
+                  </div>
+                  <div className="text-xl font-black font-mono text-blue-600">
+                    Rs {balanceSheetReport.netWorth.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-semibold mt-1">
+                    Net value after clearing all dues
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Verification Banner */}
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex items-center justify-between text-emerald-800 text-xs shadow-xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center font-black text-[11px]">
+                    ✓
+                  </div>
+                  <span className="font-bold">
+                    Balance Sheet Equation Satisfied: <strong>Total Assets (Rs {balanceSheetReport.assets.totalAssets.toFixed(2)}) = Total Liabilities (Rs {balanceSheetReport.liabilitiesAndEquity.totalLiabilities.toFixed(2)}) + Owner Equity (Rs {balanceSheetReport.liabilitiesAndEquity.equity.totalEquity.toFixed(2)})</strong>
+                  </span>
+                </div>
+                <span className="bg-white px-2.5 py-1 rounded-md text-emerald-700 font-black text-[11px] border border-emerald-200">
+                  100% Balanced
+                </span>
+              </div>
+
+              {/* Two-Column Financial Position Layout */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* LEFT COLUMN: ASSETS */}
+                <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col justify-between">
+                  <div>
+                    <div className="p-3.5 border-b border-slate-100 bg-slate-50/70 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black uppercase text-slate-800 tracking-wide">Assets (Asasay)</span>
+                        <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 uppercase">
+                          Owned by Store
+                        </span>
+                      </div>
+                      <span className="text-xs font-black font-mono text-emerald-700">
+                        Rs {balanceSheetReport.assets.totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    {/* Current Assets List */}
+                    <div className="p-4 space-y-3 text-xs">
+                      <div className="text-[11px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1.5">
+                        Current Assets (Liquid Resources)
+                      </div>
+
+                      <div className="space-y-2">
+                        {balanceSheetReport.assets.currentAssets.map(item => (
+                          <div key={item.id} className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50/70 border border-slate-100 hover:bg-slate-100/60 transition-colors">
+                            <div>
+                              <div className="font-bold text-slate-800">{item.title}</div>
+                              <div className="text-[11px] text-slate-400 font-medium">{item.notes}</div>
+                            </div>
+                            <div className="font-mono font-black text-slate-900 text-xs">
+                              Rs {item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Assets Total Footer */}
+                  <div className="p-4 bg-emerald-50/60 border-t border-emerald-100 flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wider text-emerald-900">Total Assets</span>
+                    <span className="font-mono font-black text-base text-emerald-700">
+                      Rs {balanceSheetReport.assets.totalAssets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+
+                {/* RIGHT COLUMN: LIABILITIES & EQUITY */}
+                <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col justify-between">
+                  <div>
+                    <div className="p-3.5 border-b border-slate-100 bg-slate-50/70 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black uppercase text-slate-800 tracking-wide">Liabilities & Owner's Equity</span>
+                        <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 uppercase">
+                          Claims & Net Worth
+                        </span>
+                      </div>
+                      <span className="text-xs font-black font-mono text-blue-700">
+                        Rs {balanceSheetReport.liabilitiesAndEquity.totalLiabilitiesAndEquity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div className="p-4 space-y-4 text-xs">
+                      {/* Section 1: Current Liabilities */}
+                      <div className="space-y-2">
+                        <div className="text-[11px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1.5 flex items-center justify-between">
+                          <span>Current Liabilities (Wajibaat)</span>
+                          <span className="font-mono font-bold text-amber-700">
+                            Subtotal: Rs {balanceSheetReport.liabilitiesAndEquity.totalLiabilities.toFixed(2)}
+                          </span>
+                        </div>
+
+                        {balanceSheetReport.liabilitiesAndEquity.currentLiabilities.length === 0 ? (
+                          <div className="text-[11px] text-slate-400 italic p-2">Zero pending payables or liabilities</div>
+                        ) : (
+                          balanceSheetReport.liabilitiesAndEquity.currentLiabilities.map(item => (
+                            <div key={item.id} className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50/70 border border-slate-100 hover:bg-slate-100/60 transition-colors">
+                              <div>
+                                <div className="font-bold text-slate-800">{item.title}</div>
+                                <div className="text-[11px] text-slate-400 font-medium">{item.notes}</div>
+                              </div>
+                              <div className="font-mono font-black text-amber-700 text-xs">
+                                Rs {item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      {/* Section 2: Owner's Equity */}
+                      <div className="space-y-2">
+                        <div className="text-[11px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1.5 flex items-center justify-between">
+                          <span>Owner's Equity & Retained Profit</span>
+                          <span className="font-mono font-bold text-purple-700">
+                            Total Equity: Rs {balanceSheetReport.liabilitiesAndEquity.equity.totalEquity.toFixed(2)}
+                          </span>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50/70 border border-slate-100">
+                            <div>
+                              <div className="font-bold text-slate-800">Owner's Capital Account</div>
+                              <div className="text-[11px] text-slate-400 font-medium">Initial capital & cumulative store equity</div>
+                            </div>
+                            <div className="font-mono font-black text-slate-900 text-xs">
+                              Rs {balanceSheetReport.liabilitiesAndEquity.equity.capital.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between p-2.5 rounded-lg bg-purple-50/50 border border-purple-100">
+                            <div>
+                              <div className="font-bold text-purple-900">Current Period Net Profit (from P&L)</div>
+                              <div className="text-[11px] text-purple-600 font-medium">Transferred directly from Profit & Loss statement</div>
+                            </div>
+                            <div className="font-mono font-black text-purple-700 text-xs">
+                              Rs {balanceSheetReport.liabilitiesAndEquity.equity.currentPeriodNetProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Liabilities & Equity Footer */}
+                  <div className="p-4 bg-blue-50/60 border-t border-blue-100 flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wider text-blue-900">Total Liabilities & Equity</span>
+                    <span className="font-mono font-black text-base text-blue-700">
+                      Rs {balanceSheetReport.liabilitiesAndEquity.totalLiabilitiesAndEquity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
         {/* ================= OTHER REPORT TABS PLACEHOLDER ================= */}
-        {activeTab !== 'sale' && activeTab !== 'purchase' && activeTab !== 'day-book' && activeTab !== 'all-transactions' && activeTab !== 'profit-loss' && activeTab !== 'party-statement' && activeTab !== 'gst-tax-summary' && activeTab !== 'bill-wise-profit' && (
+        {activeTab !== 'sale' && activeTab !== 'purchase' && activeTab !== 'day-book' && activeTab !== 'all-transactions' && activeTab !== 'profit-loss' && activeTab !== 'party-statement' && activeTab !== 'gst-tax-summary' && activeTab !== 'bill-wise-profit' && activeTab !== 'cash-flow' && activeTab !== 'trial-balance' && activeTab !== 'balance-sheet' && (
           <div className="bg-white border border-slate-200 rounded-xl p-8 shadow-sm flex flex-col items-center justify-center text-center my-auto min-h-[400px]">
             <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 mb-4">
               <FileText className="w-7 h-7 stroke-[2]" />

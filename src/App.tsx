@@ -661,7 +661,7 @@ export function App() {
   }
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#f3f4f6] overflow-hidden select-none">
+    <div className="h-screen w-screen flex flex-col bg-[#f3f4f6] overflow-hidden">
       {/* Top Header */}
       <Header
         business={businessDetails}
@@ -681,10 +681,10 @@ export function App() {
       />
 
       {/* Main Body */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-h-0 min-w-0">
         <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
-        <main className="flex-1 flex overflow-hidden">
+        <main className="flex-1 flex overflow-hidden min-h-0 min-w-0">
           {activeTab === 'home' && (
             <DashboardScreen
               invoices={invoices}
